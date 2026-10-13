@@ -1,0 +1,397 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/state/app_state.dart';
+import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/glass_navigation.dart';
+import '../anime/anime_page.dart';
+import '../calendar/calendar_page.dart';
+import '../catalog/catalog_browser_page.dart';
+import '../home/home_page.dart';
+import '../kids/kids_page.dart';
+import '../library/library_page.dart';
+import '../live_tv/live_tv_page.dart';
+import '../settings/addons_page.dart';
+import '../settings/settings_page.dart';
+import '../settings/stats_page.dart';
+import 'search_sheet.dart';
+
+class MainShell extends StatefulWidget {
+  const MainShell({super.key});
+
+  @override
+  State<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<MainShell> {
+  int _selected = 0;
+  bool _chromeVisible = true;
+  double _scrollDelta = 0;
+  bool _tabletNavVisible = false;
+
+  static const _icons = [
+    Icons.home_rounded,
+    Icons.auto_awesome_rounded,
+    Icons.child_care_rounded,
+    Icons.video_library_rounded,
+    Icons.settings_rounded,
+  ];
+
+  List<String> _labels(bool english) => english
+      ? const ['Home', 'Anime', 'Kids', 'My Library', 'Settings']
+      : const ['الرئيسية', 'أنمي', 'الأطفال', 'مكتبتي', 'الإعدادات'];
+
+  void _selectTab(int index) {
+    if (index == _selected) {
+      if (!_chromeVisible) setState(() => _chromeVisible = true);
+      return;
+    }
+    setState(() {
+      _selected = index;
+      _chromeVisible = true;
+      _scrollDelta = 0;
+    });
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+    if (notification is! ScrollUpdateNotification) return false;
+    if (context.read<AppState>().webSettings['dockAutoHide'] == false) {
+      _scrollDelta = 0;
+      if (!_chromeVisible) setState(() => _chromeVisible = true);
+      return false;
+    }
+
+    if (notification.metrics.pixels <=
+        notification.metrics.minScrollExtent + 1) {
+      _scrollDelta = 0;
+      if (!_chromeVisible) setState(() => _chromeVisible = true);
+      return false;
+    }
+
+    final delta = notification.scrollDelta ?? 0;
+    if (delta > 0) {
+      _scrollDelta = _scrollDelta > 0 ? _scrollDelta + delta : delta;
+      if (_scrollDelta >= 10 && _chromeVisible) {
+        setState(() => _chromeVisible = false);
+        _scrollDelta = 0;
+      }
+    } else if (delta < 0) {
+      _scrollDelta = _scrollDelta < 0 ? _scrollDelta + delta : delta;
+      if (_scrollDelta <= -8 && !_chromeVisible) {
+        setState(() => _chromeVisible = true);
+        _scrollDelta = 0;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _openSearch() => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: HorseTheme.surface,
+        builder: (_) => const SearchSheet(),
+      );
+
+  void _openSecondary(Widget page) {
+    setState(() => _tabletNavVisible = false);
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final labels = _labels(app.english);
+    final size = MediaQuery.sizeOf(context);
+    final tabletLayout = size.width >= 840;
+    final phoneTabOrder = app.english ? const [4, 2, 1, 0] : const [0, 1, 2, 4];
+    final phoneTabIcons = phoneTabOrder.map((index) => _icons[index]).toList();
+    final phoneTabLabels = phoneTabOrder.map((index) => labels[index]).toList();
+    final phoneSelectedIndex =
+        phoneTabOrder.indexOf(_selected == 3 ? 4 : _selected);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
+    final pages = [
+      HomePage(active: _selected == 0),
+      const AnimePage(),
+      const KidsPage(),
+      const LibraryPage(),
+      SettingsPage(onOpenLibrary: () => _selectTab(3)),
+    ];
+
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Center(
+                child: SizedBox(
+                  width: math.min(size.width, 1600),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll,
+                    child: IndexedStack(
+                      index: _selected,
+                      children: pages,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (_selected != 4)
+              Positioned(
+                // The design pins search to the physical top-left in both locales.
+                left: 16,
+                top: 12,
+                child: IgnorePointer(
+                  ignoring: !_chromeVisible,
+                  child: AnimatedSlide(
+                    offset:
+                        _chromeVisible ? Offset.zero : const Offset(0, -1.25),
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _chromeVisible ? 1 : 0,
+                      duration: duration,
+                      child: GlassSearchButton(
+                        tooltip: app.english ? 'Search' : 'بحث',
+                        onPressed: _openSearch,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (tabletLayout)
+              Positioned(
+                top: 12,
+                right: 16,
+                child: Material(
+                  color: HorseTheme.surface.withValues(alpha: .94),
+                  shape: const CircleBorder(
+                      side: BorderSide(color: HorseTheme.line)),
+                  child: IconButton(
+                    tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
+                    onPressed: () =>
+                        setState(() => _tabletNavVisible = !_tabletNavVisible),
+                    icon: Icon(_tabletNavVisible
+                        ? Icons.close_rounded
+                        : Icons.menu_rounded),
+                  ),
+                ),
+              ),
+            if (!tabletLayout)
+              PositionedDirectional(
+                start: 0,
+                end: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: !_chromeVisible,
+                  child: AnimatedSlide(
+                    offset: _chromeVisible ? Offset.zero : const Offset(0, 1.2),
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _chromeVisible ? 1 : 0,
+                      duration: duration,
+                      child: GlassNavigationBar(
+                        index: phoneSelectedIndex,
+                        labels: phoneTabLabels,
+                        icons: phoneTabIcons,
+                        onSelected: (index) => _selectTab(phoneTabOrder[index]),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (tabletLayout && _tabletNavVisible) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _tabletNavVisible = false),
+                  child: ColoredBox(color: Colors.black.withValues(alpha: .42)),
+                ),
+              ),
+              AnimatedPositionedDirectional(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                start: 12,
+                top: 68,
+                bottom: 12,
+                width: 286,
+                child: _TabletNavigation(
+                  selected: _selected,
+                  english: app.english,
+                  onClose: () => setState(() => _tabletNavVisible = false),
+                  onTabSelected: _selectTab,
+                  onPageSelected: _openSecondary,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TabletNavigation extends StatelessWidget {
+  const _TabletNavigation({
+    required this.selected,
+    required this.english,
+    required this.onClose,
+    required this.onTabSelected,
+    required this.onPageSelected,
+  });
+
+  final int selected;
+  final bool english;
+  final VoidCallback onClose;
+  final ValueChanged<int> onTabSelected;
+  final ValueChanged<Widget> onPageSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = english
+        ? const ['Home', 'Anime', 'Kids', 'My Library', 'Settings']
+        : const ['الرئيسية', 'أنمي', 'الأطفال', 'مكتبتي', 'الإعدادات'];
+    final secondary = <(IconData, String, Widget)>[
+      (
+        Icons.explore_outlined,
+        english ? 'Discover' : 'اكتشف',
+        const CatalogBrowserPage(mode: CatalogBrowseMode.discover)
+      ),
+      (
+        Icons.movie_outlined,
+        english ? 'Movies' : 'الأفلام',
+        const CatalogBrowserPage(mode: CatalogBrowseMode.movies)
+      ),
+      (
+        Icons.tv_outlined,
+        english ? 'Series' : 'المسلسلات',
+        const CatalogBrowserPage(mode: CatalogBrowseMode.shows)
+      ),
+      (
+        Icons.grid_view_rounded,
+        english ? 'Add-on catalogs' : 'كتالوجات الإضافات',
+        const CatalogBrowserPage(mode: CatalogBrowseMode.catalogs)
+      ),
+      (
+        Icons.live_tv_outlined,
+        english ? 'Live TV' : 'البث المباشر',
+        const LiveTvPage()
+      ),
+      (
+        Icons.calendar_month_outlined,
+        english ? 'Calendar' : 'التقويم',
+        const CalendarPage()
+      ),
+      (
+        Icons.query_stats_rounded,
+        english ? 'Viewing statistics' : 'إحصائيات المشاهدة',
+        const StatsPage()
+      ),
+      (
+        Icons.extension_outlined,
+        english ? 'Add-ons' : 'الإضافات',
+        const AddonsPage()
+      ),
+    ];
+    const icons = [
+      Icons.home_rounded,
+      Icons.auto_awesome_rounded,
+      Icons.child_care_rounded,
+      Icons.video_library_rounded,
+      Icons.settings_rounded,
+    ];
+    return Material(
+      elevation: 16,
+      color: HorseTheme.surface,
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(18, 12, 8, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.brightness_7_rounded, color: HorseTheme.gold),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text('Horse',
+                        style: Theme.of(context).textTheme.titleLarge)),
+                IconButton(
+                    tooltip: english ? 'Close navigation' : 'إغلاق التنقل',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded)),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(10),
+              children: [
+                for (var index = 0; index < primary.length; index++)
+                  _NavigationItem(
+                    icon: icons[index],
+                    label: primary[index],
+                    selected: selected == index,
+                    onTap: () => onTabSelected(index),
+                  ),
+                Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(14, 18, 14, 8),
+                  child: Text(english ? 'MORE' : 'المزيد',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: HorseTheme.muted, letterSpacing: 1.1)),
+                ),
+                for (final item in secondary)
+                  _NavigationItem(
+                    icon: item.$1,
+                    label: item.$2,
+                    selected: false,
+                    onTap: () => onPageSelected(item.$3),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavigationItem extends StatelessWidget {
+  const _NavigationItem(
+      {required this.icon,
+      required this.label,
+      required this.selected,
+      required this.onTap});
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: ListTile(
+          minLeadingWidth: 28,
+          minTileHeight: 48,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          selected: selected,
+          selectedTileColor: HorseTheme.gold.withValues(alpha: .15),
+          leading:
+              Icon(icon, color: selected ? HorseTheme.gold : HorseTheme.muted),
+          title: Text(label,
+              style: TextStyle(
+                  color: selected ? HorseTheme.gold : HorseTheme.ink,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+          onTap: onTap,
+        ),
+      );
+}

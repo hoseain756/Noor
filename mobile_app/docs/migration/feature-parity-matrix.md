@@ -1,0 +1,67 @@
+# Website to Flutter feature parity matrix
+
+Audit baseline: `origin/main` at `428d4f4` in `hoseain756/Horse`.
+Flutter baseline: local `flutter-mobile` at `9e604a6`, based on the fetched
+`origin/flutter-mobile` (`72409ed`, tag `v1.0.0`).
+Backend base URL configured by the app: `https://horse-silk.vercel.app` (see
+`mobile_app/README.md`).
+
+Status distinguishes Flutter implementation, automated verification, and live
+backend/device verification. A passing widget or unit test confirms only the
+behavior covered by that test; it does not prove a live provider or account
+flow.
+
+| Website feature / source | Web behavior and data path | Flutter implementation / API path | Status and verification still needed |
+|---|---|---|---|
+| Home — `views/home-view.tsx`, `home-hero.tsx`, `home-cw.tsx`, `section-rails.tsx` | Featured titles, continue watching, ranked titles and add-on catalog rails | `features/home/home_page.dart`; `CatalogRepository.homeTopTen`, Stremio proxy catalogs, local progress and optional TMDB recommendations | Implemented; responsive home tests pass in RTL/LTR at phone/tablet/desktop widths. Live catalog and recommendation responses were not exercised. |
+| Discover — `views/discover-view.tsx` | Curated discovery and search entry points | `features/catalog/catalog_browser_page.dart`; native Cinemeta/add-on catalog requests | Implemented with real catalog data, type/filter/sort, watched filter and retry/empty states; widget coverage is in the full test suite. No live API session was used. |
+| Catalog browser — `views/catalogs-view.tsx` | Browse installed add-on catalogs and open filtered grids | `features/catalog/catalog_browser_page.dart`; `CatalogRepository.addonCatalogs` | Implemented; phone and tablet routing is covered by responsive and tablet navigation tests. Large live catalogs and pagination remain unverified. |
+| Movies — `views/movies-view.tsx` | Movie catalogs and category browsing | `features/catalog/catalog_browser_page.dart`; Cinemeta/add-on catalogs | Implemented as a native filtered catalog view; no live backend/provider session was used. |
+| Shows — `views/shows-view.tsx` | Series catalogs and category browsing | `features/catalog/catalog_browser_page.dart`; Cinemeta/add-on catalogs | Implemented as a native filtered catalog view; no live backend/provider session was used. |
+| Anime — `views/anime-view.tsx`, `lib/harbor/anilist.ts` | AniList catalog/search/airing metadata | `features/anime/anime_page.dart`; `POST /api/anilist` | Existing implementation retained; responsive widget coverage passes. Live AniList pagination and API error behavior remain unverified. |
+| Kids — `views/kids-view.tsx`, Kids settings panel | Family catalogs, safe-content filtering, kids mode | `features/kids/kids_page.dart`, `core/data/content_classifier.dart`; Cinemeta proxy | Existing implementation retained; classifier and responsive widget coverage pass. Persistence across a real restart was not device-tested. |
+| Library and watchlist — `views/library-view.tsx`, `lib/harbor/cw.ts` | Watchlist, viewing history, continue-watching and local lists | `features/library/library_page.dart`, `features/library/custom_lists_page.dart`; `AppState`; `/api/sync` | Watchlist/history/lists and create/edit/delete/add/remove are implemented. Share-code encoding, import and cloud list merge have unit/widget coverage. Live account sync and shared-link resolution were not tested against the service. |
+| Watch statistics / Wrapped — `views/wrapped-view.tsx` | Local viewing totals, activity history, top titles, genres and achievements | `features/settings/stats_page.dart` | Statistics surface is available from settings. Full Wrapped story, achievements, and parity of date/ranking calculations remain incomplete. |
+| Media detail — `views/detail-view.tsx`, `chrome/ratings-row.tsx`, `chrome/tmdb-card.tsx` | Metadata, external ratings, watchlist actions, recommendations and related titles | `features/media/media_detail_page.dart`; Stremio proxy, `/api/ratings`, `/api/tmdb` | Provider ratings and recommendations/similar rails are implemented, with genre fallback and native detail navigation. Requires a valid TMDB key and live API verification. |
+| Episodes — `episodes/episodes-section.tsx`, `season-dropdown.tsx`, `episodes-toolbar.tsx` | Season selection, list/grid layouts, watched state and spoiler protection | `features/media/episode_views.dart`, media detail page, playback progress | Existing season/list/grid and progress flows retained and reference screenshots reviewed. Full selection persistence and spoiler preference parity remain unverified. |
+| Add-ons — `views/addons-view.tsx`, `views/addon-detail.tsx` | Install, inspect, enable/disable, remove, order and transfer add-ons | `features/settings/addons_page.dart`, `core/data/catalog_repository.dart` | Partial: install/remove/toggle/collection sync present; add-on detail and device transfer need review |
+| Search — `chrome/floating-search.tsx`, `search-overlay.tsx` | Search across metadata/add-ons with result groups and open detail | `features/shell/search_sheet.dart`; backend/add-on catalog requests | Native search plus direct browse shortcuts are implemented. Remote result quality and service error cases were not tested against a live account. |
+| Account/authentication — `chrome/account.tsx`, auth routes | Register/login, password reset/change, verification, sessions, logout/delete/export | `settings/settings_page.dart`, `horse_account_actions.dart`, `settings_data_page.dart`; `/api/auth/*`, `/api/account/export` | Existing native account actions remain; verification deep links, session listing/revocation and destructive account operations need feature-by-feature live verification. |
+| Stremio account and collection sync — account/settings panels | Sign in and sync add-on collection | `AppState`, `HorseApi`; `/api/stremio/login`, `/api/stremio/addons`, `/api/stremio/library` | Existing direct API flow retained. Automated mocks do not establish live login, sync conflict, or backend state behavior. |
+| Trakt and Simkl — settings integrations and provider stores | Link/unlink, import watchlist/history, scrobble playback | `features/settings/integrations_page.dart`, `AppState`, `HorseApi`; `/api/trakt/*`, `/api/simkl/*` | Existing integrations retained; linking, imported data, and playback scrobble were not exercised with provider accounts. |
+| Debrid services — integrations and playback resolver | Validate provider keys and resolve torrent streams | `integrations_page.dart`, `HorseApi`; `/api/debrid/user`, `/api/debrid/resolve` | Existing secure provider storage and resolver retained; pairing can transfer a saved key after server validation. No provider key or real stream was used for verification. |
+| Player and source picker — `player/player-overlay.tsx`, `views/picker-overlay.tsx` | Choose streams, playback controls, subtitles, seek, next episode, resume/scrobble | `features/player/video_player_page.dart`, `CatalogRepository.streams/subtitles`, `HorseApi` | Present in source; verify supported stream/container cases and lifecycle behavior |
+| Playback settings — `settings-view.tsx`, playback panel | Autoplay/resume, stream sorting, proxy/transcode, playable filtering, speeds and player presentation | `settings/settings_preferences_page.dart`, `AppState`, native player | Existing mobile controls retained. Full key-by-key comparison to current website settings and device persistence/effect checks remain open. |
+| Subtitle settings — settings subtitles panel | Preferred languages, appearance and default track policy | Preferences page, catalog subtitles, native player track selection | Partial: native controls exist; verify web preference parity and platform subtitle support |
+| Appearance and navigation settings — settings appearance panel | Theme, contrast, poster/card presentation, language and navigation order/visibility | `settings/settings_display_page.dart`, `AppState`, Horse theme | Existing mobile appearance controls retained; full parity for web contrast, poster options, and navigation order/visibility remains incomplete. Kitchen color customization is excluded by request. |
+| Kids settings — settings Kids panel | Kids mode, visibility and poster sizing | Preferences page and Kids page | Present in source; verify each control affects content and survives restart |
+| Data management — settings Data panel, `account/export` | Backup/restore, clear history/library and account export | `settings/settings_data_page.dart`, `AppState`; account export API | Local backup/restore excludes provider secrets and keeps custom lists. Destructive flows and live account export still need end-to-end verification. |
+| Integrations and device pairing — `chrome/device-pairing.tsx`, `pairing/*` | Pair devices and transfer account/debrid configuration | `features/settings/integrations_page.dart`; pairing create/status/cancel/claim APIs | Short-code pairing for TMDB or Debrid is implemented using the inspected API contract and secure local storage. Live two-device transfer was not available to test; no QR scanner is included. |
+| Live TV — `views/live-view.tsx` | M3U playlists, channel groups/search, optional XMLTV EPG and channel playback via raw proxy | `features/live_tv/live_tv_page.dart`, `core/data/iptv_parser.dart`; secure playlist storage; `HorseApi.proxyText` | Implemented for M3U import, groups/search, optional XMLTV guide and playback. Parser unit tests pass. Playlist URLs stay on-device in secure storage and are omitted from backup/cloud sync because they may contain provider credentials. Live IPTV playback was not tested. |
+| Calendar — `views/calendar-view.tsx`, AniList airing API | Weekly episodes for tracked series plus AniList anime airings, new-release discovery and title details | `features/calendar/calendar_page.dart`, `core/models/anime_airing.dart`; `/api/anilist`; Cinemeta episode metadata | Tracked-series episodes and deduplicated, adult-filtered AniList airings are implemented; AniList IDs resolve to playable Cinemeta titles before opening details. Parser coverage passes. The separate Cinemeta “new episodes this week” discovery rail remains unimplemented; live schedule data was not verified. |
+| Command palette and keyboard shortcuts — `chrome/command-palette.tsx`, `shortcuts-overlay.tsx`, `lib/harbor/tvnav.ts` | Keyboard/remote navigation and global actions | No global command palette or Android TV remote navigation layer added | Mobile phone/tablet scope currently uses touch navigation. Hardware keyboard and TV remote parity remains unimplemented. |
+| Local lists and shared links — `views/list-detail-view.tsx`, `lib/harbor/lists.ts` | Create/manage named lists and accept shared-list links | `core/models/custom_list.dart`, `core/data/custom_list_share.dart`, library list screens; `/api/sync` | Create/manage/share-code/import and cloud sync support are implemented and unit/widget tested. The mobile format accepts the site's `hblist1.` payload and URL form; live cross-account round trip is unverified. |
+| Settings account/theme/list share QR overlays and PWA | Deep links, QR login, theme/list sharing, service worker install | Integrations pairing card and custom-list sharing; native lifecycle | Device pairing uses the website's short-code API with server-side key validation and secure local storage; QR scanning is not implemented. PWA install/service-worker behavior is web-only and excluded. |
+| Phone navigation — `chrome/glass-dock.tsx` | Floating phone dock, selected destination and auto-hide | `shared/widgets/glass_navigation.dart`, `MainShell`; five current tabs | Present in source; compare screenshots, safe area, keyboard/player overlays and reduced motion |
+| Tablet navigation — `chrome/side-rail.tsx` | Collapsible side rail for wide screens | `features/shell/main_shell.dart` | Implemented as a collapsed-by-default secondary navigation drawer at tablet widths; navigation test passes. Physical tablet behavior was not device-tested. |
+| Kitchen color customization | Website visual customization outside the mobile migration scope | No control should be added to Flutter | Excluded explicitly by task; document exclusion in Settings acceptance notes |
+
+## Source coverage notes
+
+- The website is a single Next.js shell (`src/app/page.tsx`) whose in-app routes
+  are selected in `src/components/harbor/chrome/app-shell.tsx`; route names are
+  not separate `src/app/<route>` files.
+- The web app uses the same Horse backend routes under `src/app/api/`. Flutter
+  calls those API paths through `core/api/horse_api.dart` and proxies Stremio
+  resources through Horse.
+- Automated verification at this milestone: `flutter analyze lib --no-pub`
+  passed; the complete `flutter test` suite passed 134 tests. These tests use
+  local fixtures/mocks and do not verify production account/provider flows.
+- Browser-only PWA installation, DOM translation, and keyboard bindings need
+  mobile equivalents or a documented platform exclusion; they must not be
+  mistaken for backend features.
+- Open migration/verification work: complete per-setting key parity (account,
+  playback and appearance controls); implement the complete Wrapped/achievement
+  experience and global keyboard/TV remote navigation; add Calendar's separate
+  Cinemeta new-release discovery rail; and exercise account, sync, provider,
+  pairing and IPTV flows against authorized live services and physical devices.
