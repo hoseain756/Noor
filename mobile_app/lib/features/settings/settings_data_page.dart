@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
+import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
 
 class SettingsDataPage extends StatelessWidget {
@@ -21,19 +22,7 @@ class SettingsDataPage extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 36),
             children: [
-              _DataRow(
-                icon: Icons.cloud_sync_outlined,
-                title: english ? 'Cloud sync' : 'المزامنة السحابية',
-                detail: english
-                    ? 'Sync your library and preferences with your Horse account.'
-                    : 'مزامنة مكتبتك وتفضيلاتك مع حساب Horse.',
-                trailing: Switch(
-                  value: app.webSettings['cloudSyncEnabled'] != false,
-                  activeThumbColor: HorseTheme.gold,
-                  onChanged: (value) =>
-                      app.setSetting('cloudSyncEnabled', value),
-                ),
-              ),
+              _SupabaseSyncCard(app: app),
               _DataRow(
                 icon: Icons.download_outlined,
                 title: english ? 'Export backup' : 'تصدير نسخة احتياطية',
@@ -83,15 +72,15 @@ class SettingsDataPage extends StatelessWidget {
                     ? 'Clear library and history'
                     : 'مسح المكتبة والسجل',
                 detail: english
-                    ? 'Remove saved titles and playback records from this account.'
-                    : 'إزالة العناوين المحفوظة وسجلات التشغيل من هذا الحساب.',
+                    ? 'Remove saved titles and playback records from this device.'
+                    : 'إزالة العناوين المحفوظة وسجلات التشغيل من هذا الجهاز.',
                 destructive: true,
                 onTap: () => _confirm(
                   context,
                   title: english ? 'Clear your library?' : 'مسح مكتبتك؟',
                   body: english
-                      ? 'Your add-ons and account will stay connected.'
-                      : 'ستبقى الإضافات والحساب مرتبطين.',
+                      ? 'Your add-ons stay installed on this device.'
+                      : 'ستبقى الإضافات مثبتة على هذا الجهاز.',
                   onConfirm: app.clearLibraryData,
                 ),
               ),
@@ -135,6 +124,168 @@ class SettingsDataPage extends StatelessWidget {
       ),
     );
     if (accepted == true) await onConfirm();
+  }
+}
+
+class _SupabaseSyncCard extends StatefulWidget {
+  const _SupabaseSyncCard({required this.app});
+  final AppState app;
+
+  @override
+  State<_SupabaseSyncCard> createState() => _SupabaseSyncCardState();
+}
+
+class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
+  bool _busy = false;
+  final Map<String, DateTime?> _lastSync = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastSync();
+  }
+
+  Future<void> _loadLastSync() async {
+    for (final bucket in NoorSyncService.buckets) {
+      _lastSync[bucket] =
+          await NoorSyncService.instance.lastSyncAt(bucket);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _syncNow() async {
+    final english = widget.app.english;
+    setState(() => _busy = true);
+    final ok = await widget.app.syncNow();
+    await _loadLastSync();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? (english ? 'Sync complete.' : 'تمت المزامنة.')
+              : (english
+                  ? 'Sync failed — check your connection.'
+                  : 'تعذّرت المزامنة — تحقّق من الاتصال.'),
+        ),
+      ),
+    );
+  }
+
+  String _bucketLabel(String bucket, bool english) => switch (bucket) {
+        NoorSyncService.bucketSettings =>
+          english ? 'Settings' : 'الإعدادات',
+        NoorSyncService.bucketLibrary =>
+          english ? 'Continue watching' : 'متابعة المشاهدة',
+        NoorSyncService.bucketLists => english ? 'Lists' : 'القوائم',
+        NoorSyncService.bucketWatchlist =>
+          english ? 'Watchlist' : 'المحفوظات',
+        NoorSyncService.bucketHistory => english ? 'History' : 'السجل',
+        NoorSyncService.bucketAddons => english ? 'Add-ons' : 'الإضافات',
+        _ => bucket,
+      };
+
+  String _format(DateTime? last, bool english) {
+    if (last == null) return english ? 'Never' : 'لم تتم بعد';
+    final local = last.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final english = app.english;
+    final enabled = app.webSettings['cloudSyncEnabled'] != false;
+    final id = app.deviceId ?? '';
+    final shortId = id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: HorseTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HorseTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.cloud_sync_outlined,
+                  color: HorseTheme.gold, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  english ? 'Cloud sync (Supabase)' : 'مزامنة سحابية (Supabase)',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              Switch(
+                value: enabled,
+                activeThumbColor: HorseTheme.gold,
+                onChanged: (value) =>
+                    app.setSetting('cloudSyncEnabled', value),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            english
+                ? 'Accountless device sync · Device $shortId'
+                : 'بدون حساب — مزامنة عبر معرّف الجهاز · الجهاز $shortId',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          if (enabled)
+            ...NoorSyncService.buckets.map(
+              (bucket) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _bucketLabel(bucket, english),
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    Text(
+                      _format(_lastSync[bucket], english),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: HorseTheme.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (!enabled)
+            Text(
+              english
+                  ? 'Sync is off — data stays on this device only.'
+                  : 'المزامنة متوقفة — ستبقى البيانات على هذا الجهاز فقط.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: FilledButton.tonal(
+              onPressed: _busy ? null : _syncNow,
+              child: _busy
+                  ? const SizedBox(
+                      width: 17,
+                      height: 17,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(english ? 'Sync now' : 'مزامنة الآن'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -214,7 +365,6 @@ class _DataRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.detail,
-    this.trailing,
     this.onTap,
     this.destructive = false,
   });
@@ -222,7 +372,6 @@ class _DataRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String detail;
-  final Widget? trailing;
   final VoidCallback? onTap;
   final bool destructive;
 
@@ -246,8 +395,9 @@ class _DataRow extends StatelessWidget {
                     color: destructive ? const Color(0xFFFFA29B) : null)),
             subtitle:
                 Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
-            trailing: trailing ??
-                const Icon(Icons.chevron_left_rounded, color: HorseTheme.muted),
+            trailing: const Icon(
+                Icons.chevron_left_rounded,
+                color: HorseTheme.muted),
           ),
         ),
       );

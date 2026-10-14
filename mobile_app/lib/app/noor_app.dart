@@ -6,8 +6,8 @@ import '../core/state/app_state.dart';
 import '../core/theme/horse_theme.dart';
 import '../features/shell/main_shell.dart';
 
-class HorseApp extends StatelessWidget {
-  const HorseApp({super.key, required this.state});
+class NoorApp extends StatelessWidget {
+  const NoorApp({super.key, required this.state});
 
   final AppState state;
 

@@ -1,14 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../api/horse_api.dart';
+import '../api/noor_api.dart';
 import '../data/catalog_repository.dart';
 import '../models/addon.dart';
 import '../models/custom_list.dart';
 import '../models/media_item.dart';
+import '../sync/noor_sync.dart';
 
 class AppState extends ChangeNotifier {
   AppState(this.api, this.catalogs);
@@ -64,16 +66,18 @@ class AppState extends ChangeNotifier {
     'preferredQuality': 'auto',
   };
 
-  final HorseApi api;
+  final NoorApi api;
   final CatalogRepository catalogs;
+  final NoorSyncService sync = NoorSyncService.instance;
   SharedPreferences? _preferences;
   bool initialized = false;
-  bool syncing = false;
-  bool _syncAgain = false;
   bool english = false;
+
+  /// Accountless identity: UUID v4 generated once, persisted in secure
+  /// storage, and used as the sync key (there is no user account).
+  String? deviceId;
+
   Map<String, dynamic> webSettings = Map<String, dynamic>.from(defaultSettings);
-  Map<String, dynamic>? horseUser;
-  Map<String, dynamic>? stremioUser;
   Map<String, Map<String, dynamic>> linkedServices = {};
   Map<String, dynamic>? debridUser;
   List<Addon> addons = [];
@@ -81,6 +85,11 @@ class AppState extends ChangeNotifier {
   List<MediaItem> watchlist = [];
   List<WatchHistoryEntry> history = [];
   final Map<String, Map<String, dynamic>> _continueWatching = {};
+
+  /// Buckets queued for the next debounced cloud push.
+  final Set<String> _dirtyBuckets = {};
+  Timer? _pushTimer;
+  bool _pushInFlight = false;
 
   bool contains(MediaItem item) =>
       watchlist.any((entry) => entry.id == item.id);
@@ -117,18 +126,20 @@ class AppState extends ChangeNotifier {
       }
     }
     final legacyPlaylists = _playlistRows(webSettings['iptvPlaylists']);
-    await api.migrateLegacyIptvPlaylists(legacyPlaylists);
+    final storedPlaylists = await api.loadIptvPlaylists();
+    if (legacyPlaylists.isNotEmpty && storedPlaylists.isEmpty) {
+      // First boot on the accountless build: carry local playlists over.
+      await api.saveIptvPlaylists(legacyPlaylists);
+    }
     webSettings = {
       ...webSettings,
-      'iptvPlaylists': await api.loadIptvPlaylists(),
+      'iptvPlaylists': legacyPlaylists.isNotEmpty && storedPlaylists.isEmpty
+          ? legacyPlaylists
+          : storedPlaylists,
     };
-    await api.migrateLegacyTmdbKeys(
-      userKey: webSettings['tmdbUserKey']?.toString(),
-      apiKey: webSettings['tmdbKey']?.toString(),
-    );
-    // TMDB credentials are device-local secure-storage values. Old versions
-    // kept these fields in the preferences JSON, so clear them before any
-    // settings write or account sync can serialize the migrated data.
+    // TMDB credentials live in device-local secure storage. Old versions kept
+    // these fields in the preferences JSON, so blank them before any settings
+    // write or sync push can serialize them again.
     webSettings = {...webSettings, 'tmdbKey': '', 'tmdbUserKey': ''};
     await _persistSettings();
     if (savedEnglish == null) english = webSettings['uiLanguage'] == 'en';
@@ -145,7 +156,8 @@ class AppState extends ChangeNotifier {
         debridUser = null;
       }
     }
-    final device = _deviceId();
+    deviceId = await sync.deviceId();
+    unawaited(sync.heartbeat());
     addons = _decodeList(
       _preferences!.getString('horse.mobile.addons'),
       Addon.fromJson,
@@ -167,92 +179,17 @@ class AppState extends ChangeNotifier {
     );
     initialized = true;
     notifyListeners();
-    if (api.stremioAuthKey != null) {
-      stremioUser = {
-        'email':
-            _preferences!.getString('horse.mobile.stremio.email') ?? 'Stremio',
-      };
-    }
 
-    try {
-      final me = await api.horseMe();
-      if (me['authenticated'] == true && me['user'] is Map) {
-        horseUser = Map<String, dynamic>.from(me['user'] as Map);
-      }
-    } catch (_) {
-      // Public browsing stays available if the account endpoint is offline.
-    }
+    // Linked services are resolved straight from the API (no account needed).
+    await _refreshLinkedServices();
 
+    // Accountless cloud sync: pull every bucket whose cloud revision is newer
+    // than the last revision this device has seen, then persist the merge.
     if (webSettings['cloudSyncEnabled'] != false) {
-      try {
-        final result = await api.loadSnapshot(device);
-        final snapshot = Map<String, dynamic>.from(
-          result['snapshot'] as Map? ?? const {},
-        );
-        final remoteAddons = (snapshot['addons'] as List? ?? const [])
-            .whereType<Map>()
-            .map((e) => Addon.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
-        final remoteWatchlist = (snapshot['watchlist'] as List? ?? const [])
-            .whereType<Map>()
-            .map((e) => MediaItem.fromJson(Map<String, dynamic>.from(e)))
-            .where((e) => e.id.isNotEmpty)
-            .toList();
-        final remoteHistory = (snapshot['history'] as List? ?? const [])
-            .whereType<Map>()
-            .map(
-                (e) => WatchHistoryEntry.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
-        final remoteLists = (snapshot['lists'] as List? ?? const [])
-            .whereType<Map>()
-            .map((e) => CustomMediaList.fromJson(Map<String, dynamic>.from(e)))
-            .where((list) => list.id.isNotEmpty && list.name.isNotEmpty)
-            .toList();
-        if (addons.isEmpty) addons = remoteAddons;
-        if (customLists.isEmpty) customLists = remoteLists;
-        if (watchlist.isEmpty) watchlist = remoteWatchlist;
-        if (history.isEmpty) history = remoteHistory;
-        if (_continueWatching.isEmpty && snapshot['cw'] is Map) {
-          _continueWatching.addAll(
-            Map<String, dynamic>.from(snapshot['cw'] as Map).map(
-              (key, value) =>
-                  MapEntry(key, Map<String, dynamic>.from(value as Map)),
-            ),
-          );
-        }
-      } catch (_) {
-        // Local data is the offline fallback.
-      }
-    }
-
-    if (api.stremioAuthKey != null) {
-      try {
-        final remote = await api.loadStremioAddons();
-        final parsed = remote
-            .whereType<Map>()
-            .map((e) => Addon.fromJson(Map<String, dynamic>.from(e)))
-            .where((e) => e.id.isNotEmpty)
-            .toList();
-        if (parsed.isNotEmpty) addons = parsed;
-      } catch (_) {
-        // Preserve the last local/server snapshot if Stremio is unavailable.
-      }
+      await _pullBuckets();
     }
     await _persist();
     notifyListeners();
-  }
-
-  String _deviceId() {
-    var value = _preferences?.getString('horse.mobile.device');
-    if (value == null || value.length < 8) {
-      const chars =
-          'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      final random = Random.secure();
-      value =
-          'horse_${List.generate(22, (_) => chars[random.nextInt(chars.length)]).join()}';
-      _preferences?.setString('horse.mobile.device', value);
-    }
-    return value;
   }
 
   Future<void> setLanguage(bool useEnglish) async {
@@ -261,7 +198,7 @@ class AppState extends ChangeNotifier {
     await _preferences?.setBool('horse.mobile.english', useEnglish);
     await _persistSettings();
     notifyListeners();
-    if (webSettings['cloudSyncEnabled'] == true) await _pushSnapshot();
+    _schedulePush(NoorSyncService.bucketSettings);
   }
 
   Future<void> setSetting(String key, dynamic value) async {
@@ -277,7 +214,7 @@ class AppState extends ChangeNotifier {
     }
     await _persistSettings();
     notifyListeners();
-    if (webSettings['cloudSyncEnabled'] == true) await _pushSnapshot();
+    _schedulePush(NoorSyncService.bucketSettings);
   }
 
   Future<void> _persistSettings() async {
@@ -301,62 +238,6 @@ class AppState extends ChangeNotifier {
     });
   }
 
-  Future<void> setServer(String value) async {
-    await api.setServerUrl(value);
-    try {
-      final health = await api.getJson('/api/health');
-      if (health['ok'] != true) {
-        throw const FormatException('تعذر الاتصال بخادم Horse.');
-      }
-      final me = await api.horseMe();
-      horseUser = me['authenticated'] == true && me['user'] is Map
-          ? Map<String, dynamic>.from(me['user'] as Map)
-          : null;
-      await _pullSnapshot(merge: true);
-      notifyListeners();
-    } catch (_) {
-      rethrow;
-    }
-  }
-
-  Future<void> loginHorse(
-    String email,
-    String password, {
-    String syncStrategy = 'merge',
-  }) async {
-    final data = await api.loginHorse(email, password);
-    horseUser = Map<String, dynamic>.from(data['user'] as Map? ?? const {});
-    if (syncStrategy == 'local') {
-      await _pushSnapshot(force: true);
-    } else {
-      await _pullSnapshot(merge: syncStrategy == 'merge', force: true);
-    }
-    notifyListeners();
-  }
-
-  Future<void> syncHorseAccount({String strategy = 'merge'}) async {
-    if (strategy == 'local') {
-      await _pushSnapshot(force: true);
-      return;
-    }
-    await _pullSnapshot(merge: strategy == 'merge', force: true);
-    notifyListeners();
-  }
-
-  Future<void> logoutHorseAllDevices() async {
-    await api.logoutHorseAllDevices();
-    horseUser = null;
-    notifyListeners();
-  }
-
-  Future<void> deleteHorseAccount() async {
-    await api.deleteHorseAccount();
-    horseUser = null;
-    linkedServices = {};
-    await _preferences?.remove('horse.mobile.linked-services');
-    await _persistAndSync();
-  }
-
   Future<void> restoreLocalData(String raw) async {
     final decoded = jsonDecode(raw);
     if (decoded is! Map ||
@@ -365,7 +246,7 @@ class AppState extends ChangeNotifier {
         decoded['addons'] is! List ||
         decoded['watchlist'] is! List ||
         decoded['history'] is! List) {
-      throw const FormatException('نسخة Horse الاحتياطية غير صالحة.');
+      throw const FormatException('النسخة الاحتياطية غير صالحة.');
     }
     final data = Map<String, dynamic>.from(decoded);
     final settings = Map<String, dynamic>.from(data['settings'] as Map);
@@ -376,6 +257,7 @@ class AppState extends ChangeNotifier {
       'tmdbKey': '',
       'tmdbUserKey': '',
       'iptvPlaylists': webSettings['iptvPlaylists'],
+      'cloudSyncEnabled': webSettings['cloudSyncEnabled'],
     };
     english = webSettings['uiLanguage'] == 'en';
     addons = _decodeList(
@@ -412,40 +294,6 @@ class AppState extends ChangeNotifier {
     await _persistAndSync();
   }
 
-  Future<void> registerHorse(String email, String password, String name) async {
-    final data = await api.registerHorse(email, password, name);
-    horseUser = Map<String, dynamic>.from(data['user'] as Map? ?? const {});
-    await _pullSnapshot(merge: true);
-    notifyListeners();
-  }
-
-  Future<void> logoutHorse() async {
-    await api.logoutHorse();
-    horseUser = null;
-    notifyListeners();
-  }
-
-  Future<void> loginStremio(String email, String password) async {
-    stremioUser = await api.loginStremio(email, password);
-    await _preferences?.setString('horse.mobile.stremio.email', email.trim());
-    final remote = await api.loadStremioAddons();
-    final parsed = remote
-        .whereType<Map>()
-        .map((e) => Addon.fromJson(Map<String, dynamic>.from(e)))
-        .where((e) => e.id.isNotEmpty)
-        .toList();
-    if (parsed.isNotEmpty) addons = parsed;
-    await _persist();
-    notifyListeners();
-  }
-
-  Future<void> logoutStremio() async {
-    await api.logoutStremio();
-    await _preferences?.remove('horse.mobile.stremio.email');
-    stremioUser = null;
-    notifyListeners();
-  }
-
   Future<void> saveLinkedService(
     String service,
     Map<String, dynamic> account,
@@ -462,13 +310,10 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> unlinkService(String service) async {
-    final account = linkedServices[service];
-    if (account != null) {
-      try {
-        await api.unlinkService(service, account['linkId'].toString());
-      } catch (_) {
-        // Clear the local link even if the server has already removed it.
-      }
+    try {
+      await api.unlinkService(service);
+    } catch (_) {
+      // Clear the local link even if the provider has already removed it.
     }
     linkedServices = {...linkedServices}..remove(service);
     await _preferences?.setString(
@@ -479,72 +324,78 @@ class AppState extends ChangeNotifier {
   }
 
   Future<(int, int)> syncLinkedService(String service) async {
-    final account = linkedServices[service];
-    if (account == null) return (0, 0);
-    final (watchlistItems, historyItems) = await api.syncLinkedService(
-      service,
-      account['linkId'].toString(),
-    );
-    final importedWatchlist = watchlistItems
-        .whereType<Map>()
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .map(
-          (entry) => MediaItem.fromJson({
-            'id': entry['id'],
-            'type': entry['type'],
-            'name': entry['name'],
-            if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
-          }),
-        )
-        .where((item) => item.id.isNotEmpty)
-        .toList();
-    final importedHistory = historyItems
-        .whereType<Map>()
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .map((entry) {
-          final item = MediaItem.fromJson({
-            'id': entry['id'],
-            'type': entry['type'],
-            'name': entry['name'],
-          });
-          return WatchHistoryEntry(
-            item: item,
-            watchedAt: (entry['watchedAt'] as num?)?.toInt() ?? 0,
-            videoId: entry['videoId'] as String?,
-            season: (entry['season'] as num?)?.toInt(),
-            episode: (entry['episode'] as num?)?.toInt(),
-          );
-        })
-        .where((entry) => entry.item.id.isNotEmpty)
-        .toList();
-    final oldWatchlistLength = watchlist.length;
-    final oldHistoryLength = history.length;
-    watchlist = _mergeBy(watchlist, importedWatchlist, (item) => item.id);
-    history = _mergeBy(
-      history,
-      importedHistory,
-      (entry) => entry.item.id,
-    ).take(200).toList();
-    linkedServices = {
-      ...linkedServices,
-      service: {
-        ...account,
-        'lastSyncedAt': DateTime.now().millisecondsSinceEpoch,
-      },
-    };
-    await _preferences?.setString(
-      'horse.mobile.linked-services',
-      _encode(linkedServices),
-    );
-    await _persistAndSync();
-    return (
-      watchlist.length - oldWatchlistLength,
-      history.length - oldHistoryLength,
-    );
+    if (linkedServices[service] == null) return (0, 0);
+    int imported = 0;
+    int historyImported = 0;
+    try {
+      final watchlistItems = await api.syncLinkedService(service, 'watchlist');
+      final historyItems = await api.syncLinkedService(service, 'history');
+      final importedWatchlist = watchlistItems
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .map(
+            (entry) => MediaItem.fromJson({
+              'id': (entry['imdb'] ?? entry['id'] ?? '').toString(),
+              'type': entry['type'],
+              'name': (entry['title'] ?? entry['name'] ?? '').toString(),
+              if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+            }),
+          )
+          .where((item) => item.id.isNotEmpty)
+          .toList();
+      final importedHistory = historyItems
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .map((entry) {
+            final item = MediaItem.fromJson({
+              'id': (entry['imdb'] ?? entry['id'] ?? '').toString(),
+              'type': entry['type'],
+              'name': (entry['title'] ?? entry['name'] ?? '').toString(),
+              if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+            });
+            final watchedAt = entry['watchedAt'];
+            return WatchHistoryEntry(
+              item: item,
+              watchedAt: watchedAt is int
+                  ? watchedAt
+                  : int.tryParse('$watchedAt') ?? 0,
+            );
+          })
+          .where((row) => row.item.id.isNotEmpty)
+          .toList();
+      // Merge into watchlist without duplicates.
+      final watchlistIds = watchlist.map((m) => m.id).toSet();
+      final freshWatchlist = importedWatchlist
+          .where((item) => !watchlistIds.contains(item.id))
+          .toList();
+      watchlist = [...watchlist, ...freshWatchlist];
+      historyImported = importedHistory.length;
+      if (importedHistory.isNotEmpty) {
+        final historyIds = history.map((row) => row.item.id).toSet();
+        final freshHistory = importedHistory
+            .where((row) => !historyIds.contains(row.item.id))
+            .toList();
+        history = [...freshHistory, ...history];
+      }
+      imported = freshWatchlist.length;
+      await _persist();
+      _schedulePush('history');
+    } catch (_) {
+      return (0, 0);
+    }
+    return (imported, historyImported);
   }
 
   Future<void> configureDebrid(String service, String apiKey) async {
-    debridUser = await api.saveDebridKey(service, apiKey.trim());
+    final user = await api.verifyDebridKey(
+      service: service,
+      apiKey: apiKey.trim(),
+    );
+    if (user == null) {
+      throw Exception('invalid-debrid-key');
+    }
+    await api.saveDebridKey(service: service, apiKey: apiKey.trim());
+    debridUser = user;
     await _preferences?.setString(
       'horse.mobile.debrid.user',
       _encode(debridUser),
@@ -594,7 +445,7 @@ class AppState extends ChangeNotifier {
     watchlist = contains(item)
         ? watchlist.where((entry) => entry.id != item.id).toList()
         : [item, ...watchlist];
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketWatchlist});
   }
 
   Future<void> createCustomList(String name, {String? description}) async {
@@ -617,7 +468,7 @@ class AppState extends ChangeNotifier {
       updatedAt: now,
     );
     customLists = [list, ...customLists];
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
   }
 
   Future<void> renameCustomList(
@@ -644,12 +495,12 @@ class AppState extends ChangeNotifier {
               )
             : list)
         .toList();
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
   }
 
   Future<void> deleteCustomList(String id) async {
     customLists = customLists.where((list) => list.id != id).toList();
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
   }
 
   Future<bool> addToCustomList(String listId, MediaItem item) async {
@@ -679,7 +530,7 @@ class AppState extends ChangeNotifier {
       createdAt: list.createdAt,
       updatedAt: now,
     );
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
     return true;
   }
 
@@ -697,7 +548,7 @@ class AppState extends ChangeNotifier {
               )
             : list)
         .toList();
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
   }
 
   Future<void> importCustomList({
@@ -726,7 +577,7 @@ class AppState extends ChangeNotifier {
       ),
       ...customLists,
     ];
-    await _persistAndSync();
+    await _persistAndSync(const {NoorSyncService.bucketLists});
   }
 
   Future<void> recordPlayback(
@@ -767,36 +618,74 @@ class AppState extends ChangeNotifier {
     } else {
       _continueWatching.remove(item.id);
     }
-    await _persistAndSync();
+    await _persistAndSync(const {
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    });
   }
 
   Future<void> clearHistory() async {
     history = [];
     _continueWatching.clear();
-    await _persistAndSync();
+    await _persistAndSync(const {
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    });
   }
 
   Future<void> clearLibraryData() async {
     watchlist = [];
     history = [];
     _continueWatching.clear();
-    await _persistAndSync();
+    await _persistAndSync(const {
+      NoorSyncService.bucketWatchlist,
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    });
+  }
+
+  /// Manual "sync now": pull every bucket, then push the full local state.
+  /// Returns whether the round trip fully succeeded.
+  Future<bool> syncNow() async {
+    if (webSettings['cloudSyncEnabled'] == false) return false;
+    await _pullBuckets();
+    await _persist();
+    var ok = true;
+    for (final bucket in NoorSyncService.buckets) {
+      final payload = _bucketPayload(bucket);
+      if (payload == null) continue;
+      if (!await sync.pushBucket(bucket, payload)) {
+        ok = false;
+        continue;
+      }
+      _dirtyBuckets.remove(bucket);
+      await _storeLocalRev(bucket);
+    }
+    unawaited(sync.heartbeat());
+    notifyListeners();
+    return ok;
   }
 
   Future<void> _saveAddons() async {
     await _persist();
-    if (api.stremioAuthKey != null) {
-      await api.saveStremioAddons(
-        addons.map((addon) => addon.toJson()).toList(),
-      );
-    }
-    await _pushSnapshot();
+    _schedulePush(NoorSyncService.bucketAddons);
     notifyListeners();
   }
 
-  Future<void> _persistAndSync() async {
+  Future<void> _persistAndSync([
+    Set<String> buckets = const {
+      NoorSyncService.bucketSettings,
+      NoorSyncService.bucketAddons,
+      NoorSyncService.bucketLists,
+      NoorSyncService.bucketWatchlist,
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    },
+  ]) async {
     await _persist();
-    await _pushSnapshot();
+    for (final bucket in buckets) {
+      _schedulePush(bucket);
+    }
     notifyListeners();
   }
 
@@ -823,129 +712,217 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<void> _pushSnapshot({bool force = false}) async {
-    if (webSettings['cloudSyncEnabled'] == false && !force) return;
-    if (syncing) {
-      _syncAgain = true;
+  // ---------------------------------------------------------------------------
+  // Accountless cloud sync (NoorSyncService over direct Postgres).
+  // ---------------------------------------------------------------------------
+
+  /// Debounced push: queues [bucket] and (re)starts the 4s timer so bursts of
+  /// changes collapse into a single write per bucket.
+  void _schedulePush(String bucket) {
+    if (webSettings['cloudSyncEnabled'] == false) {
+      _dirtyBuckets.clear();
       return;
     }
-    syncing = true;
+    _dirtyBuckets.add(bucket);
+    _pushTimer?.cancel();
+    _pushTimer = Timer(const Duration(seconds: 4), _flushPush);
+  }
+
+  Future<void> _flushPush() async {
+    if (_dirtyBuckets.isEmpty) return;
+    if (webSettings['cloudSyncEnabled'] == false) {
+      _dirtyBuckets.clear();
+      return;
+    }
+    if (_pushInFlight) {
+      _pushTimer?.cancel();
+      _pushTimer = Timer(const Duration(seconds: 4), _flushPush);
+      return;
+    }
+    _pushInFlight = true;
     try {
-      do {
-        _syncAgain = false;
-        final snapshot = {
-          'v': 1,
+      for (final bucket in _dirtyBuckets.toList()) {
+        final payload = _bucketPayload(bucket);
+        if (payload == null) {
+          _dirtyBuckets.remove(bucket);
+          continue;
+        }
+        if (!await sync.pushBucket(bucket, payload)) break;
+        _dirtyBuckets.remove(bucket);
+        await _storeLocalRev(bucket);
+        if (_dirtyBuckets.isEmpty) break;
+      }
+    } finally {
+      _pushInFlight = false;
+    }
+    if (_dirtyBuckets.isNotEmpty) {
+      // Failed buckets stay dirty; retry after a short backoff so an offline
+      // device does not hammer the database on every keystroke.
+      _pushTimer?.cancel();
+      _pushTimer = Timer(const Duration(seconds: 30), _flushPush);
+    }
+  }
+
+  /// Persists the revision the cloud row now carries for [bucket], so a later
+  /// boot only applies buckets that were written after this device's last
+  /// known revision.
+  Future<void> _storeLocalRev(String bucket) async {
+    final current = _preferences?.getInt('noor.sync.rev.$bucket') ?? 0;
+    final rev = sync.lastKnownRev(bucket) ?? current + 1;
+    await _preferences?.setInt('noor.sync.rev.$bucket', rev);
+  }
+
+  /// Boot-time pull: whole-bucket replace whenever the cloud revision is
+  /// newer than the last revision recorded locally.
+  Future<void> _pullBuckets() async {
+    for (final bucket in NoorSyncService.buckets) {
+      final remote = await sync.pullBucket(bucket);
+      if (remote == null) {
+        // The bucket has never been written: seed the cloud from local data.
+        if (_hasLocalBucketData(bucket)) _schedulePush(bucket);
+        continue;
+      }
+      final remoteRev = (remote['rev'] as num?)?.toInt() ?? 0;
+      final localRev = _preferences?.getInt('noor.sync.rev.$bucket') ?? 0;
+      if (remoteRev > localRev) {
+        await _applyBucket(bucket, remote['data']);
+        await _preferences?.setInt('noor.sync.rev.$bucket', remoteRev);
+      }
+    }
+    notifyListeners();
+  }
+
+  bool _hasLocalBucketData(String bucket) {
+    switch (bucket) {
+      case NoorSyncService.bucketAddons:
+        return addons.isNotEmpty;
+      case NoorSyncService.bucketLists:
+        return customLists.isNotEmpty;
+      case NoorSyncService.bucketWatchlist:
+        return watchlist.isNotEmpty;
+      case NoorSyncService.bucketHistory:
+        return history.isNotEmpty;
+      case NoorSyncService.bucketLibrary:
+        return _continueWatching.isNotEmpty;
+      default:
+        return false;
+    }
+  }
+
+  Map<String, dynamic>? _bucketPayload(String bucket) {
+    switch (bucket) {
+      case NoorSyncService.bucketSettings:
+        return {
           'settings': {
             ..._settingsWithoutSecrets(),
             'uiLanguage': english ? 'en' : 'ar',
           },
-          'addons': addons.map((e) => e.toJson()).toList(),
-          'removedAddons': <dynamic>[],
-          'cw': _continueWatching,
-          'watchlist': watchlist
-              .map(
-                (e) => {
-                  ...e.toJson(),
-                  't': DateTime.now().millisecondsSinceEpoch,
-                },
-              )
-              .toList(),
-          'history': history.map((e) => e.toJson()).toList(),
-          'lists': customLists.map((list) => list.toJson()).toList(),
-          'updatedAt': DateTime.now().toUtc().toIso8601String(),
         };
-        await api.saveSnapshot(_deviceId(), snapshot);
-      } while (_syncAgain);
-    } catch (_) {
-      // The local copy remains current and the next change retries the sync.
-    } finally {
-      syncing = false;
+      case NoorSyncService.bucketAddons:
+        return {'addons': addons.map((e) => e.toJson()).toList()};
+      case NoorSyncService.bucketLists:
+        return {'lists': customLists.map((list) => list.toJson()).toList()};
+      case NoorSyncService.bucketWatchlist:
+        return {'watchlist': watchlist.map((e) => e.toJson()).toList()};
+      case NoorSyncService.bucketHistory:
+        return {'history': history.map((e) => e.toJson()).toList()};
+      case NoorSyncService.bucketLibrary:
+        return {'cw': _continueWatching};
+      default:
+        return null;
     }
   }
 
-  Future<void> _pullSnapshot({required bool merge, bool force = false}) async {
-    if (webSettings['cloudSyncEnabled'] == false && !force) return;
-    final result = await api.loadSnapshot(_deviceId());
-    final snapshot = Map<String, dynamic>.from(
-      result['snapshot'] as Map? ?? const {},
+  Future<void> _applyBucket(String bucket, dynamic payload) async {
+    if (payload is! Map) return;
+    final data = Map<String, dynamic>.from(payload);
+    switch (bucket) {
+      case NoorSyncService.bucketSettings:
+        if (data['settings'] is! Map) return;
+        webSettings = {
+          ...webSettings,
+          ...Map<String, dynamic>.from(data['settings'] as Map),
+          'tmdbKey': '',
+          'tmdbUserKey': '',
+          // Playlist URLs can include provider credentials; keep them local.
+          'iptvPlaylists': webSettings['iptvPlaylists'],
+          // Sync on/off is a per-device choice, never inherited from the cloud.
+          'cloudSyncEnabled': webSettings['cloudSyncEnabled'],
+        };
+        english = webSettings['uiLanguage'] == 'en';
+        await _preferences?.setBool('horse.mobile.english', english);
+        await _persistSettings();
+      case NoorSyncService.bucketAddons:
+        addons = (data['addons'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => Addon.fromJson(Map<String, dynamic>.from(e)))
+            .where((e) => e.id.isNotEmpty)
+            .toList();
+      case NoorSyncService.bucketLists:
+        customLists = (data['lists'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => CustomMediaList.fromJson(Map<String, dynamic>.from(e)))
+            .where((list) => list.id.isNotEmpty && list.name.isNotEmpty)
+            .toList();
+      case NoorSyncService.bucketWatchlist:
+        watchlist = (data['watchlist'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => MediaItem.fromJson(Map<String, dynamic>.from(e)))
+            .where((e) => e.id.isNotEmpty)
+            .toList();
+      case NoorSyncService.bucketHistory:
+        history = (data['history'] as List? ?? const [])
+            .whereType<Map>()
+            .map(
+                (e) => WatchHistoryEntry.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      case NoorSyncService.bucketLibrary:
+        if (data['cw'] is! Map) return;
+        _continueWatching
+          ..clear()
+          ..addAll(
+            Map<String, dynamic>.from(data['cw'] as Map).map(
+              (key, value) =>
+                  MapEntry(key, Map<String, dynamic>.from(value as Map)),
+            ),
+          );
+    }
+  }
+
+  /// Linked services are checked directly against the API — no pairing codes,
+  /// no account. The cached map keeps `linkId`s for offline scrobble calls.
+  Future<void> _refreshLinkedServices() async {
+    var next = _decodeMap(
+      _preferences?.getString('horse.mobile.linked-services'),
     );
-    if (snapshot['settings'] is Map) {
-      webSettings = {
-        ...webSettings,
-        ...Map<String, dynamic>.from(snapshot['settings'] as Map),
-        'tmdbKey': '',
-        'tmdbUserKey': '',
-        // Playlist URLs can include provider credentials; keep them on-device.
-        'iptvPlaylists': webSettings['iptvPlaylists'],
-      };
-      english = webSettings['uiLanguage'] == 'en';
-      await _preferences?.setBool('horse.mobile.english', english);
-      await _persistSettings();
-    }
-    final remoteAddons = (snapshot['addons'] as List? ?? const [])
-        .whereType<Map>()
-        .map((e) => Addon.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    final remoteWatchlist = (snapshot['watchlist'] as List? ?? const [])
-        .whereType<Map>()
-        .map((e) => MediaItem.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    final remoteHistory = (snapshot['history'] as List? ?? const [])
-        .whereType<Map>()
-        .map((e) => WatchHistoryEntry.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    final remoteLists = (snapshot['lists'] as List? ?? const [])
-        .whereType<Map>()
-        .map((e) => CustomMediaList.fromJson(Map<String, dynamic>.from(e)))
-        .where((list) => list.id.isNotEmpty && list.name.isNotEmpty)
-        .toList();
-    if (merge) {
-      addons = _mergeBy(addons, remoteAddons, (e) => e.id);
-      customLists = _mergeLists(customLists, remoteLists);
-      watchlist = _mergeBy(watchlist, remoteWatchlist, (e) => e.id);
-      history = _mergeBy(history, remoteHistory, (e) => e.item.id);
-    } else {
-      addons = remoteAddons;
-      customLists = remoteLists;
-      watchlist = remoteWatchlist;
-      history = remoteHistory;
-    }
-    if (snapshot['cw'] is Map) {
-      _continueWatching.addAll(
-        Map<String, dynamic>.from(snapshot['cw'] as Map).map(
-          (key, value) =>
-              MapEntry(key, Map<String, dynamic>.from(value as Map)),
-        ),
-      );
-    }
-    await _persist();
-    await _pushSnapshot(force: force);
-  }
-
-  List<T> _mergeBy<T>(List<T> local, List<T> remote, String Function(T) keyOf) {
-    final result = <T>[];
-    final seen = <String>{};
-    for (final item in [...local, ...remote]) {
-      if (seen.add(keyOf(item))) result.add(item);
-    }
-    return result;
-  }
-
-  List<CustomMediaList> _mergeLists(
-    List<CustomMediaList> local,
-    List<CustomMediaList> remote,
-  ) {
-    final merged = {for (final list in local) list.id: list};
-    for (final list in remote) {
-      final current = merged[list.id];
-      if (current == null || list.updatedAt >= current.updatedAt) {
-        merged[list.id] = list;
+    for (final service in const ['trakt', 'simkl']) {
+      try {
+        // isLinked is synchronous (token presence) — no await needed.
+        final dynamic linked = api.isLinked(service);
+        if (linked == true) {
+          if (!next.containsKey(service)) {
+            next = {
+              ...next,
+              service: const <String, dynamic>{'linked': true},
+            };
+          }
+        } else if (linked is Map && linked.isNotEmpty) {
+          next = {...next, service: Map<String, dynamic>.from(linked)};
+        } else {
+          next = {...next}..remove(service);
+        }
+      } catch (_) {
+        // Keep the cached entry when the status check is unavailable.
       }
     }
-    final result = merged.values.toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return result.take(40).toList();
+    linkedServices = next;
+    await _preferences?.setString(
+      'horse.mobile.linked-services',
+      _encode(linkedServices),
+    );
+    notifyListeners();
   }
+
 
   String? _cleanDescription(String? value) {
     final clean = value?.trim();
@@ -1022,5 +999,12 @@ class AppState extends ChangeNotifier {
         .replaceFirst(RegExp(r'/configure/?$'), '')
         .replaceFirst(RegExp(r'/+$'), '');
     return url.endsWith('manifest.json') ? url : '$url/manifest.json';
+  }
+
+  @override
+  void dispose() {
+    _pushTimer?.cancel();
+    sync.close();
+    super.dispose();
   }
 }

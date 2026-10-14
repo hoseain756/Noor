@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "app.horse.mobile"
+    namespace = "app.noor.mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "app.horse.mobile"
+        applicationId = "app.noor.mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -40,4 +40,12 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // On-device torrent streaming engine (libtorrent rasterbar via jlibtorrent).
+    // Prebuilt natives ship inside the AARs below, so no NDK is required.
+    implementation("com.frostwire:jlibtorrent:1.2.0.18")
+    implementation("com.frostwire:jlibtorrent-android-arm64:1.2.0.18")
+    implementation("com.frostwire:jlibtorrent-android-arm:1.2.0.18")
 }

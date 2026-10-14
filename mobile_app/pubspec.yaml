@@ -1,4 +1,4 @@
-name: horse_mobile
+name: noor_mobile
 description: "Horse mobile application for phones and tablets."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -40,8 +40,26 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   shared_preferences: ^2.5.6
   provider: ^6.1.5+1
-  video_player: ^2.11.1
   url_launcher: ^6.3.3
+  path_provider: ^2.1.5
+  uuid: ^4.5.1
+  screen_brightness: ^2.1.11
+  volume_controller: ^3.7.1
+
+  # libmpv playback stack (media-kit) — full codec coverage (RMVB/MKV/TS/FLV…),
+  # audio & subtitle track switching, hardware decoding on Android/iOS.
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_android_video: ^1.3.8
+  media_kit_libs_ios_video: ^1.1.4
+
+  # Direct Postgres (Supabase pooler) for accountless device sync.
+  postgres: ^3.5.6
+
+dependency_overrides:
+  # Sandbox/user builds have no NDK: pin the last pre-jnigen path_provider_android
+  # (pure Kotlin). API-identical for app usage; upstream re-jnigen at 2.3.0.
+  path_provider_android: 2.2.23
 
 dev_dependencies:
   flutter_test:

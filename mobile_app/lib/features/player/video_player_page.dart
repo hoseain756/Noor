@@ -1,16 +1,30 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:video_player/video_player.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:volume_controller/volume_controller.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
-import 'player_timeline.dart';
+import '../../core/torrent/torrent_models.dart';
+import '../../core/torrent/torrent_service.dart';
+import 'engine/playback_engine.dart';
+import 'widgets/player_chrome.dart';
+import 'widgets/player_sheets.dart';
 
+/// Cinematic player (reference design): the video is the screen — white
+/// controls, teal→blue gradient timeline, large outlined central play
+/// control, side rails (orientation / fit / lock · audio / episodes / speed)
+/// and gesture-first interaction:
+///   · tap            — show / hide chrome
+///   · double-tap     — ±10 s (edges) · play/pause (center)
+///   · horizontal drag— scrub with live seek HUD
+///   · vertical drag  — left: brightness · right: system volume
+///   · pinch          — zoom 1×–4×
+/// Engine is libmpv (media_kit) behind the [PlaybackEngine] facade.
 class VideoPlayerPage extends StatefulWidget {
   const VideoPlayerPage({
     super.key,
@@ -21,6 +35,12 @@ class VideoPlayerPage extends StatefulWidget {
     this.initialPositionMs,
     this.season,
     this.episode,
+    this.streams = const [],
+    this.streamIndex,
+    this.onSwitchStream,
+    this.headers,
+    this.filename,
+    this.torrent,
     this.nextEpisode,
     this.recordProgress = true,
   });
@@ -32,6 +52,16 @@ class VideoPlayerPage extends StatefulWidget {
   final int? initialPositionMs;
   final int? season;
   final int? episode;
+  final List<Map<String, dynamic>> streams;
+  final int? streamIndex;
+  final Future<void> Function(Map<String, dynamic> stream)? onSwitchStream;
+  /// Extra HTTP headers (addon behaviorHints.proxyHeaders) for direct streams.
+  final Map<String, String>? headers;
+  /// Human stream name hint (used for debrid resolution).
+  final String? filename;
+  /// Prepared on-device torrent stream (when source was an infoHash).
+  final PreparedTorrent? torrent;
+  /// Explicit next-episode map from the detail page (fallback: computed).
   final Map<String, dynamic>? nextEpisode;
   final bool recordProgress;
 
@@ -39,1066 +69,883 @@ class VideoPlayerPage extends StatefulWidget {
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
 
-class _VideoPlayerPageState extends State<VideoPlayerPage>
-    with WidgetsBindingObserver {
-  late VideoPlayerController _controller;
-  late final AppState _app;
+enum _GestureMode { none, seek, brightness, volume, zoom }
+
+enum _OrientationMode { auto, landscape, portrait }
+
+class _VideoPlayerPageState extends State<VideoPlayerPage> {
+  MediaKitEngine? _engine;
   Timer? _hideTimer;
   Timer? _progressTimer;
-  Timer? _feedbackTimer;
+  StreamSubscription<TorrentStatus>? _torrentSub;
+  TorrentStatus? _torrentStatus;
+  Timer? _hintTimer;
+
   bool _controlsVisible = true;
-  bool _failed = false;
+  bool _locked = false;
+  bool _sheetOpen = false;
+  BoxFit _fit = BoxFit.contain;
+  double _zoom = 1.0;
+  bool _showRemaining = false;
+
+  // Resume flow.
+  bool _resuming = false;
+  int? _resumePositionMs;
   bool _stopScrobbled = false;
-  bool _completionScrobbled = false;
-  bool _autoAdvanceStarted = false;
-  bool _closing = false;
-  bool _switchingEpisode = false;
-  bool _isFullscreen = true;
-  bool _preservePlayerOrientation = false;
-  bool _wasPlayingBeforeBackground = false;
-  bool _isSeeking = false;
-  List<Map<String, dynamic>> _subtitleTracks = [];
-  Map<String, dynamic>? _activeSubtitle;
-  List<VideoAudioTrack> _audioTracks = [];
-  double _playbackSpeed = 1;
-  double _lastVolume = 1;
-  Duration? _seekPreview;
-  Duration _videoGestureStart = Duration.zero;
-  double _videoGestureDelta = 0;
-  String? _seekFeedback;
-  String? _error;
+  bool _upNextDismissed = false;
+  int _streamIndex = 0;
+
+  // Gesture state.
+  _GestureMode _mode = _GestureMode.none;
+  double _zoomStart = 1.0;
+  double _dragStartDx = 0;
+  double _dragAccumDx = 0;
+  int _positionAtDragStartMs = 0;
+  double? _brightnessStart;
+  double _hudValue = 0;
+  int _hudDeltaSeconds = 0;
+  int _hudTargetMs = 0;
+
+  _OrientationMode _orientation = _OrientationMode.auto;
 
   @override
   void initState() {
     super.initState();
-    _app = context.read<AppState>();
-    WidgetsBinding.instance.addObserver(this);
+    _streamIndex = widget.streamIndex ?? 0;
+    _resumePositionMs = widget.initialPositionMs;
+    _resuming = (_resumePositionMs ?? 0) > 30000;
     SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _createController();
-    _initialize();
-    _scheduleHide();
     _progressTimer = Timer.periodic(
-      const Duration(seconds: 20),
-      (_) => _saveProgress(),
+      const Duration(seconds: 5),
+      (_) => unawaited(_saveProgress()),
     );
+    _createEngine();
+    _listenTorrent();
+    _applySubtitleStyle();
   }
 
-  void _createController() {
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
-    _controller.addListener(_onVideoChanged);
-  }
-
-  Future<void> _initialize() async {
-    try {
-      await _controller.initialize();
-      final settings = _app.webSettings;
-      final resumeEnabled = settings['resumePlayback'] != false;
-      final resumeAt = resumeEnabled ? widget.initialPositionMs ?? 0 : 0;
-      var shouldResume = resumeAt > 0;
-      if (shouldResume && settings['resumePrompt'] == true && mounted) {
-        shouldResume = await _askToResume(resumeAt);
-      }
-      if (shouldResume && resumeAt > 0) {
-        final end = _controller.value.duration.inMilliseconds;
-        await _controller.seekTo(
-          Duration(
-            milliseconds: resumeAt.clamp(0, end).toInt(),
-          ),
-        );
-      }
-      _controller.setCaptionOffset(
-        Duration(
-            milliseconds: (settings['subtitleOffsetMs'] as num?)?.toInt() ?? 0),
-      );
-      await _controller.play();
-      unawaited(_loadPlaybackTracks());
-      _scrobble('start');
-      if (mounted) setState(() {});
-    } catch (error) {
+  void _listenTorrent() {
+    final torrent = widget.torrent;
+    if (torrent == null) return;
+    _torrentSub = torrent.statusStream.listen((status) {
       if (!mounted) return;
-      setState(() {
-        _failed = true;
-        _error = error.toString();
-      });
+      setState(() => _torrentStatus = status);
+    });
+  }
+
+  void _applySubtitleStyle() {
+    final st = context.read<AppState>().webSettings;
+    final engineRef = _engine;
+    if (engineRef == null) return;
+    unawaited(engineRef.applySubtitleStyle(
+      fontSize: (st['subFontSize'] as num?)?.toInt(),
+      colorHex: st['subFontColor'] as String?,
+      borderColorHex: st['subBorderColor'] as String?,
+      borderSize: (st['subBorderSize'] as num?)?.toInt(),
+      backgroundOpacity: (st['subBackgroundOpacity'] as num?)?.toDouble(),
+      style: st['subStyle'] as String?,
+    ));
+    if (st['subtitlesOffByDefault'] == true) {
+      unawaited(engineRef.selectSubtitle(SubtitleTrack.no()));
     }
   }
 
-  Future<void> _loadPlaybackTracks() async {
-    await _loadAudioTracks();
-    await _loadSubtitleTracks();
-    if (_app.webSettings['subtitlesOffByDefault'] != true &&
-        _subtitleTracks.isNotEmpty) {
-      final preferred = _preferredSubtitle();
-      if (preferred != null) {
-        await _activateSubtitle(preferred, showError: false);
-      }
-    }
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      if (_wasPlayingBeforeBackground && _controller.value.isInitialized) {
-        _wasPlayingBeforeBackground = false;
-        unawaited(_controller.play());
-        _scheduleHide();
-      }
-      return;
-    }
-
-    _hideTimer?.cancel();
-    if (_controller.value.isInitialized) {
-      _wasPlayingBeforeBackground = _controller.value.isPlaying;
-      if (_wasPlayingBeforeBackground) unawaited(_controller.pause());
-      unawaited(_saveProgress());
-    }
-    if (mounted && !_controlsVisible) {
-      setState(() => _controlsVisible = true);
-    }
-  }
-
-  Future<bool> _askToResume(int milliseconds) async {
-    final english = _app.english;
-    final minutes = (milliseconds / 60000).floor();
-    final seconds = ((milliseconds ~/ 1000) % 60).toString().padLeft(2, '0');
-    final resume = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(english ? 'Resume playback?' : 'استئناف المشاهدة؟'),
-        content: Text(english
-            ? 'Continue from $minutes:$seconds?'
-            : 'متابعة المشاهدة من $minutes:$seconds؟'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(english ? 'Start over' : 'من البداية')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(english ? 'Resume' : 'استئناف')),
-        ],
+  void _createEngine() {
+    final engine = MediaKitEngine();
+    _engine = engine;
+    engine.addListener(_onEngineTick);
+    unawaited(
+      engine.open(
+        widget.url,
+        startAt: !_resuming ? Duration(milliseconds: _resumePositionMs ?? 0) : null,
+        httpHeaders: widget.headers,
       ),
     );
-    return resume == true;
+    _bumpControls();
   }
 
-  Future<void> _loadAudioTracks() async {
-    if (!_controller.isAudioTrackSupportAvailable()) return;
-    try {
-      _audioTracks = await _controller.getAudioTracks();
-      final preference =
-          (_app.webSettings['defaultAudioLanguage'] ?? 'source').toString();
-      if (preference == 'source') return;
-      final matching = _audioTracks.where((track) {
-        final haystack =
-            '${track.language ?? ''} ${track.label ?? ''}'.toLowerCase();
-        return haystack.contains(preference.toLowerCase());
-      }).firstOrNull;
-      if (matching != null) await _controller.selectAudioTrack(matching.id);
-    } catch (_) {
-      // Some media backends do not expose track selection for every stream.
-    }
-  }
-
-  Future<void> _loadSubtitleTracks() async {
-    try {
-      _subtitleTracks = await _app.catalogs.subtitles(
-        widget.item.type,
-        widget.videoId,
-        _app.addons,
-      );
-    } catch (_) {
-      _subtitleTracks = [];
-    }
-  }
-
-  Map<String, dynamic>? _preferredSubtitle() {
-    final target =
-        (_app.webSettings['subtitleTranslationLanguage'] ?? 'off').toString();
-    final languages = <String>[
-      if (target != 'off') _normalizedLanguage(target),
-      ...((_app.webSettings['preferredSubLangs'] as List? ?? const [])
-          .map((entry) => _normalizedLanguage(entry.toString()))),
-    ];
-    for (final language in languages) {
-      final track = _subtitleTracks.where((entry) {
-        final code = _normalizedLanguage(
-          (entry['lang'] ?? entry['language'] ?? '').toString(),
-        );
-        return code == language ||
-            code.startsWith('$language-') ||
-            code.startsWith('${language}_');
-      }).firstOrNull;
-      if (track != null) return track;
-    }
-    return _subtitleTracks.firstOrNull;
-  }
-
-  Future<void> _activateSubtitle(
-    Map<String, dynamic>? track, {
-    bool showError = true,
-  }) async {
-    try {
-      if (track == null) {
-        await _controller.setClosedCaptionFile(null);
-        if (mounted) setState(() => _activeSubtitle = null);
-        return;
-      }
-      final url = Uri.tryParse(track['url'].toString());
-      if (url == null || !url.hasScheme) {
-        throw const FormatException('Invalid subtitle URL');
-      }
-      final contents = await _app.api.proxyText(url.toString());
-      final extension = url.path.toLowerCase();
-      final file = extension.endsWith('.srt')
-          ? SubRipCaptionFile(contents)
-          : WebVTTCaptionFile(contents);
-      await _controller.setClosedCaptionFile(Future.value(file));
-      _controller.setCaptionOffset(
-        Duration(
-            milliseconds:
-                (_app.webSettings['subtitleOffsetMs'] as num?)?.toInt() ?? 0),
-      );
-      if (mounted) setState(() => _activeSubtitle = track);
-    } catch (error) {
-      if (showError && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(_app.english
-                  ? 'Could not load this subtitle track.'
-                  : 'تعذر تحميل مسار الترجمة.')),
-        );
-      }
-    }
-  }
-
-  Future<void> _showSubtitlePicker() async {
-    _hideTimer?.cancel();
-    final selected = await showModalBottomSheet<Map<String, dynamic>?>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(title: Text(_app.english ? 'Subtitles' : 'الترجمة')),
-            ListTile(
-              leading: Icon(_activeSubtitle == null
-                  ? Icons.check_rounded
-                  : Icons.subtitles_off_outlined),
-              title: Text(_app.english ? 'Off' : 'إيقاف'),
-              onTap: () =>
-                  Navigator.pop(context, <String, dynamic>{'__off': true}),
-            ),
-            for (final track in _subtitleTracks)
-              ListTile(
-                leading: Icon(identical(track, _activeSubtitle)
-                    ? Icons.check_rounded
-                    : Icons.subtitles_outlined),
-                title: Text((track['lang'] ?? track['language'] ?? 'Unknown')
-                    .toString()),
-                subtitle: Text(
-                    '${track['addonName'] ?? ''} ${track['label'] ?? ''}'
-                        .trim(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                onTap: () => Navigator.pop(context, track),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (selected == null) return;
-    await _activateSubtitle(selected['__off'] == true ? null : selected);
-  }
-
-  Future<void> _showAudioPicker() async {
-    if (_audioTracks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(_app.english
-                ? 'No selectable audio tracks are available.'
-                : 'لا توجد مسارات صوت يمكن اختيارها.')),
-      );
-      return;
-    }
-    _hideTimer?.cancel();
-    final selected = await showModalBottomSheet<VideoAudioTrack>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-                title:
-                    Text(_app.english ? 'Audio tracks' : 'المسارات الصوتية')),
-            for (final track in _audioTracks)
-              ListTile(
-                leading: Icon(track.isSelected
-                    ? Icons.check_rounded
-                    : Icons.audiotrack_rounded),
-                title: Text(track.label ?? track.language ?? track.id),
-                subtitle: track.language == null ? null : Text(track.language!),
-                onTap: () => Navigator.pop(context, track),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (selected != null) {
-      try {
-        await _controller.selectAudioTrack(selected.id);
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(_app.english
-                    ? 'This stream cannot switch audio tracks.'
-                    : 'لا يمكن تبديل المسار الصوتي لهذا المصدر.')),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _showSpeedPicker() async {
-    _hideTimer?.cancel();
-    final configured =
-        (_app.webSettings['customPlaybackSpeeds'] as List? ?? const [])
-            .map((entry) => (entry as num).toDouble())
-            .toList();
-    final speeds = configured.isEmpty ? [0.75, 1, 1.25, 1.5, 2] : configured;
-    final selected = await showModalBottomSheet<double>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          alignment: WrapAlignment.center,
-          children: [
-            for (final speed in speeds)
-              ChoiceChip(
-                label: Text('$speed×'),
-                selected: _playbackSpeed == speed,
-                onSelected: (_) => Navigator.pop(context, speed),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (selected != null) {
-      try {
-        await _controller.setPlaybackSpeed(selected);
-        if (mounted) setState(() => _playbackSpeed = selected);
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(_app.english
-                    ? 'Playback speed is not supported by this stream.'
-                    : 'سرعة التشغيل غير مدعومة في هذا المصدر.')),
-          );
-        }
-      }
-    }
-  }
-
-  void _onVideoChanged() {
+  void _onEngineTick() {
     if (!mounted) return;
-    final value = _controller.value;
-    if (!value.isPlaying) {
-      _hideTimer?.cancel();
-      _controlsVisible = true;
-    }
-    if (value.isCompleted && !_completionScrobbled) {
-      _completionScrobbled = true;
+    final engine = _engine;
+    if (engine == null) return;
+    if (engine.completed && !_stopScrobbled) {
       _stopScrobbled = true;
       _scrobble('stop');
-      if (_app.webSettings['autoPlayNextEpisode'] == true &&
-          widget.nextEpisode != null) {
-        unawaited(_playNextEpisode());
-      }
+      unawaited(_saveProgress());
     }
-    if (value.hasError) {
-      setState(() {
-        _failed = true;
-        _error = value.errorDescription;
-      });
-    } else {
-      setState(() {});
-    }
+    setState(() {});
   }
 
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    if (!_controller.value.isInitialized ||
-        !_controller.value.isPlaying ||
-        _isSeeking) {
-      return;
+  // ── Episodes ────────────────────────────────────────────────────────────
+
+  List<Map<String, dynamic>> get _episodes => widget.item.videos
+      .where((v) => ((v['season'] as num?)?.toInt() ?? 0) > 0)
+      .toList()
+    ..sort((a, b) {
+      final bySeason = ((a['season'] as num?) ?? 0)
+          .compareTo((b['season'] as num?) ?? 0);
+      if (bySeason != 0) return bySeason;
+      return ((a['episode'] as num?) ?? 0)
+          .compareTo((b['episode'] as num?) ?? 0);
+    });
+
+  int _currentEpisodeIndex() {
+    if (widget.item.type != 'series') return -1;
+    final episodes = _episodes;
+    for (var i = 0; i < episodes.length; i++) {
+      if (episodes[i]['id'] == widget.videoId) return i;
     }
-    _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _controller.value.isPlaying && !_isSeeking) {
+    return episodes.isEmpty ? -1 : 0;
+  }
+
+  Map<String, dynamic>? _episodeAt(int index) {
+    final episodes = _episodes;
+    if (index < 0 || index >= episodes.length) return null;
+    return episodes[index];
+  }
+
+  // ── Chrome visibility ───────────────────────────────────────────────────
+
+  void _bumpControls() {
+    if (_locked) return;
+    setState(() => _controlsVisible = true);
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 4000), () {
+      if (!mounted) return;
+      final engine = _engine;
+      final playing = engine?.playing ?? false;
+      if (playing && !_sheetOpen && _mode == _GestureMode.none) {
         setState(() => _controlsVisible = false);
       }
     });
   }
 
   void _toggleControls() {
-    if (!_controller.value.isPlaying) {
-      setState(() => _controlsVisible = true);
-      return;
-    }
-    setState(() => _controlsVisible = !_controlsVisible);
     if (_controlsVisible) {
-      _scheduleHide();
-    } else {
       _hideTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _bumpControls();
     }
   }
 
-  Future<void> _seek(Duration offset) async {
-    if (!_controller.value.isInitialized ||
-        _controller.value.duration <= Duration.zero) {
-      return;
-    }
-    final duration = _controller.value.duration;
-    final target = _controller.value.position + offset;
-    await _controller.seekTo(
-      Duration(
-        milliseconds:
-            target.inMilliseconds.clamp(0, duration.inMilliseconds).toInt(),
-      ),
-    );
-    _showSeekFeedback(offset);
-    _scheduleHide();
-  }
-
-  Future<void> _togglePlayback() async {
-    try {
-      if (_controller.value.isPlaying) {
-        await _controller.pause();
-        _scrobble('pause');
-      } else {
-        await _controller.play();
-        _scrobble('start');
-      }
-      _scheduleHide();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_app.english
-                ? 'Playback could not be changed.'
-                : 'تعذر تغيير حالة التشغيل.'),
-          ),
-        );
-      }
-    }
-  }
-
-  void _showSeekFeedback(Duration offset) {
-    _feedbackTimer?.cancel();
-    final sign = offset.isNegative ? '−' : '+';
-    _seekFeedback = '$sign${formatPlayerTime(offset.abs())}';
-    if (mounted) setState(() {});
-    _feedbackTimer = Timer(const Duration(milliseconds: 850), () {
-      if (!mounted) return;
-      setState(() => _seekFeedback = null);
-    });
-  }
-
-  void _startVideoSeek(DragStartDetails details) {
-    if (!_controller.value.isInitialized ||
-        _controller.value.duration <= Duration.zero) {
-      return;
-    }
-    _hideTimer?.cancel();
-    _videoGestureStart = _controller.value.position;
-    _videoGestureDelta = 0;
-    _isSeeking = true;
-    _seekPreview = _videoGestureStart;
-    _controlsVisible = true;
+  void _flashHint(String message) {
+    _hintTimer?.cancel();
+    _lastHint = message;
     setState(() {});
-  }
-
-  void _updateVideoSeek(DragUpdateDetails details) {
-    if (!_isSeeking) return;
-    _videoGestureDelta += details.delta.dx;
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final shiftMs = (_videoGestureDelta / screenWidth * 180000).round();
-    final durationMs = _controller.value.duration.inMilliseconds;
-    final position = Duration(
-      milliseconds: (_videoGestureStart.inMilliseconds + shiftMs)
-          .clamp(0, durationMs)
-          .toInt(),
-    );
-    setState(() {
-      _seekPreview = position;
-      final offset = position - _videoGestureStart;
-      final sign = offset.isNegative ? '−' : '+';
-      _seekFeedback = '$sign${formatPlayerTime(offset.abs())}';
+    _hintTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() {});
     });
   }
 
-  Future<void> _finishVideoSeek(DragEndDetails details) async {
-    if (!_isSeeking) return;
-    final target = _seekPreview;
-    _isSeeking = false;
-    _videoGestureDelta = 0;
-    if (target != null && target != _videoGestureStart) {
-      try {
-        await _controller.seekTo(target);
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_app.english
-                  ? 'Could not seek in this stream.'
-                  : 'تعذر تغيير موضع التشغيل في هذا المصدر.'),
-            ),
-          );
-        }
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _seekPreview = null;
-      _seekFeedback = null;
-    });
-    _scheduleHide();
-  }
+  String _lastHint = '';
 
-  Future<void> _finishTimelineSeek(double milliseconds) async {
-    try {
-      await _controller.seekTo(Duration(milliseconds: milliseconds.round()));
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_app.english
-                ? 'Could not seek in this stream.'
-                : 'تعذر تغيير موضع التشغيل في هذا المصدر.'),
-          ),
-        );
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _isSeeking = false;
-      _seekPreview = null;
-    });
-    _scheduleHide();
-  }
+  bool get _hintVisible => _hintTimer?.isActive ?? false;
 
-  Future<void> _toggleMute({bool scheduleHide = true}) async {
-    final current = _controller.value.volume;
-    final target = current > 0.001 ? 0.0 : _lastVolume.clamp(0.1, 1.0);
-    if (current > 0.001) _lastVolume = current;
-    try {
-      await _controller.setVolume(target);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_app.english
-                ? 'Volume control is unavailable for this stream.'
-                : 'التحكم بالصوت غير متاح لهذا المصدر.'),
-          ),
-        );
-      }
-    }
-    if (scheduleHide) _scheduleHide();
-  }
+  // ── Transport ───────────────────────────────────────────────────────────
 
-  Future<void> _showVolumePicker() async {
-    _hideTimer?.cancel();
-    var selectedVolume = _controller.value.volume;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: _app.english ? 'Mute' : 'كتم',
-                    onPressed: () async {
-                      await _toggleMute(scheduleHide: false);
-                      selectedVolume = _controller.value.volume;
-                      setSheetState(() {});
-                    },
-                    icon: Icon(selectedVolume <= 0.001
-                        ? Icons.volume_off_rounded
-                        : Icons.volume_up_rounded),
-                  ),
-                  Expanded(
-                    child: Slider(
-                      value: selectedVolume.clamp(0.0, 1.0),
-                      onChanged: (value) async {
-                        selectedVolume = value;
-                        if (value > 0.001) _lastVolume = value;
-                        setSheetState(() {});
-                        try {
-                          await _controller.setVolume(value);
-                        } catch (_) {
-                          selectedVolume = _controller.value.volume;
-                          setSheetState(() {});
-                        }
-                      },
-                    ),
-                  ),
-                  Text('${(selectedVolume * 100).round()}%'),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    if (mounted) _scheduleHide();
-  }
-
-  Future<void> _toggleFullscreen() async {
-    final next = !_isFullscreen;
-    setState(() => _isFullscreen = next);
-    await SystemChrome.setPreferredOrientations(
-      next
-          ? const [
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ]
-          : const <DeviceOrientation>[],
-    );
-    await SystemChrome.setEnabledSystemUIMode(
-      next ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
-    );
-    if (!mounted) return;
-    _scheduleHide();
-  }
-
-  Future<void> _showAspectPicker() async {
-    _hideTimer?.cancel();
-    final current = (_app.webSettings['videoFill'] ?? 'fit').toString();
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(_app.english ? 'Video fit' : 'ملاءمة الفيديو'),
-            ),
-            for (final option in const ['fit', 'fill', 'zoom'])
-              ListTile(
-                leading: Icon(option == current
-                    ? Icons.check_rounded
-                    : Icons.crop_rounded),
-                title: Text(_aspectLabel(option)),
-                onTap: () => Navigator.pop(context, option),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (selected != null) await _app.setSetting('videoFill', selected);
-  }
-
-  String _aspectLabel(String option) {
-    if (_app.english) {
-      return switch (option) {
-        'fill' => 'Fill',
-        'zoom' => 'Zoom',
-        _ => 'Fit',
-      };
-    }
-    return switch (option) {
-      'fill' => 'ملء الشاشة',
-      'zoom' => 'تكبير',
-      _ => 'احتواء',
-    };
-  }
-
-  Future<void> _showPlayerSettings() async {
-    _hideTimer?.cancel();
-    final action = await showModalBottomSheet<_PlayerSettingAction>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(_app.english ? 'Player settings' : 'إعدادات المشغل'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.speed_rounded),
-              title: Text(_app.english ? 'Playback speed' : 'سرعة التشغيل'),
-              trailing: Text('$_playbackSpeed×'),
-              onTap: () => Navigator.pop(context, _PlayerSettingAction.speed),
-            ),
-            ListTile(
-              leading: const Icon(Icons.crop_rounded),
-              title: Text(_app.english ? 'Video fit' : 'ملاءمة الفيديو'),
-              trailing: Text(_aspectLabel(
-                  (_app.webSettings['videoFill'] ?? 'fit').toString())),
-              onTap: () => Navigator.pop(context, _PlayerSettingAction.aspect),
-            ),
-            if (_subtitleTracks.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.subtitles_outlined),
-                title: Text(_app.english ? 'Subtitles' : 'الترجمة'),
-                onTap: () =>
-                    Navigator.pop(context, _PlayerSettingAction.subtitles),
-              ),
-            if (_audioTracks.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.audiotrack_rounded),
-                title: Text(_app.english ? 'Audio tracks' : 'المسارات الصوتية'),
-                onTap: () => Navigator.pop(context, _PlayerSettingAction.audio),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (!mounted) return;
-    switch (action) {
-      case _PlayerSettingAction.speed:
-        await _showSpeedPicker();
-      case _PlayerSettingAction.aspect:
-        await _showAspectPicker();
-      case _PlayerSettingAction.subtitles:
-        await _showSubtitlePicker();
-      case _PlayerSettingAction.audio:
-        await _showAudioPicker();
-      case null:
-        break;
+  Future<void> _togglePlay() async {
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    if (engine.playing) {
+      await engine.pause();
+      _scrobble('pause');
+      _hideTimer?.cancel();
+      if (mounted) setState(() => _controlsVisible = true);
+    } else {
+      await engine.play();
+      _scrobble('start');
+      _bumpControls();
     }
   }
 
-  Future<void> _playNextEpisode() async {
-    if (_autoAdvanceStarted) return;
-    _autoAdvanceStarted = true;
-    final next = widget.nextEpisode;
-    if (next == null) return;
-    await _startEpisode(next, automatic: true);
-  }
-
-  Map<String, dynamic>? _episodeAt(int offset) {
-    final videos = widget.item.videos;
-    final index = videos.indexWhere(
-      (video) => video['id']?.toString() == widget.videoId,
+  Future<void> _seekBy(int seconds) async {
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    await engine.seekBy(seconds);
+    _flashHint(
+      english
+          ? '${seconds > 0 ? '+' : ''}$seconds s'
+          : '${seconds > 0 ? '+' : ''}$seconds ث',
     );
-    if (index < 0) return offset > 0 ? widget.nextEpisode : null;
-    final target = index + offset;
-    if (target >= 0 && target < videos.length) return videos[target];
-    return offset > 0 ? widget.nextEpisode : null;
-  }
-
-  Future<void> _showEpisodePicker() async {
-    final episodes = widget.item.videos;
-    if (episodes.isEmpty) return;
-    _hideTimer?.cancel();
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 520, maxWidth: 620),
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: episodes.length,
-            itemBuilder: (context, index) {
-              final episode = episodes[index];
-              final active = episode['id']?.toString() == widget.videoId;
-              final season = (episode['season'] as num?)?.toInt();
-              final number = (episode['episode'] as num?)?.toInt();
-              final english = _app.english;
-              return ListTile(
-                leading: Icon(active
-                    ? Icons.graphic_eq_rounded
-                    : Icons.play_circle_outline_rounded),
-                title: Text(
-                  (episode['title'] ??
-                          (english
-                              ? 'Episode ${number ?? index + 1}'
-                              : 'الحلقة ${number ?? index + 1}'))
-                      .toString(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: season == null || number == null
-                    ? null
-                    : Text(english
-                        ? 'Season $season · Episode $number'
-                        : 'الموسم $season · الحلقة $number'),
-                trailing: active ? const Icon(Icons.check_rounded) : null,
-                onTap: active
-                    ? () => Navigator.pop(context)
-                    : () => Navigator.pop(context, episode),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-    if (mounted) _scheduleHide();
-    if (selected != null) await _startEpisode(selected);
-  }
-
-  Future<void> _startEpisode(
-    Map<String, dynamic> episode, {
-    bool automatic = false,
-  }) async {
-    if (_switchingEpisode) return;
-    _switchingEpisode = true;
-    if (mounted && !automatic) setState(() {});
-    try {
-      final id = (episode['id'] ?? '').toString();
-      if (id.isEmpty) throw const FormatException('Episode has no id');
-      final streams =
-          await _app.catalogs.streams(widget.item.type, id, _app.addons);
-      final candidates = _rankStreams(streams);
-      final nextStream = candidates
-          .where((stream) =>
-              stream['url'] is String &&
-              (stream['url'] as String).startsWith('http'))
-          .firstOrNull;
-      if (nextStream == null) throw StateError('No playable episode stream');
-      if (!mounted) return;
-      final hints =
-          (nextStream['behaviorHints'] as Map?)?.cast<String, dynamic>() ??
-              const <String, dynamic>{};
-      final signedUrl = await _app.api.signMediaUrl(
-        nextStream['url'] as String,
-        proxyHeaders: (hints['proxyHeaders'] as Map?)?.cast<String, dynamic>(),
-        filename: (hints['filename'] ?? nextStream['title']) as String?,
-      );
-      if (!mounted) return;
-      if (!_stopScrobbled) _scrobble('stop');
-      _stopScrobbled = true;
-      await _saveProgress();
-      if (!mounted) return;
-      _preservePlayerOrientation = true;
-      await Navigator.of(context).pushReplacement<void, void>(
-        MaterialPageRoute<void>(
-          builder: (_) => VideoPlayerPage(
-            item: widget.item,
-            url: signedUrl,
-            streamName: (nextStream['title'] ??
-                    nextStream['addonName'] ??
-                    widget.streamName)
-                .toString(),
-            videoId: id,
-            season: (episode['season'] as num?)?.toInt(),
-            episode: (episode['episode'] as num?)?.toInt(),
-            nextEpisode: _nextFromCatalog(id),
-            recordProgress: widget.recordProgress,
-          ),
-          fullscreenDialog: true,
-        ),
-      );
-    } catch (_) {
-      if (mounted) {
-        _switchingEpisode = false;
-        _preservePlayerOrientation = false;
-        if (automatic) _autoAdvanceStarted = false;
-        setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_app.english
-                ? 'Could not load a playable stream for this episode.'
-                : 'تعذر العثور على مصدر تشغيل لهذه الحلقة.'),
-          ),
-        );
-      }
-    }
-  }
-
-  Map<String, dynamic>? _nextFromCatalog(String currentId) {
-    final videos = widget.item.videos;
-    final index =
-        videos.indexWhere((video) => video['id']?.toString() == currentId);
-    return index >= 0 && index + 1 < videos.length ? videos[index + 1] : null;
-  }
-
-  List<Map<String, dynamic>> _rankStreams(List<Map<String, dynamic>> streams) {
-    final preferred =
-        (_app.webSettings['preferredQuality'] ?? 'auto').toString();
-    final sorted = [...streams];
-    if (preferred != 'auto' || _app.webSettings['streamSort'] == 'score') {
-      int quality(Map<String, dynamic> stream) {
-        final title = '${stream['title'] ?? ''} ${stream['name'] ?? ''}';
-        final match = RegExp(r'(2160|1080|720|480)p?', caseSensitive: false)
-            .firstMatch(title);
-        final value = int.tryParse(match?.group(1) ?? '') ?? 0;
-        final preference = int.tryParse(preferred.replaceAll('p', ''));
-        return preference == null
-            ? value
-            : (value == preference ? 10000 + value : value);
-      }
-
-      sorted.sort((a, b) => quality(b).compareTo(quality(a)));
-    }
-    return sorted;
+    _bumpControls();
   }
 
   Future<void> _saveProgress() async {
-    if (!widget.recordProgress || !_controller.value.isInitialized) return;
-    final value = _controller.value;
-    await _app.recordPlayback(
-      widget.item,
-      positionMs: value.position.inMilliseconds,
-      durationMs: value.duration.inMilliseconds,
-      videoId: widget.videoId,
-      season: widget.season,
-      episode: widget.episode,
-    );
+    if (!widget.recordProgress) return;
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    await context.read<AppState>().recordPlayback(
+          widget.item,
+          positionMs: engine.position.inMilliseconds,
+          durationMs: engine.duration.inMilliseconds,
+          videoId: widget.videoId,
+          season: widget.season,
+          episode: widget.episode,
+        );
   }
 
   void _scrobble(String action) {
-    if (!widget.recordProgress) return;
-    final imdbId = widget.item.id;
-    if (!RegExp(r'^tt\d+$').hasMatch(imdbId)) return;
-    final value = _controller.value;
-    final duration = value.duration.inMilliseconds;
+    final app = context.read<AppState>();
+    final engine = _engine;
+    final duration = engine?.duration.inMilliseconds ?? 0;
     final progress =
-        duration <= 0 ? 0.0 : value.position.inMilliseconds / duration * 100;
-    final type = widget.item.type == 'series' ? 'episode' : 'movie';
+        duration <= 0 ? 0.0 : (engine!.position.inMilliseconds / duration) * 100;
+    final type = widget.item.type == 'series' ? 'series' : 'movie';
+    final year = RegExp(r'^\d{4}')
+        .firstMatch(widget.item.releaseInfo ?? '')
+        ?.group(0);
     for (final service in const ['trakt', 'simkl']) {
-      final link = _app.linkedServices[service];
-      final linkId = link?['linkId']?.toString();
-      if (linkId == null || linkId.isEmpty) continue;
-      unawaited(
-        _app.api.scrobbleLinkedService(
-          service: service,
-          linkId: linkId,
-          action: action,
-          progress: progress,
-          imdbId: imdbId,
-          type: type,
-          season: type == 'episode' ? widget.season : null,
-          episode: type == 'episode' ? widget.episode : null,
-        ),
-      );
+      if (!app.api.isLinked(service)) continue;
+      unawaited(app.api.scrobbleLinkedService(
+        service,
+        action: action,
+        type: type,
+        title: widget.item.name,
+        year: year,
+        imdb: widget.item.id,
+        progress: progress,
+      ));
     }
   }
 
   Future<void> _close() async {
-    if (_closing) return;
-    if (_app.webSettings['playerConfirmLeave'] == true) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(_app.english ? 'Leave playback?' : 'مغادرة المشغّل؟'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text(_app.english ? 'Stay' : 'البقاء')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(_app.english ? 'Leave' : 'مغادرة')),
-          ],
-        ),
-      );
-      if (confirmed != true || !mounted) return;
-    }
-    setState(() => _closing = true);
-    if (!_stopScrobbled) _scrobble('stop');
+    _scrobble('stop');
     _stopScrobbled = true;
     await _saveProgress();
     if (mounted) Navigator.of(context).pop();
   }
 
+  Future<void> _switchStream(Map<String, dynamic> stream) async {
+    final callback = widget.onSwitchStream;
+    if (callback == null) return;
+    await _saveProgress();
+    await callback(stream);
+  }
+
+  Future<void> _resumeFromSaved() async {
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    final end = engine.duration.inMilliseconds;
+    await engine.seekTo(
+      Duration(
+        milliseconds:
+            (_resumePositionMs ?? 0).clamp(0, end - 5000).toInt(),
+      ),
+    );
+    await engine.play();
+    if (mounted) setState(() => _resuming = false);
+    _bumpControls();
+  }
+
+  // ── Chrome actions ──────────────────────────────────────────────────────
+
+  void _lock() {
+    _hideTimer?.cancel();
+    setState(() {
+      _locked = true;
+      _controlsVisible = false;
+    });
+  }
+
+  void _unlock() {
+    setState(() => _locked = false);
+    _bumpControls();
+  }
+
+  Future<void> _cycleOrientation() async {
+    switch (_orientation) {
+      case _OrientationMode.auto:
+        _orientation = _OrientationMode.landscape;
+        await SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+        _flashHint(english ? 'Landscape' : 'أفقي');
+      case _OrientationMode.landscape:
+        _orientation = _OrientationMode.portrait;
+        await SystemChrome.setPreferredOrientations(
+          const [DeviceOrientation.portraitUp],
+        );
+        _flashHint(english ? 'Portrait' : 'عمودي');
+      case _OrientationMode.portrait:
+        _orientation = _OrientationMode.auto;
+        await SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+          DeviceOrientation.portraitUp,
+        ]);
+        _flashHint(english ? 'Auto-rotate' : 'تدوير تلقائي');
+    }
+    _bumpControls();
+  }
+
+  Future<void> _cycleFit() async {
+    setState(() {
+      if (_fit == BoxFit.contain) {
+        _fit = BoxFit.cover;
+        _flashHint(english ? 'Fill' : 'ملء');
+      } else if (_fit == BoxFit.cover) {
+        _fit = BoxFit.fill;
+        _flashHint(english ? 'Stretch' : 'تمديد');
+      } else {
+        _fit = BoxFit.contain;
+        _zoom = 1;
+        _flashHint(english ? 'Fit' : 'احتواء');
+      }
+    });
+    _bumpControls();
+  }
+
+  String get _speedLabel {
+    final rate = _engine?.rate ?? 1.0;
+    return '${rate == rate.roundToDouble() ? rate.toStringAsFixed(1) : rate}X';
+  }
+
+  // ── Sheets ──────────────────────────────────────────────────────────────
+
+  Future<void> _openSheet(Future<void> Function() show) async {
+    _sheetOpen = true;
+    _hideTimer?.cancel();
+    if (mounted) setState(() => _controlsVisible = true);
+    try {
+      await show();
+    } finally {
+      if (mounted) {
+        setState(() => _sheetOpen = false);
+        _bumpControls();
+      }
+    }
+  }
+
+  Future<void> _openSettings() => _openSheet(() async {
+        final next = await showPlayerSheet<String>(
+          context,
+          builder: (_) => PlayerSettingsSheet(
+            english: english,
+            speed: _engine?.rate ?? 1.0,
+            fit: _fit,
+            audioLabel: _audioLabel,
+            subtitleLabel: _subtitleLabel,
+            hasEpisodes: widget.item.type == 'series' && _episodes.isNotEmpty,
+            onSpeed: (value) {
+              Navigator.of(context).pop('speed:${value.toString()}');
+            },
+            onFit: (fit) => Navigator.of(context).pop('fit:$fit'),
+            onOpenAudio: () => Navigator.of(context).pop('audio'),
+            onOpenSubtitles: () => Navigator.of(context).pop('subtitles'),
+            onOpenEpisodes: () => Navigator.of(context).pop('episodes'),
+          ),
+        );
+        if (!mounted || next == null) return;
+        if (next.startsWith('speed:')) {
+          final value = double.tryParse(next.substring(6));
+          if (value != null) await _engine?.setRate(value);
+        } else if (next.startsWith('fit:')) {
+          final name = next.substring(4);
+          setState(() {
+            _fit = name == 'BoxFit.cover'
+                ? BoxFit.cover
+                : name == 'BoxFit.fill'
+                    ? BoxFit.fill
+                    : BoxFit.contain;
+          });
+        } else if (next == 'audio') {
+          await _openAudioSheet();
+        } else if (next == 'subtitles') {
+          await _openSubtitlesSheet();
+        } else if (next == 'episodes') {
+          await _openEpisodesSheet();
+        }
+      });
+
+  String get _audioLabel {
+    final track = _engine?.selectedAudio;
+    if (track == null || track.id == 'auto' || track.id.isEmpty) {
+      return english ? 'Default' : 'افتراضي';
+    }
+    return (track.title?.isNotEmpty == true
+            ? track.title!
+            : track.language?.isNotEmpty == true
+                ? track.language!
+                : '${english ? 'Track' : 'مسار'} ${track.id}')
+        .split('\n')
+        .first;
+  }
+
+  String get _subtitleLabel {
+    final track = _engine?.selectedSubtitle;
+    if (track == null || track.id == 'no') {
+      return english ? 'Off' : 'إيقاف';
+    }
+    if (track.id == 'auto' || track.id.isEmpty) {
+      return english ? 'Auto' : 'تلقائي';
+    }
+    return (track.title?.isNotEmpty == true
+            ? track.title!
+            : track.language?.isNotEmpty == true
+                ? track.language!
+                : '${english ? 'Track' : 'مسار'} ${track.id}')
+        .split('\n')
+        .first;
+  }
+
+  Future<void> _openAudioSheet() => _openSheet(() async {
+        final engine = _engine;
+        if (engine == null) return;
+        await showPlayerSheet<void>(
+          context,
+          builder: (_) => AudioTracksSheet(
+            english: english,
+            tracks: engine.audioTracks,
+            selected: engine.selectedAudio,
+            onPick: (track) => unawaited(engine.selectAudio(track)),
+          ),
+        );
+      });
+
+  List<SubtitleTrack> _externalSubs = const [];
+
+  Future<void> _loadExternalSubs() async {
+    if (_externalSubs.isNotEmpty) return;
+    try {
+      final app = context.read<AppState>();
+      final subs = await app.catalogs
+          .subtitles(widget.item.type, widget.videoId, app.addons);
+      _externalSubs = subs
+          .where((sub) => sub['url'] is String)
+          .map<SubtitleTrack>(
+            (sub) => SubtitleTrack.uri(
+              sub['url'] as String,
+              title: (sub['lang'] ?? sub['label'] ?? 'Addon').toString(),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      _externalSubs = const [];
+    }
+  }
+
+  Future<void> _openSubtitlesSheet() => _openSheet(() async {
+        final engine = _engine;
+        if (engine == null) return;
+        await _loadExternalSubs();
+        if (!mounted) return;
+        await showPlayerSheet<void>(
+          context,
+          builder: (_) => SubtitleTracksSheet(
+            english: english,
+            tracks: [...engine.subtitleTracks, ..._externalSubs],
+            selected: engine.selectedSubtitle,
+            onPick: (track) {
+              if (track.uri && track.id.isNotEmpty) {
+                unawaited(engine.setSubtitleUri(track.id, title: track.title));
+              } else {
+                unawaited(engine.selectSubtitle(track));
+              }
+            },
+          ),
+        );
+      });
+
+  Future<void> _openEpisodesSheet() => _openSheet(() async {
+        if (_episodes.isEmpty) return;
+        await showPlayerSheet<void>(
+          context,
+          builder: (_) => EpisodesSheet(
+            english: english,
+            episodes: _episodes,
+            currentVideoId: widget.videoId,
+            onPick: (episode) => unawaited(_switchEpisode(episode)),
+          ),
+        );
+      });
+
+  Future<void> _openStreamsSheet() => _openSheet(() async {
+        if (widget.streams.isEmpty) return;
+        await showPlayerSheet<void>(
+          context,
+          builder: (_) => StreamsSheet(
+            english: english,
+            streams: widget.streams,
+            selectedIndex: _streamIndex,
+            onPick: (stream) => unawaited(_switchStream(stream)),
+          ),
+        );
+      });
+
+  Future<void> _switchEpisode(Map<String, dynamic> episode) async {
+    final app = context.read<AppState>();
+    final episodeId = (episode['id'] ?? widget.item.id).toString();
+    if (episodeId == widget.videoId) return;
+    try {
+      final streams =
+          await app.catalogs.streams(widget.item.type, episodeId, app.addons);
+      final playable = streams.where((stream) {
+        if (stream['url'] != null) return true;
+        if (stream['infoHash'] != null) {
+          if (app.api.debridService != null) return true;
+          return app.webSettings['p2pEnabled'] == true;
+        }
+        return false;
+      }).toList();
+      if (playable.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                english
+                    ? 'No playable source for the next episode.'
+                    : 'لا يوجد مصدر قابل للتشغيل للحلقة التالية.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      final stream = _bestStream(playable);
+      final resolved = await _resolveForPlayback(app, stream);
+      if (!mounted) return;
+      if (resolved == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              english
+                  ? 'Could not resolve the source. Try another stream.'
+                  : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
+            ),
+          ),
+        );
+        return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => VideoPlayerPage(
+            item: widget.item,
+            url: resolved.url,
+            streamName:
+                (stream['title'] ?? stream['addonName'] ?? 'Noor').toString(),
+            videoId: episodeId,
+            season: (episode['season'] as num?)?.toInt(),
+            episode: (episode['episode'] as num?)?.toInt(),
+            headers: resolved.headers.isEmpty ? null : resolved.headers,
+            torrent: resolved.torrent,
+            streams: playable,
+            streamIndex: playable.indexOf(stream),
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    }
+  }
+
+  Map<String, dynamic> _bestStream(List<Map<String, dynamic>> list) {
+    int score(Map<String, dynamic> s) {
+      final t =
+          ((s['name'] ?? s['title'] ?? '') as String).toUpperCase();
+      var v = 0;
+      if (t.contains('2160') || t.contains('4K')) v += 50;
+      if (t.contains('1080')) v += 40;
+      if (t.contains('720')) v += 25;
+      if (t.contains('480')) v += 10;
+      if (RegExp('HDR|DOLBY|DV ').hasMatch(t)) v += 5;
+      if (t.contains('H265') || t.contains('HEVC')) v += 3;
+      return v;
+    }
+
+    final sorted = [...list]..sort((a, b) => score(b).compareTo(score(a)));
+    return sorted.first;
+  }
+
+  Future<_PlaybackResolution?> _resolveForPlayback(
+    AppState app,
+    Map<String, dynamic> stream,
+  ) async {
+    final url = stream['url']?.toString();
+    final headers = <String, String>{};
+    final bh = stream['behaviorHints'];
+    if (bh is Map && bh['proxyHeaders'] is Map) {
+      (bh['proxyHeaders'] as Map).forEach(
+        (k, v) => headers[k.toString()] = v.toString(),
+      );
+    }
+    if (url != null) {
+      return _PlaybackResolution(
+        url: url,
+        headers: headers,
+        torrent: null,
+      );
+    }
+    final infoHash = stream['infoHash']?.toString();
+    if (infoHash == null) return null;
+    final filename =
+        (stream['filename'] ?? stream['name'] ?? widget.filename ?? '').toString();
+    final filesize = (stream['size'] as num?)?.toInt();
+    // Premium debrid first: instant direct link, zero buffering.
+    if (app.api.debridService != null) {
+      final direct = await app.api.resolveDebridTorrent(
+        infoHash: infoHash,
+        filename: filename,
+        filesize: filesize,
+      );
+      if (direct != null) {
+        return _PlaybackResolution(url: direct, headers: headers, torrent: null);
+      }
+    }
+    // On-device torrent engine: sequential streaming via localhost server.
+    try {
+      final torrent = await TorrentService.instance.prepare(
+        infoHash: infoHash,
+        filename: filename,
+        filesize: filesize,
+        displayName: widget.item.name,
+      );
+      return _PlaybackResolution(url: torrent.url, headers: headers, torrent: torrent);
+    } on TorrentException {
+      return null;
+    }
+  }
+
+  // ── Gestures ────────────────────────────────────────────────────────────
+
+  void _handleDoubleTap(TapDownDetails details) {
+    if (_locked) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (details.localPosition.dx < width * .34) {
+      unawaited(_seekBy(-10));
+    } else if (details.localPosition.dx > width * .66) {
+      unawaited(_seekBy(10));
+    } else {
+      unawaited(_togglePlay());
+    }
+  }
+
+  void _onScaleStart(ScaleStartDetails details) {
+    if (_locked) return;
+    _hideTimer?.cancel();
+    final engine = _engine;
+    _gestureModeStart(details.pointerCount);
+    if (details.pointerCount >= 2) {
+      _mode = _GestureMode.zoom;
+      _zoomStart = _zoom;
+      return;
+    }
+    if (engine == null || !engine.ready) return;
+    _dragStartDx = details.localFocalPoint.dx;
+    _dragAccumDx = 0;
+    _positionAtDragStartMs = engine.position.inMilliseconds;
+    _brightnessStart = null;
+    _mode = _GestureMode.none;
+  }
+
+  void _gestureModeStart(int pointerCount) {
+    // reset per-gesture HUD values
+    _hudValue = 0;
+    _hudDeltaSeconds = 0;
+    _hudTargetMs = 0;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    if (_locked || _mode == _GestureMode.none && details.pointerCount == 0) {
+      return;
+    }
+    if (_mode == _GestureMode.zoom) {
+      setState(() {
+        _zoom = (_zoomStart * details.scale).clamp(1.0, 4.0);
+        _hudValue = _zoom;
+      });
+      return;
+    }
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    final size = MediaQuery.sizeOf(context);
+
+    // Axis lock on first significant movement.
+    if (_mode == _GestureMode.none) {
+      final dx = details.focalPointDelta.dx;
+      final dy = details.focalPointDelta.dy;
+      if (dx.abs() < 8 && dy.abs() < 8) return;
+      if (dx.abs() >= dy.abs()) {
+        _mode = _GestureMode.seek;
+      } else if (_dragStartDx < size.width * .35) {
+        _mode = _GestureMode.brightness;
+      } else if (_dragStartDx > size.width * .65) {
+        _mode = _GestureMode.volume;
+      } else {
+        _mode = _GestureMode.seek; // center: default to scrub
+      }
+    }
+
+    switch (_mode) {
+      case _GestureMode.seek:
+        _dragAccumDx += details.focalPointDelta.dx;
+        final durationMs = engine.duration.inMilliseconds;
+        // Full screen width covers half the runtime — comfortable scrub rate.
+        final deltaMs = (_dragAccumDx / size.width * durationMs * .5).round();
+        setState(() {
+          _hudDeltaSeconds = (deltaMs / 1000).round();
+          _hudTargetMs =
+              (_positionAtDragStartMs + deltaMs).clamp(0, durationMs).toInt();
+        });
+      case _GestureMode.brightness:
+        unawaited(_updateBrightness(details.focalPointDelta.dy, size.height));
+      case _GestureMode.volume:
+        unawaited(_updateVolume(details.focalPointDelta.dy, size.height));
+      case _GestureMode.zoom:
+      case _GestureMode.none:
+        break;
+    }
+  }
+
+  Future<void> _updateBrightness(double dy, double height) async {
+    try {
+      _brightnessStart ??= await ScreenBrightness().application;
+      final next = (_brightnessStart! - dy / height).clamp(0.0, 1.0);
+      await ScreenBrightness().setApplicationScreenBrightness(next);
+      if (mounted) setState(() => _hudValue = next);
+    } catch (_) {
+      // Platform refused (rare); HUD stays silent rather than lying.
+      _mode = _GestureMode.none;
+    }
+  }
+
+  Future<void> _updateVolume(double dy, double height) async {
+    try {
+      final current = await VolumeController.instance.getVolume();
+      final next = (current - dy / height).clamp(0.0, 1.0);
+      VolumeController.instance.showSystemUI = false;
+      await VolumeController.instance.setVolume(next);
+      if (mounted) setState(() => _hudValue = next);
+    } catch (_) {
+      _mode = _GestureMode.none;
+    }
+  }
+
+  void _onScaleEnd(ScaleEndDetails details) {
+    if (_mode == _GestureMode.seek && _hudTargetMs > 0) {
+      unawaited(_engine?.seekTo(Duration(milliseconds: _hudTargetMs)));
+    }
+    _mode = _GestureMode.none;
+    _hudValue = 0;
+    _hudDeltaSeconds = 0;
+    _hudTargetMs = 0;
+    if (mounted) setState(() {});
+    _bumpControls();
+  }
+
+  // ── Build ───────────────────────────────────────────────────────────────
+
+  bool get _english => context.read<AppState>().english;
+  bool get english => _english;
+
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _progressTimer?.cancel();
-    _feedbackTimer?.cancel();
-    _controller.removeListener(_onVideoChanged);
+    _hintTimer?.cancel();
+    _torrentSub?.cancel();
+    final torrent = widget.torrent;
+    if (torrent != null) unawaited(torrent.stop());
+    final engine = _engine;
+    engine?.removeListener(_onEngineTick);
     unawaited(_saveProgress());
-    unawaited(_controller.dispose());
-    if (!_preservePlayerOrientation) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setPreferredOrientations(const []);
-    }
+    engine?.dispose();
+    unawaited(_restoreBrightness());
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setPreferredOrientations(const []);
     super.dispose();
+  }
+
+  Future<void> _restoreBrightness() async {
+    try {
+      await ScreenBrightness().resetApplicationScreenBrightness();
+    } catch (_) {
+      // Nothing to restore.
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
-    final value = _controller.value;
+    final engine = _engine;
+    final ready = engine != null && engine.ready;
+    final failed = engine?.failed ?? false;
+    final duration = engine?.duration.inMilliseconds ?? 0;
+    final position = engine?.position.inMilliseconds ?? 0;
+    final nearEnd =
+        duration > 0 && (duration - position) <= 30000 ||
+            (duration > 0 && position / duration >= 0.95);
+    final nextEpisode = widget.item.type == 'series'
+        ? _episodeAt(_currentEpisodeIndex() + 1)
+        : null;
+    final prevEpisode = widget.item.type == 'series'
+        ? _episodeAt(_currentEpisodeIndex() - 1)
+        : null;
+    final width = MediaQuery.sizeOf(context).width;
+    final scale = width >= 768 ? 1.15 : 1.0;
+    final railTopInset = 108.0 * scale;
+
     return PopScope(
-      canPop: _closing || _app.webSettings['playerConfirmLeave'] != true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) {
-          if (!_stopScrobbled) _scrobble('stop');
+        if (didPop && !_stopScrobbled) {
+          _scrobble('stop');
           _stopScrobbled = true;
           unawaited(_saveProgress());
-        } else {
-          unawaited(_close());
         }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact =
-                constraints.maxHeight < 440 || constraints.maxWidth < 560;
-            return Stack(
+        // The chrome follows the reference layout (LTR media convention);
+        // Arabic strings still render correctly via bidi.
+        body: Directionality(
+          textDirection: TextDirection.ltr,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (_locked) {
+                _flashHint(english ? 'Controls locked' : 'التحكم مقفل');
+              } else {
+                _toggleControls();
+              }
+            },
+            onDoubleTapDown: _handleDoubleTap,
+            onScaleStart: _onScaleStart,
+            onScaleUpdate: _onScaleUpdate,
+            onScaleEnd: _onScaleEnd,
+            child: Stack(
               fit: StackFit.expand,
               children: [
-                if (value.isInitialized && !_failed)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: _toggleControls,
-                    onDoubleTapDown: (details) {
-                      final width = MediaQuery.sizeOf(context).width;
-                      if (details.localPosition.dx < width * .34) {
-                        _seek(const Duration(seconds: -10));
-                      } else if (details.localPosition.dx > width * .66) {
-                        _seek(const Duration(seconds: 10));
-                      }
-                    },
-                    onHorizontalDragStart: _startVideoSeek,
-                    onHorizontalDragUpdate: _updateVideoSeek,
-                    onHorizontalDragEnd: _finishVideoSeek,
-                    child: _buildVideo(value.aspectRatio),
+                // Video surface (+ pinch zoom).
+                if (engine != null && engine.ready)
+                  ClipRect(
+                    child: Transform.scale(
+                      scale: _zoom,
+                      child: PlayerVideoSurface(engine: engine, fit: _fit),
+                    ),
                   )
-                else if (_failed)
-                  _PlaybackError(
-                    message: _error,
+                else if (failed)
+                  _ErrorPanel(
+                    message: engine?.errorMessage,
                     english: english,
                     onRetry: () {
-                      final previous = _controller;
-                      previous.removeListener(_onVideoChanged);
-                      unawaited(previous.dispose());
+                      final old = _engine;
+                      old?.removeListener(_onEngineTick);
+                      old?.dispose();
                       setState(() {
-                        _failed = false;
-                        _error = null;
-                        _completionScrobbled = false;
+                        _controlsVisible = true;
+                        _zoom = 1;
                       });
-                      _createController();
-                      _initialize();
+                      _createEngine();
                     },
                   )
                 else
@@ -1108,320 +955,390 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       strokeWidth: 2,
                     ),
                   ),
-                if (value.isInitialized && value.isBuffering && !_failed)
-                  const Center(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Color(0x77000000),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox.square(
-                          dimension: 26,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (!_failed && value.caption.text.isNotEmpty)
-                  _CaptionOverlay(
-                    text: value.caption.text,
-                    settings: _app.webSettings,
-                    bottom: _controlsVisible ? 112 : 38,
-                  ),
-                IgnorePointer(
-                  ignoring: !_controlsVisible || _failed || _switchingEpisode,
-                  child: AnimatedOpacity(
-                    opacity: _controlsVisible && !_failed ? 1 : 0,
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    child: _buildControls(
-                      value: value,
+
+                // Torrent streaming HUD (speed / peers / progress).
+                if (widget.torrent != null && _torrentStatus != null)
+                  Positioned(
+                    top: MediaQuery.paddingOf(context).top + 8,
+                    left: 12,
+                    child: _TorrentHud(
+                      status: _torrentStatus!,
                       english: english,
-                      compact: compact,
                     ),
                   ),
-                ),
-                if (_seekFeedback != null && !_failed)
-                  Center(
+
+                // Buffering spark.
+                if (engine != null && engine.ready && engine.buffering)
+                  const Center(
+                    child: SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: CircularProgressIndicator(
+                        color: Colors.white70,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  ),
+
+                if (ready && !failed) ...[
+                  // Chrome — fades together.
+                  AnimatedOpacity(
+                    opacity: _controlsVisible && !_locked ? 1 : 0,
+                    duration: const Duration(milliseconds: 280),
                     child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: .62),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.white24),
+                      ignoring: !_controlsVisible || _locked,
+                      child: Stack(
+                        children: [
+                          PlayerTopBar(
+                            title: widget.item.name,
+                            subtitle: _topBarSubtitle(),
+                            onClose: _close,
+                            onSettings: _openSettings,
+                            onSubtitles: engine.subtitleTracks.isEmpty
+                                ? null
+                                : _openSubtitlesSheet,
+                            onQueue: widget.item.type == 'series' &&
+                                    _episodes.isNotEmpty
+                                ? _openEpisodesSheet
+                                : null,
+                            onStreams: widget.onSwitchStream == null ||
+                                    widget.streams.isEmpty
+                                ? null
+                                : _openStreamsSheet,
+                            streamLabel: widget.streamName,
+                          ),
+                          PlayerSideRail(
+                            side: AxisSide.left,
+                            topInset: railTopInset,
+                            children: [
+                              PlayerRailButton(
+                                icon: _orientationIcon,
+                                semanticLabel: 'Orientation',
+                                onTap: () => unawaited(_cycleOrientation()),
+                              ),
+                              PlayerRailButton(
+                                icon: Icons.aspect_ratio_rounded,
+                                semanticLabel: 'Video fit',
+                                onTap: () => unawaited(_cycleFit()),
+                              ),
+                              PlayerRailButton(
+                                icon: Icons.lock_outline_rounded,
+                                semanticLabel: 'Lock controls',
+                                onTap: _lock,
+                              ),
+                              if (widget.item.type == 'series' &&
+                                  _episodes.isNotEmpty)
+                                PlayerRailButton(
+                                  icon: Icons.format_list_bulleted_rounded,
+                                  semanticLabel: 'Episodes',
+                                  onTap: _openEpisodesSheet,
+                                ),
+                              PlayerSpeedPill(
+                                label: _speedLabel,
+                                semanticLabel: 'Playback speed',
+                                onTap: _openSettings,
+                              ),
+                            ],
+                          ),
+                          PlayerBottomCluster(
+                            durationMs: duration,
+                            positionMs: position,
+                            bufferedMs: engine.bufferedEnd.inMilliseconds,
+                            previewSeconds: -1,
+                            isPlaying: engine.playing,
+                            muted: engine.muted,
+                            showRemaining: _showRemaining,
+                            canPrev: prevEpisode != null,
+                            canNext: nextEpisode != null,
+                            scale: scale,
+                            onPlayPause: () => unawaited(_togglePlay()),
+                            onSkip: (s) => unawaited(_seekBy(s)),
+                            onPrev: prevEpisode == null
+                                ? null
+                                : () => unawaited(_switchEpisode(prevEpisode)),
+                            onNext: nextEpisode == null
+                                ? null
+                                : () => unawaited(_switchEpisode(nextEpisode)),
+                            onMuteToggle: () async {
+                              await engine.toggleMute();
+                              _bumpControls();
+                            },
+                            onFitCycle: () => unawaited(_cycleFit()),
+                            onToggleRemaining: () =>
+                                setState(() => _showRemaining = !_showRemaining),
+                            onScrubStart: () {
+                              _hideTimer?.cancel();
+                              setState(() => _controlsVisible = true);
+                            },
+                            onScrubUpdate: (seconds) {},
+                            onScrubEnd: (seconds) async {
+                              await engine.seekTo(
+                                Duration(milliseconds: (seconds * 1000).round()),
+                              );
+                              _bumpControls();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Center gesture HUDs.
+                  if (_mode == _GestureMode.seek)
+                    Center(
+                      child: SeekHud(
+                        deltaSeconds: _hudDeltaSeconds,
+                        targetText: formatPlayerTime(
+                          Duration(milliseconds: _hudTargetMs),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 18, vertical: 10),
-                          child: Text(
-                            _seekFeedback!,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    )
+                  else if (_mode == _GestureMode.brightness)
+                    Center(
+                      child: VerticalHud(
+                        icon: Icons.brightness_6_rounded,
+                        label: english ? 'Brightness' : 'السطوع',
+                        value: _hudValue,
+                      ),
+                    )
+                  else if (_mode == _GestureMode.volume)
+                    Center(
+                      child: VerticalHud(
+                        icon: Icons.volume_up_rounded,
+                        label: english ? 'Volume' : 'الصوت',
+                        value: _hudValue,
+                      ),
+                    )
+                  else if (_mode == _GestureMode.zoom && _zoom > 1.01)
+                    Center(child: ZoomHud(scale: _zoom)),
+
+                  // Reset-zoom chip.
+                  if (_zoom > 1.01 &&
+                      _mode == _GestureMode.none &&
+                      _controlsVisible)
+                    Positioned(
+                      top: railTopInset + 168,
+                      right: 14,
+                      child: Material(
+                        color: Colors.black.withValues(alpha: .55),
+                        borderRadius: BorderRadius.circular(999),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(999),
+                          onTap: () => setState(() => _zoom = 1),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.center_focus_strong_rounded,
+                                    size: 14, color: Colors.white),
+                                SizedBox(width: 6),
+                                Text(
+                                  '1×',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                if (_switchingEpisode && !_autoAdvanceStarted)
-                  const Center(
-                    child: CircularProgressIndicator(color: HorseTheme.gold),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
 
-  Widget _buildControls({
-    required VideoPlayerValue value,
-    required bool english,
-    required bool compact,
-  }) {
-    final videos = widget.item.videos;
-    final hasEpisodeContext = widget.season != null || widget.episode != null;
-    final previousEpisode = hasEpisodeContext ? _episodeAt(-1) : null;
-    final nextEpisode = hasEpisodeContext ? _episodeAt(1) : null;
-    final horizontalPadding = compact ? 12.0 : 26.0;
-
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xB8000000),
-            Colors.transparent,
-            Colors.transparent,
-            Color(0xC9000000),
-          ],
-          stops: [0, .25, .64, 1],
-        ),
-      ),
-      child: SafeArea(
-        child: Align(
-          alignment: Alignment.center,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1120),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: horizontalPadding,
-                vertical: compact ? 4 : 14,
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      _playerIconButton(
-                        icon: Icons.arrow_back_rounded,
-                        label: english ? 'Back' : 'رجوع',
-                        onPressed: _close,
+                  // Lock pill — the only chrome while locked.
+                  if (_locked)
+                    Positioned(
+                      bottom: 26,
+                      left: 16,
+                      child: Material(
+                        color: Colors.black.withValues(alpha: .45),
+                        borderRadius: BorderRadius.circular(999),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(999),
+                          onTap: _unlock,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 9,
+                            ),
+                            child: Icon(
+                              Icons.lock_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
+                    ),
+
+                  // Hint pill.
+                  if (_hintVisible)
+                    Center(child: LockHintHud(message: _lastHint)),
+
+                  // Resume card.
+                  if (!_locked &&
+                      _resuming &&
+                      (_resumePositionMs ?? 0) > 30000)
+                    Positioned(
+                      bottom: 180 * scale,
+                      left: 16,
+                      child: PlayerCardShell(
+                        width: 340,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              widget.item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: compact ? 14 : 16,
+                            PlayerCardHeader(
+                              icon: Icons.history_rounded,
+                              label: english ? 'RESUME' : 'استئناف',
+                              trailing: InkWell(
+                                onTap: () =>
+                                    setState(() => _resuming = false),
+                                child: const Icon(Icons.close_rounded,
+                                    size: 17, color: Colors.white38),
                               ),
                             ),
-                            if (!compact || hasEpisodeContext)
-                              Text(
-                                _app.webSettings['showQualityInfo'] == true
-                                    ? '${_episodeLabel(english)} · ${widget.streamName}'
-                                    : _episodeLabel(english),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: .72),
-                                  fontSize: 11,
-                                ),
+                            const SizedBox(height: 7),
+                            Text(
+                              english
+                                  ? 'Resume from ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}?'
+                                  : 'استئناف من ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}؟',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
+                            ),
+                            const SizedBox(height: 11),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: PlayerPrimaryAction(
+                                    label: english ? 'Resume' : 'استئناف',
+                                    onPressed: () =>
+                                        unawaited(_resumeFromSaved()),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: PlayerSecondaryAction(
+                                    label: english ? 'Start over' : 'من البداية',
+                                    onPressed: () async {
+                                      setState(() {
+                                        _resuming = false;
+                                        _resumePositionMs = 0;
+                                      });
+                                      await _engine
+                                          ?.seekTo(Duration.zero);
+                                      await _engine?.play();
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
-                      if (hasEpisodeContext && videos.length > 1)
-                        _playerIconButton(
-                          icon: Icons.playlist_play_rounded,
-                          label: english ? 'Episodes' : 'الحلقات',
-                          onPressed: _showEpisodePicker,
-                        ),
-                      _playerIconButton(
-                        icon: _activeSubtitle == null
-                            ? Icons.subtitles_outlined
-                            : Icons.closed_caption_rounded,
-                        label: english ? 'Subtitles' : 'الترجمة',
-                        onPressed: _showSubtitlePicker,
-                      ),
-                      _playerIconButton(
-                        icon: Icons.tune_rounded,
-                        label: english ? 'Player settings' : 'إعدادات المشغل',
-                        onPressed: _showPlayerSettings,
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Directionality(
-                    textDirection: TextDirection.ltr,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (hasEpisodeContext)
-                          _playerIconButton(
-                            icon: Icons.skip_previous_rounded,
-                            label:
-                                english ? 'Previous episode' : 'الحلقة السابقة',
-                            onPressed: previousEpisode == null
-                                ? null
-                                : () => _startEpisode(previousEpisode),
-                            size: compact ? 22 : 26,
-                          ),
-                        _playerIconButton(
-                          icon: Icons.replay_10_rounded,
-                          label: english ? 'Back 10 seconds' : 'رجوع 10 ثوانٍ',
-                          onPressed: () => _seek(Duration(
-                            seconds:
-                                -((_app.webSettings['seekBackStepSec'] as num?)
-                                        ?.toInt() ??
-                                    10),
-                          )),
-                          size: compact ? 24 : 28,
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: .42),
-                            shape: BoxShape.circle,
-                            border:
-                                Border.all(color: Colors.white70, width: 1.5),
-                            boxShadow: const [
-                              BoxShadow(color: Colors.black38, blurRadius: 18),
-                            ],
-                          ),
-                          child: IconButton(
-                            tooltip: value.isPlaying
-                                ? (english ? 'Pause' : 'إيقاف مؤقت')
-                                : (english ? 'Play' : 'تشغيل'),
-                            onPressed: _togglePlayback,
-                            iconSize: compact ? 34 : 42,
-                            padding: EdgeInsets.all(compact ? 8 : 12),
-                            constraints: BoxConstraints.tightFor(
-                              width: compact ? 58 : 70,
-                              height: compact ? 58 : 70,
-                            ),
-                            color: Colors.white,
-                            icon: Icon(
-                              value.isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _playerIconButton(
-                          icon: Icons.forward_10_rounded,
-                          label:
-                              english ? 'Forward 10 seconds' : 'تقديم 10 ثوانٍ',
-                          onPressed: () => _seek(Duration(
-                            seconds: ((_app.webSettings['seekForwardStepSec']
-                                        as num?)
-                                    ?.toInt() ??
-                                10),
-                          )),
-                          size: compact ? 24 : 28,
-                        ),
-                        if (hasEpisodeContext)
-                          _playerIconButton(
-                            icon: Icons.skip_next_rounded,
-                            label: english ? 'Next episode' : 'الحلقة التالية',
-                            onPressed: nextEpisode == null
-                                ? null
-                                : () => _startEpisode(nextEpisode),
-                            size: compact ? 22 : 26,
-                          ),
-                      ],
                     ),
-                  ),
-                  const Spacer(),
-                  PlayerTimeline(
-                    position: _seekPreview ?? value.position,
-                    duration: value.duration,
-                    buffered: value.buffered,
-                    onSeekStart: (target) {
-                      _hideTimer?.cancel();
-                      setState(() {
-                        _isSeeking = true;
-                        _seekPreview = target;
-                      });
-                    },
-                    onSeekPreview: (target) =>
-                        setState(() => _seekPreview = target),
-                    onSeekEnd: (target) => _finishTimelineSeek(
-                      target.inMilliseconds.toDouble(),
+
+                  // Up-Next card.
+                  if (!_locked &&
+                      nextEpisode != null &&
+                      nearEnd &&
+                      !_upNextDismissed &&
+                      !_stopScrobbled &&
+                      duration > 0)
+                    Positioned(
+                      bottom: 180 * scale,
+                      right: 16,
+                      child: PlayerCardShell(
+                        width: 288,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            PlayerCardHeader(
+                              icon: Icons.skip_next_rounded,
+                              label: english ? 'UP NEXT' : 'التالي',
+                              trailing: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: HorseTheme.canvas,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(color: HorseTheme.line),
+                                ),
+                                child: Text(
+                                  countdown(nearEnd, duration, position),
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Text(
+                              (nextEpisode['name'] ??
+                                      nextEpisode['title'] ??
+                                      'Episode')
+                                  .toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (nextEpisode['season'] != null &&
+                                nextEpisode['episode'] != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Text(
+                                  'S${(nextEpisode['season'] as num).toInt()}:E${(nextEpisode['episode'] as num).toInt()}',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: .54),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 11),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: PlayerPrimaryAction(
+                                    label: english
+                                        ? 'Next episode'
+                                        : 'الحلقة التالية',
+                                    onPressed: () => unawaited(
+                                      _switchEpisode(nextEpisode),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                PlayerSecondaryAction(
+                                  label: english ? 'Cancel' : 'إلغاء',
+                                  onPressed: () =>
+                                      setState(() => _upNextDismissed = true),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      _playerIconButton(
-                        icon: value.volume <= .001
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        label: value.volume <= .001
-                            ? (english ? 'Unmute' : 'إلغاء كتم الصوت')
-                            : (english ? 'Mute' : 'كتم الصوت'),
-                        onPressed: _toggleMute,
-                      ),
-                      _playerIconButton(
-                        icon: Icons.graphic_eq_rounded,
-                        label: english ? 'Volume' : 'مستوى الصوت',
-                        onPressed: _showVolumePicker,
-                      ),
-                      const Spacer(),
-                      _playerTextButton(
-                        label: '$_playbackSpeed×',
-                        tooltip: english ? 'Playback speed' : 'سرعة التشغيل',
-                        onPressed: _showSpeedPicker,
-                      ),
-                      _playerIconButton(
-                        icon: Icons.fit_screen_rounded,
-                        label: english ? 'Video fit' : 'ملاءمة الفيديو',
-                        onPressed: _showAspectPicker,
-                      ),
-                      _playerIconButton(
-                        icon: _isFullscreen
-                            ? Icons.fullscreen_exit_rounded
-                            : Icons.fullscreen_rounded,
-                        label: _isFullscreen
-                            ? (english ? 'Exit fullscreen' : 'إنهاء ملء الشاشة')
-                            : (english ? 'Fullscreen' : 'ملء الشاشة'),
-                        onPressed: _toggleFullscreen,
-                      ),
-                    ],
-                  ),
                 ],
-              ),
+              ],
             ),
           ),
         ),
@@ -1429,183 +1346,49 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
-  Widget _playerIconButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback? onPressed,
-    double size = 22,
-  }) {
-    return IconButton(
-      tooltip: label,
-      onPressed: onPressed,
-      iconSize: size,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
-      style: IconButton.styleFrom(
-        foregroundColor: Colors.white,
-        disabledForegroundColor: Colors.white38,
-        backgroundColor: const Color(0x33101010),
-        shape: const CircleBorder(),
-      ),
-      icon: Icon(icon),
-    );
+  String countdown(bool nearEnd, int duration, int position) {
+    final seconds = ((duration - position) / 1000).ceil().clamp(0, 30);
+    final s = seconds.toString();
+    final unit = english ? 's' : 'ث';
+    return seconds > 0
+        ? (english ? 'in $s$unit' : 'بعد $s$unit')
+        : (english ? 'now' : 'الآن');
   }
 
-  Widget _playerTextButton({
-    required String label,
-    required String tooltip,
-    required VoidCallback onPressed,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: Colors.white,
-          minimumSize: const Size(48, 44),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVideo(double aspectRatio) {
-    final fit = (_app.webSettings['videoFill'] ?? 'fit').toString();
-    if (fit == 'fit') {
-      return Center(
-        child: AspectRatio(
-            aspectRatio: aspectRatio, child: VideoPlayer(_controller)),
-      );
+  IconData get _orientationIcon {
+    switch (_orientation) {
+      case _OrientationMode.auto:
+        return Icons.screen_rotation_rounded;
+      case _OrientationMode.landscape:
+        return Icons.screen_lock_landscape_rounded;
+      case _OrientationMode.portrait:
+        return Icons.screen_lock_portrait_rounded;
     }
-    final screen = MediaQuery.sizeOf(context);
-    final width = math.max(screen.width, screen.height * aspectRatio);
-    final height = width / aspectRatio;
-    return SizedBox.expand(
-      child: ClipRect(
-        child: Center(
-          child: Transform.scale(
-            scale: fit == 'zoom' ? 1.12 : 1,
-            child: SizedBox(
-                width: width, height: height, child: VideoPlayer(_controller)),
-          ),
-        ),
-      ),
-    );
   }
 
-  String _episodeLabel(bool english) {
+  String _topBarSubtitle() {
     if (widget.season == null || widget.episode == null) {
       return widget.streamName;
     }
     return english
-        ? 'Season ${widget.season} · Episode ${widget.episode}'
+        ? 'S${widget.season}:E${widget.episode} · ${widget.streamName}'
         : 'الموسم ${widget.season} · الحلقة ${widget.episode}';
   }
 }
 
-enum _PlayerSettingAction { speed, aspect, subtitles, audio }
+// ── Error panel ────────────────────────────────────────────────────────────
 
-class _CaptionOverlay extends StatelessWidget {
-  const _CaptionOverlay(
-      {required this.text, required this.settings, required this.bottom});
-
-  final String text;
-  final Map<String, dynamic> settings;
-  final double bottom;
-
-  @override
-  Widget build(BuildContext context) {
-    final fontColor =
-        _captionColor(settings['subFontColor']?.toString() ?? '#FFFFFF');
-    final outlineColor =
-        _captionColor(settings['subBorderColor']?.toString() ?? '#000000');
-    final borderSize = (settings['subBorderSize'] as num?)?.toDouble() ?? 0;
-    final style = settings['subStyle']?.toString() ?? 'shadow';
-    final opacity =
-        (settings['subBackgroundOpacity'] as num?)?.toDouble() ?? .35;
-    final List<Shadow> shadows = style == 'outline'
-        ? <Shadow>[
-            for (var x = -1; x <= 1; x++)
-              for (var y = -1; y <= 1; y++)
-                if (x != 0 || y != 0)
-                  Shadow(
-                      color: outlineColor,
-                      offset: Offset(x * borderSize, y * borderSize),
-                      blurRadius: 0),
-          ]
-        : style == 'shadow'
-            ? const [
-                Shadow(color: Colors.black, offset: Offset(1, 2), blurRadius: 4)
-              ]
-            : <Shadow>[];
-    return PositionedDirectional(
-      start: 22,
-      end: 22,
-      bottom: bottom,
-      child: IgnorePointer(
-        child: Center(
-          child: Container(
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.sizeOf(context).width * .88,
-            ),
-            padding: EdgeInsets.symmetric(
-                horizontal: 10, vertical: style == 'box' ? 5 : 1),
-            decoration: style == 'box'
-                ? BoxDecoration(
-                    color: Colors.black.withValues(alpha: opacity),
-                    borderRadius: BorderRadius.circular(5))
-                : null,
-            child: Text(
-              text,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: fontColor,
-                fontSize: (settings['subFontSize'] as num?)?.toDouble() ?? 28,
-                height: 1.15,
-                fontWeight: FontWeight.w600,
-                shadows: shadows,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _normalizedLanguage(String language) {
-  final normalized = language.trim().toLowerCase();
-  return switch (normalized) {
-    'arabic' || 'ara' => 'ar',
-    'english' || 'eng' => 'en',
-    'japanese' || 'jpn' => 'ja',
-    'french' || 'fra' || 'fre' => 'fr',
-    'spanish' || 'spa' => 'es',
-    _ => normalized,
-  };
-}
-
-Color _captionColor(String value) {
-  final digits = value.replaceFirst('#', '');
-  final parsed = int.tryParse(digits, radix: 16) ?? 0xFFFFFF;
-  return Color(0xFF000000 | parsed);
-}
-
-class _PlaybackError extends StatelessWidget {
-  const _PlaybackError({
+class _ErrorPanel extends StatelessWidget {
+  const _ErrorPanel({
     required this.message,
     required this.english,
     required this.onRetry,
   });
+
   final String? message;
   final bool english;
   final VoidCallback onRetry;
+
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
@@ -1616,13 +1399,11 @@ class _PlaybackError extends StatelessWidget {
               const Icon(
                 Icons.error_outline_rounded,
                 size: 46,
-                color: Color(0xFFE88178),
+                color: Color(0xFFFF8178),
               ),
               const SizedBox(height: 14),
               Text(
-                english
-                    ? 'This source could not be played'
-                    : 'تعذر تشغيل هذا المصدر',
+                english ? 'Playback error' : 'خطأ في التشغيل',
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
@@ -1636,7 +1417,7 @@ class _PlaybackError extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               const SizedBox(height: 16),
-              OutlinedButton.icon(
+              FilledButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh_rounded),
                 label: Text(english ? 'Try again' : 'إعادة المحاولة'),
@@ -1645,4 +1426,74 @@ class _PlaybackError extends StatelessWidget {
           ),
         ),
       );
+}
+
+
+class _PlaybackResolution {
+  const _PlaybackResolution({
+    required this.url,
+    required this.headers,
+    required this.torrent,
+  });
+
+  final String url;
+  final Map<String, String> headers;
+  final PreparedTorrent? torrent;
+}
+
+class _TorrentHud extends StatelessWidget {
+  const _TorrentHud({required this.status, required this.english});
+
+  final TorrentStatus status;
+  final bool english;
+
+  String _speed(num bps) {
+    if (bps >= 1024 * 1024) return '${(bps / 1024 / 1024).toStringAsFixed(1)} MB/s';
+    if (bps >= 1024) return '${(bps / 1024).toStringAsFixed(0)} kB/s';
+    return '${bps.toStringAsFixed(0)} B/s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (status.progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
+    final state = switch (status.state) {
+      'downloading' => english ? 'Streaming' : 'بث',
+      'finished' => english ? 'Completed' : 'مكتمل',
+      'seeding' => english ? 'Seeding' : 'مشاركة',
+      'paused' => english ? 'Paused' : 'متوقف',
+      'checking' => english ? 'Checking' : 'فحص',
+      _ => english ? 'Preparing' : 'تحضير',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 7,
+            height: 7,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.6,
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$state · ↓ ${_speed(status.downloadRate)}'
+            ' · P:${status.numPeers} S:${status.numSeeds} · $pct%',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

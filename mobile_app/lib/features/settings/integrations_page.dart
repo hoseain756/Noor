@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -33,15 +34,13 @@ class IntegrationsPage extends StatelessWidget {
               const SizedBox(height: 7),
               Text(
                 english
-                    ? 'Trakt and Simkl link through your Horse account. Your personal TMDB and Debrid keys stay in secure device storage.'
-                    : 'يرتبط Trakt وSimkl بحساب Horse. تُحفظ مفاتيح TMDB وDebrid الشخصية بأمان على الجهاز.',
+                    ? 'Trakt and Simkl link directly from this device — no account needed. Your personal TMDB and Debrid keys stay in secure device storage.'
+                    : 'يرتبط Trakt وSimkl مباشرة من هذا الجهاز دون حساب. تُحفظ مفاتيح TMDB وDebrid الشخصية بأمان على الجهاز.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: HorseTheme.muted,
                     ),
               ),
               const SizedBox(height: 22),
-              const _ServerEnvironmentCard(),
-              const SizedBox(height: 12),
               _LinkedServiceCard(
                 service: 'trakt',
                 title: 'Trakt',
@@ -62,391 +61,10 @@ class IntegrationsPage extends StatelessWidget {
               const SizedBox(height: 12),
               const _TmdbKeyCard(),
               const SizedBox(height: 12),
-              const _DevicePairingCard(),
-              const SizedBox(height: 12),
               const _DebridCard(),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ServerEnvironmentCard extends StatefulWidget {
-  const _ServerEnvironmentCard();
-
-  @override
-  State<_ServerEnvironmentCard> createState() => _ServerEnvironmentCardState();
-}
-
-class _ServerEnvironmentCardState extends State<_ServerEnvironmentCard> {
-  late Future<_ServerEnvironmentReport> _report;
-
-  @override
-  void initState() {
-    super.initState();
-    _report = _loadReport();
-  }
-
-  Future<Map<String, dynamic>?> _readSafely(
-    Future<Map<String, dynamic>> Function() request,
-  ) async {
-    try {
-      return await request();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<_ServerEnvironmentReport> _loadReport() async {
-    final api = context.read<AppState>().api;
-    final responses = await Future.wait([
-      _readSafely(api.serverHealth),
-      _readSafely(api.integrationStatus),
-      _readSafely(api.mediaCapabilities),
-    ]);
-    return _ServerEnvironmentReport(
-      health: responses[0],
-      integrations: responses[1],
-      capabilities: responses[2],
-    );
-  }
-
-  Future<void> _refresh() async {
-    setState(() => _report = _loadReport());
-    await _report;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-      decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const _ServiceIcon(icon: Icons.dns_outlined),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  english ? 'Horse server setup' : 'إعداد خادم Horse',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              IconButton(
-                tooltip: english ? 'Refresh status' : 'تحديث الحالة',
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh_rounded),
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsetsDirectional.only(start: 48, end: 4),
-            child: Text(
-              english
-                  ? 'Server keys stay on Horse. This page checks which server integrations are configured.'
-                  : 'تبقى مفاتيح الخادم في Horse. تعرض هذه الصفحة الخدمات المهيأة على الخادم.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.muted,
-                  ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FutureBuilder<_ServerEnvironmentReport>(
-            future: _report,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 22),
-                  child: Center(
-                    child: SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                );
-              }
-              final report = snapshot.data;
-              if (report == null || report.allUnavailable) {
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(48, 8, 8, 8),
-                  child: Text(
-                    english
-                        ? 'Could not read the server status. Check the Horse server URL and try again.'
-                        : 'تعذر قراءة حالة الخادم. تحقق من عنوان خادم Horse ثم أعد المحاولة.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFFFF8178),
-                        ),
-                  ),
-                );
-              }
-
-              final health = report.health;
-              final integrations = report.integrations;
-              final capabilities = report.capabilities;
-              final tableCount = (health?['tables'] as num?)?.toInt();
-              final rlsCount = (health?['rlsTables'] as num?)?.toInt();
-              final databaseReady = health == null
-                  ? null
-                  : health['ok'] == true &&
-                      (tableCount ?? 0) > 0 &&
-                      rlsCount == tableCount;
-              final torrentMode = capabilities?['torrent']?.toString();
-              final torrentReady = torrentMode == null
-                  ? null
-                  : torrentMode == 'external' || torrentMode == 'builtin';
-              final tmdbReady = app.api.tmdbUserKey?.isNotEmpty == true
-                  ? true
-                  : _configured(integrations, 'tmdb');
-              final items = <_ServerServiceStatus>[
-                _ServerServiceStatus(
-                  title:
-                      english ? 'Account sync database' : 'قاعدة مزامنة الحساب',
-                  ready: databaseReady,
-                  detail: _databaseDetail(
-                    english,
-                    health,
-                    tableCount: tableCount,
-                    rlsCount: rlsCount,
-                  ),
-                ),
-                _ServerServiceStatus(
-                  title: 'TMDB',
-                  ready: tmdbReady,
-                  detail: _tmdbDetail(
-                    english,
-                    tmdbReady,
-                    personalKey: app.api.tmdbUserKey?.isNotEmpty == true,
-                  ),
-                ),
-                _ServerServiceStatus(
-                  title: 'Trakt',
-                  ready: _configured(integrations, 'trakt'),
-                  detail: _providerDetail(
-                    english,
-                    _configured(integrations, 'trakt'),
-                  ),
-                ),
-                _ServerServiceStatus(
-                  title: 'Simkl',
-                  ready: _configured(integrations, 'simkl'),
-                  detail: _providerDetail(
-                    english,
-                    _configured(integrations, 'simkl'),
-                  ),
-                ),
-                _ServerServiceStatus(
-                  title: english
-                      ? 'Password recovery email'
-                      : 'بريد استعادة كلمة المرور',
-                  ready: _configured(integrations, 'email'),
-                  detail: _configured(integrations, 'email') == null
-                      ? _unavailableDetail(english)
-                      : _configured(integrations, 'email') == true
-                          ? (english
-                              ? 'The Resend key is present; sender verification and delivery depend on Resend.'
-                              : 'مفتاح Resend موجود؛ يعتمد اعتماد المرسل ووصول الرسالة على إعداد الخدمة.')
-                          : (english
-                              ? 'Set RESEND_API_KEY on the Horse server.'
-                              : 'أضف RESEND_API_KEY إلى إعداد خادم Horse.'),
-                ),
-                _ServerServiceStatus(
-                  title: 'OMDb',
-                  ready: _configured(integrations, 'omdb'),
-                  detail:
-                      _ratingDetail(english, _configured(integrations, 'omdb')),
-                ),
-                _ServerServiceStatus(
-                  title: 'MDBList',
-                  ready: _configured(integrations, 'mdblist'),
-                  detail: _ratingDetail(
-                    english,
-                    _configured(integrations, 'mdblist'),
-                  ),
-                ),
-                _ServerServiceStatus(
-                  title: english ? 'Torrent engine' : 'محرك التورنت',
-                  ready: torrentReady,
-                  detail: _torrentDetail(english, torrentMode),
-                ),
-              ];
-
-              return Column(
-                children: [
-                  for (var index = 0; index < items.length; index++) ...[
-                    _ServerServiceStatusTile(
-                      item: items[index],
-                      english: english,
-                    ),
-                    if (index < items.length - 1)
-                      Divider(height: 1, color: HorseTheme.line.withAlpha(150)),
-                  ],
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  bool? _configured(Map<String, dynamic>? response, String key) =>
-      response?[key] is bool ? response![key] as bool : null;
-
-  String _databaseDetail(
-    bool english,
-    Map<String, dynamic>? health, {
-    required int? tableCount,
-    required int? rlsCount,
-  }) {
-    if (health == null) return _unavailableDetail(english);
-    if (health['ok'] != true) {
-      return english
-          ? 'Horse could not reach the database.'
-          : 'تعذر على Horse الاتصال بقاعدة البيانات.';
-    }
-    if ((tableCount ?? 0) == 0) {
-      return english
-          ? 'The database is reachable, but its schema is empty.'
-          : 'قاعدة البيانات متاحة لكن جداول التطبيق غير موجودة.';
-    }
-    if (rlsCount != tableCount) {
-      return english
-          ? 'Some public tables are missing row-level security.'
-          : 'بعض جداول public لا تطبق سياسات أمان الصفوف.';
-    }
-    return english
-        ? 'Connected; $tableCount public tables have row-level security.'
-        : 'متصلة؛ أمان الصفوف مفعّل على جداول public وعددها $tableCount.';
-  }
-
-  String _providerDetail(bool english, bool? ready) => ready == null
-      ? _unavailableDetail(english)
-      : ready
-          ? (english
-              ? 'The provider client ID is present on the server; provider approval may still be needed.'
-              : 'معرّف التطبيق موجود على الخادم؛ قد يلزم إكمال الموافقة لدى الخدمة.')
-          : (english
-              ? 'Add this provider’s client ID to the Horse server.'
-              : 'أضف معرّف التطبيق لهذه الخدمة إلى خادم Horse.');
-
-  String _tmdbDetail(
-    bool english,
-    bool? configured, {
-    required bool personalKey,
-  }) =>
-      configured == null
-          ? _unavailableDetail(english)
-          : configured
-              ? (english
-                  ? personalKey
-                      ? 'A personal key is saved on this device or TMDB is configured on Horse.'
-                      : 'TMDB is configured on Horse; provider validity is checked when artwork loads.'
-                  : personalKey
-                      ? 'حُفظ مفتاح شخصي على هذا الجهاز أو تم إعداد TMDB على Horse.'
-                      : 'تم إعداد TMDB على Horse؛ تتحقق الصفحة من صلاحية المزود عند جلب الصور.')
-              : (english
-                  ? 'Add a TMDB key to the Horse server or save your own below.'
-                  : 'أضف مفتاح TMDB إلى خادم Horse أو احفظ مفتاحك أدناه.');
-
-  String _ratingDetail(bool english, bool? ready) => ready == null
-      ? _unavailableDetail(english)
-      : ready
-          ? (english
-              ? 'The API key is present; provider validity and quota are checked when ratings load.'
-              : 'مفتاح API موجود؛ تتحقق الصفحة من صلاحيته وحد الاستخدام عند جلب التقييمات.')
-          : (english
-              ? 'Add this API key to the Horse server.'
-              : 'أضف مفتاح API لهذه الخدمة إلى خادم Horse.');
-
-  String _torrentDetail(bool english, String? mode) => switch (mode) {
-        'external' => english
-            ? 'External engine mode is configured; playback checks whether it responds.'
-            : 'وضع المحرك الخارجي مهيأ؛ يتحقق التشغيل من استجابة المحرك.',
-        'builtin' => english
-            ? 'Built-in engine mode is selected on this server.'
-            : 'وضع محرك التورنت المدمج محدد على هذا الخادم.',
-        'none' => english
-            ? 'No torrent engine is configured; direct HTTP/HLS and Debrid remain available.'
-            : 'لا يوجد محرك تورنت مهيأ؛ يظل HTTP/HLS وDebrid متاحين.',
-        _ => _unavailableDetail(english),
-      };
-
-  String _unavailableDetail(bool english) => english
-      ? 'Status could not be read from the Horse server.'
-      : 'تعذر جلب الحالة من خادم Horse.';
-}
-
-class _ServerEnvironmentReport {
-  const _ServerEnvironmentReport({
-    required this.health,
-    required this.integrations,
-    required this.capabilities,
-  });
-
-  final Map<String, dynamic>? health;
-  final Map<String, dynamic>? integrations;
-  final Map<String, dynamic>? capabilities;
-
-  bool get allUnavailable =>
-      health == null && integrations == null && capabilities == null;
-}
-
-class _ServerServiceStatus {
-  const _ServerServiceStatus({
-    required this.title,
-    required this.ready,
-    required this.detail,
-  });
-
-  final String title;
-  final bool? ready;
-  final String detail;
-}
-
-class _ServerServiceStatusTile extends StatelessWidget {
-  const _ServerServiceStatusTile({
-    required this.item,
-    required this.english,
-  });
-
-  final _ServerServiceStatus item;
-  final bool english;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = item.ready == true
-        ? HorseTheme.gold
-        : item.ready == false
-            ? const Color(0xFFFFB66D)
-            : HorseTheme.muted;
-    final icon = item.ready == true
-        ? Icons.check_circle_rounded
-        : item.ready == false
-            ? Icons.settings_suggest_rounded
-            : Icons.help_outline_rounded;
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsetsDirectional.only(start: 48, end: 4),
-      minVerticalPadding: 7,
-      title: Text(item.title),
-      subtitle: Text(item.detail),
-      trailing: Tooltip(
-        message: item.ready == true
-            ? (english ? 'Configured' : 'مهيأ')
-            : item.ready == false
-                ? (english ? 'Needs setup' : 'يحتاج إعدادًا')
-                : (english ? 'Unknown' : 'غير معروف'),
-        child: Icon(icon, color: color),
       ),
     );
   }
@@ -513,7 +131,7 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final english = app.english;
-    final connected = app.api.tmdbUserKey?.isNotEmpty == true;
+    final connected = app.api.hasUserTmdbKey;
     return Container(
       padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
@@ -573,6 +191,15 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
               ),
             ),
           ] else ...[
+            Text(
+              english
+                  ? 'Built-in default key — works with no setup.'
+                  : 'مفتاح مضمّن افتراضيًا — يعمل بدون إعداد.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: HorseTheme.muted,
+                  ),
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: _key,
               obscureText: true,
@@ -616,347 +243,6 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
   }
 }
 
-class _DevicePairingCard extends StatefulWidget {
-  const _DevicePairingCard();
-
-  @override
-  State<_DevicePairingCard> createState() => _DevicePairingCardState();
-}
-
-class _DevicePairingCardState extends State<_DevicePairingCard> {
-  final _code = TextEditingController();
-  Timer? _pollTimer;
-  String _service = 'tmdb';
-  String? _waitingCode;
-  String? _displayCode;
-  int? _expiresAt;
-  String? _message;
-  bool _busy = false;
-  bool _error = false;
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    _code.dispose();
-    super.dispose();
-  }
-
-  String? _savedKey(AppState app) => _service == 'tmdb'
-      ? app.api.tmdbUserKey
-      : app.api.debridService == _service
-          ? app.api.debridApiKey
-          : null;
-
-  Future<void> _receive() async {
-    final app = context.read<AppState>();
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      final result = await app.api.createPairingCode(_service);
-      final code = result['code']?.toString() ?? '';
-      if (code.length != 6) {
-        throw const FormatException('تعذر إنشاء رمز الاقتران.');
-      }
-      if (!mounted) return;
-      setState(() {
-        _waitingCode = code;
-        _displayCode = result['displayCode']?.toString() ??
-            '${code.substring(0, 3)}-${code.substring(3)}';
-        _expiresAt = (result['expiresAt'] as num?)?.toInt();
-      });
-      _schedulePoll();
-    } catch (error) {
-      _setMessage(_friendlyError(error), error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  void _schedulePoll([Duration delay = const Duration(seconds: 3)]) {
-    _pollTimer?.cancel();
-    _pollTimer = Timer(delay, _poll);
-  }
-
-  Future<void> _poll() async {
-    final code = _waitingCode;
-    if (code == null) return;
-    if (_expiresAt != null &&
-        DateTime.now().millisecondsSinceEpoch >= _expiresAt!) {
-      _finishWaiting(
-        context.read<AppState>().english
-            ? 'Pairing code expired.'
-            : 'انتهت صلاحية رمز الاقتران.',
-        error: true,
-      );
-      return;
-    }
-    try {
-      final result = await context.read<AppState>().api.pairingStatus(code);
-      if (!mounted) return;
-      final status = result['status']?.toString();
-      if (status == 'waiting') {
-        _schedulePoll();
-        return;
-      }
-      if (status == 'linked' && result['apiKey'] is String) {
-        final app = context.read<AppState>();
-        final service = result['service']?.toString() ?? _service;
-        final apiKey = result['apiKey'] as String;
-        if (service == 'tmdb') {
-          await app.api.saveTmdbUserKey(apiKey);
-        } else if (const {'realdebrid', 'alldebrid', 'torbox'}
-            .contains(service)) {
-          await app.configureDebrid(service, apiKey);
-        } else {
-          throw const FormatException('نوع خدمة الاقتران غير معروف.');
-        }
-        _finishWaiting(
-          app.english
-              ? '${_serviceName(service)} connected securely.'
-              : 'تم ربط ${_serviceName(service)} بأمان.',
-        );
-        return;
-      }
-      _finishWaiting(
-        context.read<AppState>().english
-            ? 'Pairing code is no longer active.'
-            : 'رمز الاقتران لم يعد نشطًا.',
-        error: true,
-      );
-    } catch (error) {
-      if (!mounted) return;
-      if (_expiresAt == null ||
-          DateTime.now().millisecondsSinceEpoch < _expiresAt!) {
-        _schedulePoll(const Duration(seconds: 6));
-      } else {
-        _finishWaiting(_friendlyError(error), error: true);
-      }
-    }
-  }
-
-  void _finishWaiting(String message, {bool error = false}) {
-    _pollTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _waitingCode = null;
-      _displayCode = null;
-      _expiresAt = null;
-      _message = message;
-      _error = error;
-    });
-  }
-
-  Future<void> _cancelReceive() async {
-    final code = _waitingCode;
-    _pollTimer?.cancel();
-    if (code != null) {
-      try {
-        await context.read<AppState>().api.cancelPairingCode(code);
-      } catch (_) {
-        // Local waiting still ends if the cancellation request is offline.
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _waitingCode = null;
-        _displayCode = null;
-        _expiresAt = null;
-        _message = null;
-      });
-    }
-  }
-
-  Future<void> _sendSavedKey() async {
-    final app = context.read<AppState>();
-    final key = _savedKey(app);
-    final code = _code.text.trim();
-    if (key == null || key.isEmpty) {
-      _setMessage(
-        app.english
-            ? 'Save this service key on the device first.'
-            : 'احفظ مفتاح هذه الخدمة على الجهاز أولًا.',
-        error: true,
-      );
-      return;
-    }
-    if (code.replaceAll(RegExp(r'[\s-]'), '').length != 6) {
-      _setMessage(
-        app.english
-            ? 'Enter the six-character code.'
-            : 'أدخل الرمز المكوّن من ٦ أحرف.',
-        error: true,
-      );
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      await app.api.claimPairingCode(
-        code: code,
-        service: _service,
-        apiKey: key,
-      );
-      _code.clear();
-      _setMessage(
-        app.english
-            ? 'Key sent securely. The other device can finish pairing.'
-            : 'أُرسل المفتاح بأمان. أكمل الاقتران على الجهاز الآخر.',
-      );
-    } catch (error) {
-      _setMessage(_friendlyError(error), error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  void _setMessage(String message, {bool error = false}) {
-    if (!mounted) return;
-    setState(() {
-      _message = message;
-      _error = error;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const _ServiceIcon(icon: Icons.phonelink_lock_rounded),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(english ? 'Device pairing' : 'اقتران الأجهزة',
-                        style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 3),
-                    Text(
-                      english
-                          ? 'Transfer a saved provider key with a temporary code.'
-                          : 'انقل مفتاح خدمة محفوظًا برمز مؤقت.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            initialValue: _service,
-            decoration:
-                InputDecoration(labelText: english ? 'Service' : 'الخدمة'),
-            items: const [
-              DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
-              DropdownMenuItem(value: 'realdebrid', child: Text('Real-Debrid')),
-              DropdownMenuItem(value: 'alldebrid', child: Text('AllDebrid')),
-              DropdownMenuItem(value: 'torbox', child: Text('TorBox')),
-            ],
-            onChanged: _busy || _waitingCode != null
-                ? null
-                : (value) => setState(() => _service = value ?? _service),
-          ),
-          const SizedBox(height: 10),
-          if (_waitingCode != null) ...[
-            Text(english
-                ? 'Enter this code on the device sending its key. It expires in 10 minutes.'
-                : 'أدخل هذا الرمز على الجهاز الذي سيرسل المفتاح. تنتهي صلاحيته بعد ١٠ دقائق.'),
-            const SizedBox(height: 8),
-            Directionality(
-              textDirection: TextDirection.ltr,
-              child: SelectableText(
-                _displayCode ?? '',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: HorseTheme.gold,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 4,
-                    ),
-              ),
-            ),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                        ClipboardData(text: _displayCode ?? ''));
-                  },
-                  icon: const Icon(Icons.copy_rounded),
-                  label: Text(english ? 'Copy code' : 'نسخ الرمز'),
-                ),
-                TextButton(
-                  onPressed: _cancelReceive,
-                  child: Text(english ? 'Cancel' : 'إلغاء'),
-                ),
-              ],
-            ),
-          ] else ...[
-            TextField(
-              controller: _code,
-              textCapitalization: TextCapitalization.characters,
-              textDirection: TextDirection.ltr,
-              maxLength: 7,
-              decoration: InputDecoration(
-                labelText: english ? 'Other device code' : 'رمز الجهاز الآخر',
-                hintText: 'ABC-123',
-                counterText: '',
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.tonalIcon(
-                  onPressed: _busy ? null : _receive,
-                  icon: _busy
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.vpn_key_outlined),
-                  label: Text(english ? 'Receive a key' : 'استلام مفتاح'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _sendSavedKey,
-                  icon: const Icon(Icons.send_rounded),
-                  label: Text(
-                      english ? 'Send saved key' : 'إرسال المفتاح المحفوظ'),
-                ),
-              ],
-            ),
-          ],
-          if (_message != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _message!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: _error ? const Color(0xFFFF8178) : HorseTheme.gold,
-                  ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _LinkedServiceCard extends StatefulWidget {
   const _LinkedServiceCard({
     required this.service,
@@ -979,51 +265,49 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   Map<String, dynamic>? _flow;
   bool _busy = false;
   bool _syncing = false;
+  bool _needsSecret = false;
   String? _message;
   bool _error = false;
+  final _secret = TextEditingController();
+  static const _secure = FlutterSecureStorage();
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _secret.dispose();
     super.dispose();
   }
 
   Future<void> _start() async {
     final app = context.read<AppState>();
-    if (app.horseUser == null) {
-      _setMessage(
-        app.english
-            ? 'Sign in to your Horse account first.'
-            : 'سجّل الدخول إلى حساب Horse أولًا.',
-        error: true,
-      );
-      return;
-    }
     _pollTimer?.cancel();
     setState(() {
       _busy = true;
       _flow = null;
+      _needsSecret = false;
       _message = null;
     });
     try {
       final result = await app.api.startLinkedService(widget.service);
-      final pollId = result['pollId']?.toString() ?? '';
-      final code = result['userCode']?.toString() ?? '';
-      final verificationUrl = result['verificationUrl']?.toString() ?? '';
-      if (pollId.isEmpty || code.isEmpty || verificationUrl.isEmpty) {
+      final deviceCode = result?['device_code']?.toString() ?? '';
+      final code = result?['user_code']?.toString() ?? '';
+      final verificationUrl = result?['verification_url']?.toString() ?? '';
+      if (deviceCode.isEmpty || code.isEmpty || verificationUrl.isEmpty) {
         throw const FormatException('تعذر إنشاء رمز الربط.');
       }
       if (!mounted) return;
+      final interval = ((result?['interval'] as num?)?.toInt() ?? 5).clamp(3, 30);
       setState(() {
         _flow = {
-          'pollId': pollId,
-          'userCode': code,
-          'verificationUrl': verificationUrl,
-          'intervalSec': (result['intervalSec'] as num?)?.toInt() ?? 5,
-          'expiresAt': (result['expiresAt'] as num?)?.toInt() ??
-              DateTime.now()
-                  .add(const Duration(minutes: 10))
-                  .millisecondsSinceEpoch,
+          'device_code': deviceCode,
+          'user_code': code,
+          'verification_url': verificationUrl,
+          'interval': interval,
+          'expiresAt': DateTime.now()
+              .add(
+                Duration(seconds: (result?['expires_in'] as num?)?.toInt() ?? 600),
+              )
+              .millisecondsSinceEpoch,
           'status': 'waiting',
         };
       });
@@ -1031,9 +315,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         Uri.parse(verificationUrl),
         mode: LaunchMode.externalApplication,
       );
-      _schedulePoll(
-        Duration(seconds: (_flow?['intervalSec'] as int? ?? 5).clamp(3, 30)),
-      );
+      _schedulePoll(Duration(seconds: interval));
     } catch (error) {
       _setMessage(_friendlyError(error), error: true);
     } finally {
@@ -1049,19 +331,27 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   Future<void> _poll() async {
     final flow = _flow;
     if (flow == null || flow['status'] != 'waiting') return;
-    final pollId = flow['pollId']?.toString() ?? '';
     try {
       final result = await context.read<AppState>().api.pollLinkedService(
             widget.service,
-            pollId,
+            flow,
           );
       if (!mounted) return;
-      final status = result['status']?.toString();
-      if (status == 'authorized' && result['linkId'] is String) {
+      final status = result?['status']?.toString();
+      if (result?['error']?.toString() == 'secret_required') {
+        // (Trakt) The device flow needs the provider client secret before it
+        // can exchange the device code. NoorApi embeds no secret — the user
+        // pastes theirs below; the API re-reads it at the next poll, so the
+        // pending device code stays alive and the flow simply resumes.
+        _pollTimer?.cancel();
+        setState(() => _needsSecret = true);
+        return;
+      }
+      if (status == 'success') {
+        // NoorApi stores the provider token in secure storage itself; only
+        // the display state is mirrored into app state.
         await context.read<AppState>().saveLinkedService(widget.service, {
-          'linkId': result['linkId'],
-          'username': result['username'],
-          'avatar': result['avatar'],
+          'linked': true,
           'linkedAt': DateTime.now().millisecondsSinceEpoch,
         });
         if (!mounted) return;
@@ -1075,26 +365,48 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         return;
       }
       if (status == 'pending') {
-        final retryMs = (result['retryInMs'] as num?)?.toInt() ??
-            ((_flow?['intervalSec'] as int? ?? 5) * 1000);
-        _schedulePoll(Duration(milliseconds: retryMs.clamp(3000, 30000)));
+        final retryMs = ((flow['interval'] as int? ?? 5) * 1000)
+            .clamp(3000, 30000);
+        _schedulePoll(Duration(milliseconds: retryMs));
         return;
       }
       setState(() {
-        _flow = {...flow, 'status': status ?? 'failed'};
-        _message = result['error']?.toString() ??
-            (status == 'expired'
-                ? (context.read<AppState>().english
-                    ? 'The code expired.'
-                    : 'انتهت صلاحية الرمز.')
-                : (context.read<AppState>().english
-                    ? 'The link was not approved.'
-                    : 'لم تتم الموافقة على الربط.'));
+        _flow = {...flow, 'status': status ?? 'error'};
+        _message = (context.read<AppState>().english
+            ? 'The link was not approved. Generate a new code and try again.'
+            : 'لم تتم الموافقة على الربط. أنشئ رمزًا جديدًا وأعد المحاولة.');
         _error = true;
       });
     } catch (_) {
       // Keep the device flow alive through brief mobile-network interruptions.
       if (mounted) _schedulePoll(const Duration(seconds: 8));
+    }
+  }
+
+  /// Persists the Trakt OAuth client secret into secure storage under the
+  /// exact key NoorApi reads at poll time, then resumes the pending flow.
+  Future<void> _saveSecret() async {
+    final value = _secret.text.trim();
+    if (value.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      // pollLinkedService re-reads 'noor.trakt.client-secret' on every call,
+      // so saving here takes effect without an app restart.
+      await _secure.write(key: 'noor.trakt.client-secret', value: value);
+      _secret.clear();
+      if (!mounted) return;
+      setState(() {
+        _needsSecret = false;
+        _error = false;
+        _message = context.read<AppState>().english
+            ? 'Secret saved — completing the link…'
+            : 'تم حفظ السر — جارٍ إكمال الربط…';
+      });
+      _schedulePoll(const Duration(milliseconds: 800));
+    } catch (error) {
+      _setMessage(_friendlyError(error), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -1142,7 +454,10 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   void _cancelFlow() {
     _pollTimer?.cancel();
-    setState(() => _flow = null);
+    setState(() {
+      _flow = null;
+      _needsSecret = false;
+    });
   }
 
   @override
@@ -1229,7 +544,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             ),
             const SizedBox(height: 8),
             SelectableText(
-              _flow?['userCode']?.toString() ?? '',
+              _flow?['user_code']?.toString() ?? '',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     color: HorseTheme.gold,
@@ -1245,7 +560,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 FilledButton.tonalIcon(
                   onPressed: () async {
                     await Clipboard.setData(
-                      ClipboardData(text: _flow?['userCode']?.toString() ?? ''),
+                      ClipboardData(text: _flow?['user_code']?.toString() ?? ''),
                     );
                     if (mounted) {
                       _setMessage(
@@ -1258,7 +573,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
                 OutlinedButton.icon(
                   onPressed: () => launchUrl(
-                    Uri.parse(_flow?['verificationUrl'].toString() ?? ''),
+                    Uri.parse(_flow?['verification_url']?.toString() ?? ''),
                     mode: LaunchMode.externalApplication,
                   ),
                   icon: const Icon(Icons.open_in_new_rounded),
@@ -1278,11 +593,52 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     color: HorseTheme.muted,
                   ),
             ),
+            if (_needsSecret) ...[
+              const SizedBox(height: 14),
+              Text(
+                english
+                    ? "Linking ${widget.title} needs its OAuth client secret (from the provider's developer portal). Paste it below — the pending code resumes automatically."
+                    : 'ربط ${widget.title} يتطلب سر العميل (client secret) الخاص بالتطبيق من بوابة المطورين. ألصقه أدناه وسيُستأنف الرمز المعلّق تلقائيًا.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFFF8178),
+                    ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _secret,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                textDirection: TextDirection.ltr,
+                decoration: InputDecoration(
+                  labelText: english
+                      ? '${widget.title} client secret'
+                      : 'سر العميل لـ ${widget.title}',
+                  hintText: english
+                      ? 'Paste the client secret'
+                      : 'ألصق سر العميل',
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _busy ? null : _saveSecret,
+                  icon: _busy
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.key_rounded),
+                  label: Text(
+                      english ? 'Save secret and continue' : 'حفظ السر والمتابعة'),
+                ),
+              ),
+            ],
           ] else ...[
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _busy || app.horseUser == null ? null : _start,
+                onPressed: _busy ? null : _start,
                 icon: _busy
                     ? const SizedBox.square(
                         dimension: 17,
@@ -1290,13 +646,9 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                       )
                     : const Icon(Icons.link_rounded),
                 label: Text(
-                  app.horseUser == null
-                      ? (english
-                          ? 'Sign in to Horse first'
-                          : 'سجّل الدخول إلى Horse أولًا')
-                      : (english
-                          ? 'Connect ${widget.title}'
-                          : 'ربط ${widget.title}'),
+                  english
+                      ? 'Connect ${widget.title}'
+                      : 'ربط ${widget.title}',
                 ),
               ),
             ),

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import '../api/horse_api.dart';
+import '../api/noor_api.dart';
 import 'content_classifier.dart';
 import '../models/addon.dart';
 import '../models/anime_airing.dart';
@@ -10,7 +10,7 @@ import '../models/media_item.dart';
 class CatalogRepository {
   CatalogRepository(this.api);
 
-  final HorseApi api;
+  final NoorApi api;
   static const _cinemeta = 'https://v3-cinemeta.strem.io';
   static const _animeQuery = r'''
 query ($page: Int, $perPage: Int, $sort: [MediaSort], $isAdult: Boolean) {
@@ -183,7 +183,6 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         '/find/${Uri.encodeComponent(imdbId)}',
         query: const {'external_source': 'imdb_id'},
         language: language,
-        region: region,
       );
       final resultKey = kind == 'tv' ? 'tv_results' : 'movie_results';
       final matches = (lookup[resultKey] as List? ?? const [])
@@ -201,7 +200,6 @@ query ($weekStart: Int!, $weekEnd: Int!) {
           'include_image_language': imageLanguages,
         },
         language: language,
-        region: region,
       );
       final images = details['images'] is Map
           ? Map<String, dynamic>.from(details['images'] as Map)
@@ -286,7 +284,6 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         '/find/${Uri.encodeComponent(imdbId)}',
         query: const {'external_source': 'imdb_id'},
         language: language,
-        region: region,
       );
       final tmdbType = seed.type == 'series' ? 'tv' : 'movie';
       final sourceKey = tmdbType == 'tv' ? 'tv_results' : 'movie_results';
@@ -297,9 +294,8 @@ query ($weekStart: Int!, $weekEnd: Int!) {
 
       final recommendations = await api.tmdbGet(
         '/$tmdbType/${Uri.encodeComponent(tmdbId.toString())}/recommendations',
-        query: const {'page': 1},
+        query: const {'page': '1'},
         language: language,
-        region: region,
       );
       final candidates = (recommendations['results'] as List? ?? const [])
           .whereType<Map>()
@@ -361,15 +357,15 @@ query ($weekStart: Int!, $weekEnd: Int!) {
   }
 
   Future<List<MediaItem>> anime() async {
-    final response = await api.postJson('/api/anilist', {
-      'query': _animeQuery,
-      'variables': {
+    final response = await api.anilistPost(
+      query: _animeQuery,
+      variables: {
         'page': 1,
         'perPage': 40,
         'sort': ['TRENDING_DESC', 'POPULARITY_DESC'],
         'isAdult': false,
       },
-    });
+    );
     return parseAnimeResponse(response);
   }
 
@@ -377,13 +373,13 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     DateTime weekStart,
     DateTime weekEnd,
   ) async {
-    final response = await api.postJson('/api/anilist', {
-      'query': _animeAiringWeekQuery,
-      'variables': {
+    final response = await api.anilistPost(
+      query: _animeAiringWeekQuery,
+      variables: {
         'weekStart': weekStart.toUtc().millisecondsSinceEpoch ~/ 1000,
         'weekEnd': weekEnd.toUtc().millisecondsSinceEpoch ~/ 1000,
       },
-    });
+    );
     return parseAnimeAiringResponse(response);
   }
 

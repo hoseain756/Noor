@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/api/horse_api.dart';
 import '../../core/state/app_state.dart';
+import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/glass_navigation.dart';
 import 'addons_page.dart';
@@ -10,7 +10,6 @@ import 'integrations_page.dart';
 import 'stats_page.dart';
 import 'settings_preferences_page.dart';
 import 'settings_data_page.dart';
-import 'horse_account_actions.dart';
 import 'settings_display_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -120,13 +119,8 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              _SectionTitle(
-                title: english ? 'Account and sync' : 'الحساب والمزامنة',
-              ),
-              _AccountPanel(),
-              const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'Server' : 'الخادم'),
-              _ServerPanel(),
+              _SectionTitle(title: english ? 'Sync' : 'المزامنة'),
+              const _SyncPanel(),
               const SizedBox(height: 22),
               _SectionTitle(title: english ? 'App' : 'التطبيق'),
               _SettingsTile(
@@ -205,14 +199,6 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 26),
-              Text(
-                'HORSE  ·  ${HorseApi.defaultServer.replaceFirst('https://', '')}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white30,
-                      letterSpacing: .6,
-                    ),
-              ),
             ],
           ),
         ),
@@ -221,107 +207,67 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class _AccountPanel extends StatefulWidget {
-  const _AccountPanel();
+class _SyncPanel extends StatefulWidget {
+  const _SyncPanel();
+
   @override
-  State<_AccountPanel> createState() => _AccountPanelState();
+  State<_SyncPanel> createState() => _SyncPanelState();
 }
 
-class _AccountPanelState extends State<_AccountPanel> {
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  final _name = TextEditingController();
-  bool _stremio = false;
-  bool _register = false;
+class _SyncPanelState extends State<_SyncPanel> {
   bool _busy = false;
-  String _syncStrategy = 'merge';
-  String? _message;
+  DateTime? _lastSync;
 
   @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    _name.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadLastSync();
   }
 
-  Future<void> _submit() async {
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
+  Future<void> _loadLastSync() async {
+    final last = await NoorSyncService.instance
+        .lastSyncAt(NoorSyncService.bucketSettings);
+    if (mounted) setState(() => _lastSync = last);
+  }
+
+  Future<void> _syncNow() async {
     final app = context.read<AppState>();
-    try {
-      if (_stremio) {
-        await app.loginStremio(_email.text.trim(), _password.text);
-      } else if (_register) {
-        await app.registerHorse(
-          _email.text.trim(),
-          _password.text,
-          _name.text.trim(),
-        );
-      } else {
-        await app.loginHorse(
-          _email.text.trim(),
-          _password.text,
-          syncStrategy: _syncStrategy,
-        );
-      }
-      if (mounted) {
-        setState(
-          () => _message =
-              app.english ? 'Connected and synced.' : 'تم الاتصال والمزامنة.',
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(
-          () => _message = error.toString().replaceFirst('Exception: ', ''),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final english = app.english;
+    setState(() => _busy = true);
+    final ok = await app.syncNow();
+    await _loadLastSync();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? (english ? 'Sync complete.' : 'تمت المزامنة.')
+              : (english
+                  ? 'Sync failed — check your connection.'
+                  : 'تعذّرت المزامنة — تحقّق من الاتصال.'),
+        ),
+      ),
+    );
   }
 
-  Future<void> _requestPasswordReset() async {
-    final english = context.read<AppState>().english;
-    final email = _email.text.trim();
-    if (email.isEmpty) {
-      setState(() => _message = english
-          ? 'Enter your email address first.'
-          : 'أدخل بريدك الإلكتروني أولًا.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      await context.read<AppState>().api.forgotHorsePassword(
-            email,
-            language: english ? 'en' : 'ar',
-          );
-      if (mounted) {
-        setState(() => _message = english
-            ? 'If the account exists, a reset email has been sent.'
-            : 'إذا كان الحساب موجودًا، فسيصلك بريد لإعادة تعيين كلمة المرور.');
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(
-            () => _message = error.toString().replaceFirst('Exception: ', ''));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  String _formatLastSync(bool english) {
+    final last = _lastSync;
+    if (last == null) return english ? 'Never' : 'لم تتم بعد';
+    final local = last.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    final clock = '${two(local.hour)}:${two(local.minute)}';
+    return english
+        ? '${local.year}-${two(local.month)}-${two(local.day)} $clock'
+        : '${local.day}/${local.month}/${local.year} · $clock';
   }
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final english = app.english;
-    final currentUser = _stremio ? app.stremioUser : app.horseUser;
+    final id = app.deviceId ?? '';
+    final shortId = id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -332,315 +278,45 @@ class _AccountPanelState extends State<_AccountPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 8,
+          Row(
             children: [
-              ChoiceChip(
-                label: Text(english ? 'Horse account' : 'حساب Horse'),
-                selected: !_stremio,
-                onSelected: (_) => setState(() {
-                  _stremio = false;
-                  _message = null;
-                }),
-              ),
-              ChoiceChip(
-                label: const Text('Stremio'),
-                selected: _stremio,
-                onSelected: (_) => setState(() {
-                  _stremio = true;
-                  _message = null;
-                }),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (currentUser != null) ...[
-            Row(
-              children: [
-                const CircleAvatar(
-                  radius: 19,
-                  backgroundColor: Color(0xFF28231B),
-                  child: Icon(
-                    Icons.person_outline_rounded,
-                    color: HorseTheme.gold,
-                  ),
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Text(
-                    (currentUser['displayName'] ??
-                            currentUser['email'] ??
-                            currentUser['fullname'] ??
-                            'Connected')
-                        .toString(),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                TextButton(
-                  onPressed: _stremio ? app.logoutStremio : app.logoutHorse,
-                  child: Text(english ? 'Sign out' : 'خروج'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _stremio
-                  ? (english
-                      ? 'Add-ons sync with your Stremio account.'
-                      : 'تتزامن الإضافات مع حساب Stremio.')
-                  : (english
-                      ? 'Your add-ons and library sync securely with Horse.'
-                      : 'تتزامن إضافاتك ومكتبتك بأمان مع Horse.'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (!_stremio) ...[
-              const SizedBox(height: 12),
-              HorseAccountActions(app: app),
-            ],
-          ] else ...[
-            Text(
-              _stremio
-                  ? (english
-                      ? 'Link Stremio to sync its add-on collection.'
-                      : 'اربط Stremio لمزامنة قائمة إضافاته.')
-                  : (english
-                      ? 'Sign in to sync add-ons and your library across devices.'
-                      : 'سجّل الدخول لمزامنة الإضافات ومكتبتك بين الأجهزة.'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 13),
-            if (!_stremio && _register) ...[
-              TextField(
-                controller: _name,
-                textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: english ? 'Display name' : 'الاسم',
+              const Icon(Icons.sync_rounded, color: HorseTheme.gold, size: 20),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  english ? 'Noor Sync' : 'مزامنة Noor',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              const SizedBox(height: 10),
-            ],
-            TextField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.next,
-              autocorrect: false,
-              decoration: InputDecoration(
-                labelText: english ? 'Email' : 'البريد الإلكتروني',
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _password,
-              obscureText: true,
-              onSubmitted: (_) => _submit(),
-              decoration: InputDecoration(
-                labelText: english ? 'Password' : 'كلمة المرور',
-              ),
-            ),
-            if (!_stremio && !_register)
-              DropdownButton<String>(
-                value: _syncStrategy,
-                isExpanded: true,
-                items: [
-                  DropdownMenuItem(
-                    value: 'merge',
-                    child: Text(english
-                        ? 'Merge this device with account'
-                        : 'دمج هذا الجهاز مع الحساب'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'account',
-                    child: Text(english
-                        ? 'Use account data on this device'
-                        : 'استخدام بيانات الحساب على الجهاز'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'local',
-                    child: Text(english
-                        ? 'Keep device data and update account'
-                        : 'إبقاء بيانات الجهاز وتحديث الحساب'),
-                  ),
-                ],
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() => _syncStrategy = value);
-                        }
-                      },
-              ),
-            if (!_stremio)
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: TextButton(
-                  onPressed: () => setState(() => _register = !_register),
-                  child: Text(
-                    _register
-                        ? (english
-                            ? 'Already have an account? Sign in'
-                            : 'لديك حساب؟ سجّل الدخول')
-                        : (english
-                            ? 'Create a Horse account'
-                            : 'إنشاء حساب Horse'),
-                  ),
-                ),
-              ),
-            if (!_stremio && !_register)
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: TextButton(
-                  onPressed: _busy ? null : _requestPasswordReset,
-                  child:
-                      Text(english ? 'Forgot password?' : 'نسيت كلمة المرور؟'),
-                ),
-              ),
-            const SizedBox(height: 4),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _busy ? null : _submit,
+              FilledButton.tonal(
+                onPressed: _busy ? null : _syncNow,
                 child: _busy
                     ? const SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 17,
+                        height: 17,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(
-                        _stremio
-                            ? (english ? 'Link Stremio' : 'ربط Stremio')
-                            : (_register
-                                ? (english ? 'Create account' : 'إنشاء الحساب')
-                                : (english
-                                    ? 'Sign in to Horse'
-                                    : 'تسجيل الدخول إلى Horse')),
-                      ),
+                    : Text(english ? 'Sync now' : 'مزامنة الآن'),
               ),
-            ),
-            if (_message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  _message!,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: _message!.contains('تم') ||
-                                _message!.contains('Connected')
-                            ? Colors.greenAccent
-                            : HorseTheme.gold,
-                      ),
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ServerPanel extends StatefulWidget {
-  const _ServerPanel();
-  @override
-  State<_ServerPanel> createState() => _ServerPanelState();
-}
-
-class _ServerPanelState extends State<_ServerPanel> {
-  late final TextEditingController _controller;
-  bool _busy = false;
-  String? _message;
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(
-      text: context.read<AppState>().api.baseUrl,
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      await context.read<AppState>().setServer(_controller.text);
-      if (mounted) {
-        setState(
-          () => _message = context.read<AppState>().english
-              ? 'Server connected.'
-              : 'تم الاتصال بالخادم.',
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(
-          () =>
-              _message = error.toString().replaceFirst('FormatException: ', ''),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            english ? 'Horse server address' : 'عنوان خادم Horse',
-            style: Theme.of(context).textTheme.titleMedium,
+            ],
           ),
           const SizedBox(height: 6),
           Text(
             english
-                ? 'Your catalogs and account data use this server.'
-                : 'يستخدم التطبيق هذا الخادم للكتالوجات وبيانات الحساب.',
+                ? 'Accountless device sync'
+                : 'بدون حساب — مزامنة عبر معرّف الجهاز',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: 13),
-          TextField(
-            controller: _controller,
-            keyboardType: TextInputType.url,
-            textDirection: TextDirection.ltr,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              hintText: 'https://horse-silk.vercel.app',
-            ),
-          ),
           const SizedBox(height: 10),
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: FilledButton.tonal(
-              onPressed: _busy ? null : _save,
-              child: _busy
-                  ? const SizedBox(
-                      width: 17,
-                      height: 17,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(english ? 'Save and test' : 'حفظ واختبار'),
-            ),
+          Text(
+            english
+                ? 'Device $shortId · Last sync: ${_formatLastSync(english)}'
+                : 'الجهاز $shortId · آخر مزامنة: ${_formatLastSync(english)}',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: HorseTheme.muted),
           ),
-          if (_message != null)
-            Text(
-              _message!,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: HorseTheme.gold),
-            ),
         ],
       ),
     );

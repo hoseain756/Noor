@@ -693,7 +693,7 @@ class _FeaturedCardState extends State<_FeaturedCard>
     final uiLanguage = app.english ? 'en' : 'ar';
     final signature =
         '${_itemsSignature(widget.items)}:$language:$region:$uiLanguage:'
-        '${app.webSettings['tmdbEnabled']}:${app.api.tmdbUserKey ?? ''}';
+        '${app.webSettings['tmdbEnabled']}:${app.api.hasUserTmdbKey ? 'user' : 'default'}';
     if (signature == _artworkSignature) return;
     _artworkSignature = signature;
     _artwork.clear();

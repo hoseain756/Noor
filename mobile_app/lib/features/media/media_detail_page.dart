@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../core/torrent/torrent_models.dart';
+import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../library/custom_list_picker.dart';
 import 'episode_views.dart';
@@ -233,8 +235,20 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     if (app.webSettings['playableOnly'] == true) {
       streams = streams.where(_isPlayableStream).toList();
     }
-    if (app.webSettings['p2pEnabled'] == false &&
-        app.api.debridService == null) {
+    // Torrent sources stay available when a Debrid service is connected or
+    // the device itself can run the torrent engine.
+    final debridConfigured = app.api.debridService != null;
+    final p2pAllowed = app.webSettings['p2pEnabled'] != false;
+    var torrentSourcesAllowed = debridConfigured;
+    if (!torrentSourcesAllowed && p2pAllowed) {
+      try {
+        torrentSourcesAllowed = await TorrentService.instance.isSupported;
+      } catch (_) {
+        torrentSourcesAllowed = false;
+      }
+      if (!mounted) return;
+    }
+    if (!torrentSourcesAllowed) {
       streams = streams.where((stream) => stream['url'] is String).toList();
     }
     streams = _rankStreams(streams, app.webSettings);
@@ -319,26 +333,40 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     if (selected == null || !mounted) return;
     final chosenStream = selected;
     setState(() => _loadingStreams = true);
+    PreparedTorrent? prepared;
     try {
       final rawUrl = chosenStream['url'] as String?;
+      final hints =
+          (chosenStream['behaviorHints'] as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{};
+      final proxyHeaders = (hints['proxyHeaders'] as Map?)
+          ?.map((key, value) => MapEntry(key.toString(), value.toString()));
+      final filename =
+          (hints['filename'] ?? chosenStream['title'])?.toString();
       final String url;
       if (rawUrl != null && rawUrl.startsWith('http')) {
-        final hints =
-            (chosenStream['behaviorHints'] as Map?)?.cast<String, dynamic>() ??
-                const <String, dynamic>{};
-        final proxyHeaders =
-            (hints['proxyHeaders'] as Map?)?.cast<String, dynamic>();
-        final filename =
-            (hints['filename'] ?? chosenStream['title']) as String?;
-        url = await app.api.signMediaUrl(
-          rawUrl,
-          proxyHeaders: proxyHeaders,
-          filename: filename,
-        );
+        // Direct HTTP sources play as-is; the player attaches the source's
+        // proxy headers itself. No server-side signing is involved anymore.
+        url = rawUrl;
       } else {
-        url = app.api.debridService != null
-            ? await app.api.resolveDebridTorrent(chosenStream)
-            : await app.api.prepareTorrent(chosenStream);
+        final infoHash =
+            (chosenStream['infoHash'] ?? '').toString().toLowerCase();
+        final sizeCandidate = chosenStream['fileSize'] ?? hints['videoSize'];
+        final filesize = sizeCandidate is num ? sizeCandidate.toInt() : null;
+        final resolved = await _resolveTorrentStream(
+          displayName: item.name,
+          infoHash: infoHash,
+          filename: filename,
+          filesize: filesize,
+          english: english,
+        );
+        if (!mounted) return;
+        if (resolved == null) {
+          setState(() => _loadingStreams = false);
+          return;
+        }
+        url = resolved.url;
+        prepared = resolved.torrent;
       }
       if (!mounted) return;
       setState(() => _loadingStreams = false);
@@ -347,9 +375,13 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
           builder: (_) => VideoPlayerPage(
             item: item,
             url: url,
-            streamName:
-                (chosenStream['title'] ?? chosenStream['addonName'] ?? 'Horse')
-                    .toString(),
+            headers: proxyHeaders,
+            filename: filename,
+            torrent: prepared,
+            streamName: (chosenStream['title'] ??
+                    chosenStream['addonName'] ??
+                    'Noor')
+                .toString(),
             videoId: id,
             season: (episode?['season'] as num?)?.toInt(),
             episode: (episode?['episode'] as num?)?.toInt(),
@@ -369,6 +401,128 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         ).showSnackBar(SnackBar(content: Text(error.toString())));
       }
     }
+  }
+
+  /// Resolves an infoHash stream through the connected Debrid service first
+  /// and the on-device torrent engine second. A cancellable progress dialog
+  /// covers the whole preparation. Returns `null` after showing a bilingual
+  /// explanation when no resolution path exists (or the user cancels).
+  Future<({String url, PreparedTorrent? torrent})?> _resolveTorrentStream({
+    required String displayName,
+    required String infoHash,
+    required String? filename,
+    required int? filesize,
+    required bool english,
+  }) async {
+    final app = context.read<AppState>();
+    final api = app.api;
+    final debridConfigured = api.debridService != null;
+    var engineSupported = false;
+    if (!debridConfigured) {
+      try {
+        engineSupported = await TorrentService.instance.isSupported;
+      } catch (_) {
+        engineSupported = false;
+      }
+      if (!engineSupported) {
+        // Neither path exists on this device — explain the requirement.
+        _showNoTorrentPathMessage(english);
+        return null;
+      }
+    }
+    if (!mounted) return null;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    var cancelled = false;
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: HorseTheme.surface,
+        content: Row(
+          children: [
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.4),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                english ? 'Preparing the stream…' : 'جارٍ تجهيز المصدر…',
+                style: Theme.of(dialogContext).textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              cancelled = true;
+              Navigator.of(dialogContext).pop();
+            },
+            child: Text(english ? 'Cancel' : 'إلغاء'),
+          ),
+        ],
+      ),
+    ));
+    try {
+      if (debridConfigured) {
+        final url = await api.resolveDebridTorrent(
+          infoHash: infoHash,
+          filename: filename,
+          filesize: filesize,
+        );
+        if (cancelled) return null;
+        if (url != null && url.isNotEmpty) {
+          return (url: url, torrent: null);
+        }
+        // The debrid service could not resolve this torrent (not cached,
+        // quota, network…). Degrade to the on-device engine when possible.
+        try {
+          engineSupported = await TorrentService.instance.isSupported;
+        } catch (_) {
+          engineSupported = false;
+        }
+        if (cancelled) return null;
+        if (!engineSupported) {
+          _showNoTorrentPathMessage(english, debridFailed: true);
+          return null;
+        }
+      }
+      final prepared = await TorrentService.instance.prepare(
+        infoHash: infoHash,
+        filename: filename,
+        filesize: filesize,
+        displayName: displayName,
+      );
+      if (cancelled) {
+        // The user backed out while the engine was preparing the stream.
+        unawaited(prepared.stop());
+        unawaited(TorrentService.instance.remove(prepared.infoHash));
+        return null;
+      }
+      return (url: prepared.url, torrent: prepared);
+    } finally {
+      if (!cancelled) navigator.pop();
+    }
+  }
+
+  /// Bilingual SnackBar explaining that torrent playback needs either a
+  /// connected Debrid service or a device with the built-in torrent engine.
+  void _showNoTorrentPathMessage(bool english, {bool debridFailed = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          debridFailed
+              ? (english
+                  ? 'The Debrid service could not resolve this torrent and this device has no built-in torrent engine.'
+                  : 'تعذّرت خدمة Debrid حل هذا التورنت، وهذا الجهاز لا يدعم محرك التورنت المدمج.')
+              : (english
+                  ? 'Torrent streaming needs a Debrid service (Real-Debrid / AllDebrid / TorBox) or a device with the built-in torrent engine.'
+                  : 'البث عبر التورنت يحتاج خدمة Debrid (Real-Debrid / AllDebrid / TorBox) أو جهازًا يدعم محرك التورنت المدمج.'),
+        ),
+      ),
+    );
   }
 
   bool _isPlayableStream(Map<String, dynamic> stream) {
@@ -667,20 +821,25 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
     }
   }
 
-  Future<Map<String, dynamic>> _loadRatings() {
+  Future<Map<String, dynamic>> _loadRatings() async {
     final item = widget.item;
-    final query = <String, dynamic>{
-      'type': item.type == 'series' ? 'series' : 'movie',
-      'title': item.name,
-      if (item.releaseInfo?.isNotEmpty == true)
-        'year': item.releaseInfo!
-            .substring(0, item.releaseInfo!.length.clamp(0, 4)),
-      if (RegExp(r'^tt\d+$').hasMatch(item.id)) 'imdb': item.id,
-      if (item.genres.any((genre) => genre.toLowerCase() == 'animation') &&
-          (item.originCountry ?? '').toLowerCase().contains('japan'))
-        'anime': '1',
-    };
-    return context.read<AppState>().api.getJson('/api/ratings', query: query);
+    final year = item.releaseInfo?.isNotEmpty == true
+        ? item.releaseInfo!
+            .substring(0, item.releaseInfo!.length.clamp(0, 4))
+        : null;
+    final imdb = RegExp(r'^tt\d+$').hasMatch(item.id) ? item.id : null;
+    final anime = item.genres.any((genre) => genre.toLowerCase() == 'animation') &&
+        (item.originCountry ?? '').toLowerCase().contains('japan');
+    final data = await context.read<AppState>().api.ratingsGet(
+          type: item.type == 'series' ? 'series' : 'movie',
+          title: item.name,
+          year: year,
+          imdb: imdb,
+          anime: anime,
+        );
+    return data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
   }
 
   @override
@@ -711,10 +870,7 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
             ),
           );
         }
-        final ratings = (snapshot.data?['ratings'] as List? ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
+        final ratings = _ratingRows(snapshot.data ?? const <String, dynamic>{});
         if (ratings.isEmpty) return const SizedBox.shrink();
         final preferred =
             (app.webSettings['ratingsProviders'] as List? ?? const [])
@@ -911,4 +1067,57 @@ String _compactVotes(int value) {
   if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(1)}M';
   if (value >= 1000) return '${(value / 1000).round()}K';
   return '$value';
+}
+
+/// Converts the consolidated ratings payload into chip rows. The payload maps
+/// provider keys to `{rating, votes}` objects; providers can be missing or
+/// null when their rating is unavailable for the title.
+List<Map<String, dynamic>> _ratingRows(Map<String, dynamic> data) {
+  const providers = <String, String>{
+    'imdb': 'imdb',
+    'rottenTomatoes': 'rotten',
+    'metacritic': 'metacritic',
+    'tmdb': 'tmdb',
+    'trakt': 'trakt',
+    'mdblist': 'mdblist',
+  };
+  const percentProviders = {'rottenTomatoes', 'mdblist'};
+  const scales = <String, String>{
+    'imdb': '/10',
+    'rottenTomatoes': '%',
+    'metacritic': '/100',
+    'tmdb': '/10',
+    'trakt': '/10',
+    'mdblist': '%',
+  };
+  final rows = <Map<String, dynamic>>[];
+  for (final entry in providers.entries) {
+    final value = data[entry.key];
+    if (value is! Map) continue;
+    final row = Map<String, dynamic>.from(value);
+    final rating = _parseRating(row['rating']);
+    if (rating == null) continue;
+    final votes = row['votes'] is num ? (row['votes'] as num).toInt() : 0;
+    final percent = percentProviders.contains(entry.key);
+    rows.add(<String, dynamic>{
+      'provider': entry.value,
+      'display': percent
+          ? '${rating.round()}%'
+          : rating % 1 == 0
+              ? rating.toInt().toString()
+              : rating.toStringAsFixed(1),
+      'originalScale': scales[entry.key],
+      if (votes > 0) 'votes': votes,
+    });
+  }
+  return rows;
+}
+
+double? _parseRating(Object? value) {
+  if (value is num) return value.toDouble();
+  if (value is String) {
+    final cleaned = value.trim().replaceAll('%', '');
+    return double.tryParse(cleaned);
+  }
+  return null;
 }
