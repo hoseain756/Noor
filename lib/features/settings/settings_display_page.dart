@@ -268,9 +268,6 @@ class _ToggleRow extends StatelessWidget {
   Widget build(BuildContext context) => SwitchListTile.adaptive(
         contentPadding: const EdgeInsetsDirectional.only(start: 3, end: 0),
         title: Text(title),
-        subtitle: Text(value
-            ? (context.read<AppState>().english ? 'On' : 'مفعّل')
-            : (context.read<AppState>().english ? 'Off' : 'متوقف')),
         value: value,
         activeThumbColor: HorseTheme.gold,
         onChanged: onChanged,
@@ -295,14 +292,8 @@ class _SelectRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title),
-            const SizedBox(height: 3),
-            Text(
-              options[value] ?? value,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: HorseTheme.muted),
-            ),
+            // The dropdown itself shows the selected value — no repeated
+            // muted copy of it above (user request: no duplicates).
             DropdownButton<String>(
               value: options.containsKey(value) ? value : options.keys.first,
               isExpanded: true,

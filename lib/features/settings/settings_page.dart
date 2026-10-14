@@ -138,7 +138,6 @@ class SettingsPage extends StatelessWidget {
               _SettingsTile(
                 icon: Icons.language_rounded,
                 title: english ? 'Language' : 'اللغة',
-                subtitle: english ? 'English' : 'العربية',
                 trailing: Switch(
                   value: english,
                   onChanged: app.setLanguage,
@@ -342,13 +341,13 @@ class _SettingsTile extends StatelessWidget {
   const _SettingsTile({
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.trailing,
     this.onTap,
   });
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
   @override
@@ -374,11 +373,13 @@ class _SettingsTile extends StatelessWidget {
               child: Icon(icon, color: HorseTheme.gold, size: 21),
             ),
             title: Text(title, style: Theme.of(context).textTheme.titleMedium),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child:
-                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-            ),
+            subtitle: subtitle == null
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(subtitle!,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ),
             trailing: trailing ??
                 Icon(
                   Icons.chevron_left_rounded,

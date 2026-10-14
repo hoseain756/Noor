@@ -150,6 +150,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       backgroundOpacity: (st['subBackgroundOpacity'] as num?)?.toDouble(),
       style: st['subStyle'] as String?,
     ));
+    unawaited(engineRef.setSubtitleDelayMs(
+        (st['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
     if (st['subtitlesOffByDefault'] == true) {
       unawaited(engineRef.selectSubtitle(SubtitleTrack.no()));
     }
@@ -536,7 +538,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         if (engine == null) return;
         await _loadExternalSubs();
         if (!mounted) return;
-        await showPlayerSheet<void>(
+        final result = await showPlayerSheet<String>(
           context,
           builder: (_) => SubtitleTracksSheet(
             english: english,
@@ -549,9 +551,42 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 unawaited(engine.selectSubtitle(track));
               }
             },
+            onOpenSettings: () =>
+                Navigator.of(context).pop('style-settings'),
+          ),
+        );
+        if (!mounted) return;
+        if (result == 'style-settings') {
+          await _openSubtitleStyleSheet();
+        }
+      });
+
+  /// Live-editing subtitle style/timing sheet (user request): every change is
+  /// pushed to the engine immediately and persisted through AppState.
+  Future<void> _openSubtitleStyleSheet() => _openSheet(() async {
+        await showPlayerSheet<void>(
+          context,
+          builder: (_) => SubtitleStyleSheet(
+            english: english,
+            onApply: _applySubtitleValues,
           ),
         );
       });
+
+  void _applySubtitleValues(Map<String, Object?> values) {
+    final engineRef = _engine;
+    if (engineRef == null) return;
+    unawaited(engineRef.applySubtitleStyle(
+      fontSize: (values['subFontSize'] as num?)?.toInt(),
+      colorHex: values['subFontColor'] as String?,
+      borderColorHex: values['subBorderColor'] as String?,
+      borderSize: (values['subBorderSize'] as num?)?.toInt(),
+      backgroundOpacity: (values['subBackgroundOpacity'] as num?)?.toDouble(),
+      style: values['subStyle'] as String?,
+    ));
+    unawaited(engineRef.setSubtitleDelayMs(
+        (values['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
+  }
 
   Future<void> _openEpisodesSheet() => _openSheet(() async {
         if (_episodes.isEmpty) return;

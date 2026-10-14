@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/color_picker_dialog.dart';
 
 enum _Control { toggle, select, multiple, slider, color }
 
@@ -334,12 +335,8 @@ class _PreferenceTile extends StatelessWidget {
       _Control.slider => _valueButton(context, value, english),
       _Control.color => _colorValue(value?.toString() ?? '#FFFFFF'),
     };
-    final subtitle = switch (item.control) {
-      _Control.toggle => value == true
-          ? (english ? 'On' : 'مفعّل')
-          : (english ? 'Off' : 'متوقف'),
-      _ => _formatValue(item, value, english),
-    };
+    // No repeated white value under the title — the colored trailing value
+    // is the single source of truth (user request: no duplicates in settings).
     return Container(
       decoration: BoxDecoration(
         color: HorseTheme.surface,
@@ -349,7 +346,6 @@ class _PreferenceTile extends StatelessWidget {
       child: ListTile(
         minVerticalPadding: 10,
         title: Text(title),
-        subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
         trailing: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 150), child: trailing),
         onTap: item.control == _Control.toggle
@@ -370,8 +366,15 @@ class _PreferenceTile extends StatelessWidget {
 
   Widget _colorValue(String value) {
     final color = _parseColor(value);
-    return CircleAvatar(
-        radius: 14, backgroundColor: color, child: const SizedBox.shrink());
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: HorseTheme.line, width: 1.5),
+      ),
+    );
   }
 
   Future<void> _edit(
@@ -495,29 +498,15 @@ class _PreferenceTile extends StatelessWidget {
       return;
     }
     if (item.control == _Control.color) {
-      const colors = ['#FFFFFF', '#F5C778', '#8ED5FF', '#FF8E8E', '#000000'];
-      final color = await showModalBottomSheet<String>(
-        context: context,
-        backgroundColor: HorseTheme.surface,
-        builder: (context) => SafeArea(
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 18,
-            runSpacing: 12,
-            children: [
-              for (final value in colors)
-                IconButton(
-                  tooltip: value,
-                  onPressed: () => Navigator.pop(context, value),
-                  icon: CircleAvatar(
-                      backgroundColor: _parseColor(value), radius: 18),
-                ),
-            ],
-          ),
-        ),
+      // Full picker: wheel + hex code + presets (user request).
+      final picked = await showNoorColorPicker(
+        context,
+        initialHex: current?.toString() ?? '#FFFFFF',
+        title: english ? item.english : item.arabic,
+        english: english,
       );
-      if (color != null) {
-        await app.setSetting(item.key, color);
+      if (picked != null) {
+        await app.setSetting(item.key, picked);
       }
     }
   }

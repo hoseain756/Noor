@@ -59,8 +59,12 @@ abstract class PlaybackEngine extends ChangeNotifier {
     String? borderColorHex,
     int? borderSize,
     double? backgroundOpacity, // 0..1
-    String? style,             // shadow|opaque|outline
+    String? style,             // shadow|outline|box
   });
+
+  /// Live subtitle timing offset: negative = advance (earlier),
+  /// positive = delay (later). Maps to mpv `sub-delay` seconds.
+  Future<void> setSubtitleDelayMs(int delayMs);
 }
 
 /// libmpv-backed implementation (media_kit).
@@ -276,14 +280,26 @@ class MediaKitEngine extends PlaybackEngine {
     if (colorHex != null) await prop('sub-color', colorHex);
     if (borderColorHex != null) await prop('sub-border-color', borderColorHex);
     if (borderSize != null) await prop('sub-border-size', '$borderSize');
-    if (style == 'opaque') await prop('sub-border-style', 'opaque');
-    if (style == 'outline' || style == 'shadow') {
+    if (style == 'box' || style == 'opaque' || style == 'background') {
+      await prop('sub-border-style', 'opaque');
+    } else if (style == 'outline' || style == 'shadow') {
       await prop('sub-border-style', 'outline-and-shadow');
     }
     if (backgroundOpacity != null) {
       final a = (backgroundOpacity.clamp(0.0, 1.0) * 255).round();
       await prop('sub-back-color', '#${a.toRadixString(16).padLeft(2, '0')}000000');
     }
+  }
+
+  @override
+  Future<void> setSubtitleDelayMs(int delayMs) async {
+    if (_disposed) return;
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    try {
+      await platform.setProperty(
+          'sub-delay', (delayMs / 1000).toStringAsFixed(3));
+    } catch (_) {/* best-effort */}
   }
 
   // ── Stream handlers ─────────────────────────────────────────────────────
