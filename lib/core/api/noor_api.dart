@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,15 +10,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// Every provider is contacted DIRECTLY from the device — there is no proxy
 /// server in the middle anymore. The operator keys ship embedded as static
-/// defaults below; users can override the TMDB credential and the Trakt
-/// client secret from Settings. Plain (non-secret) state lives in
-/// [SharedPreferences], secrets live in [FlutterSecureStorage].
+/// defaults below; users can override the TMDB credential from Settings.
+/// Plain (non-secret) state lives in [SharedPreferences], secrets live in
+/// [FlutterSecureStorage].
+///
+/// Trakt linking uses RFC 7636 PKCE over the browser (the user's Trakt app is
+/// PKCE-only — Trakt issues NO client secret for it, and its device grant
+/// rejects secret-less exchanges, verified live): we open trakt.tv/oauth/
+/// authorize with an S256 code challenge and the browser bounces back to
+/// `noor://callback` where [completeTraktLink] swaps code+verifier for tokens.
 ///
 /// Storage map:
 ///  - secure 'noor.tmdb.user-token'      → TMDB credential override (v4 JWT
 ///    starting with 'eyJ' → Bearer header, otherwise treated as a v3 api_key)
-///  - secure 'noor.trakt.client-secret'  → user-provided Trakt OAuth secret
-///    (NONE is embedded; written by Settings, picked up live at poll time)
+///  - secure 'noor.trakt.pkce.verifier'  → in-flight PKCE code verifier
+///  - secure 'noor.trakt.pkce.state'     → in-flight PKCE state (CSRF guard)
+///  - secure 'noor.trakt.refresh'        → Trakt refresh token
 ///  - secure `noor.<service>.token`     → linked-service access tokens
 ///  - prefs  'noor.debrid.service'       → active debrid service name
 ///  - secure `noor.debrid.<service>`     → debrid API key
@@ -45,10 +54,12 @@ class NoorApi {
   static const String defaultSimklClientSecret =
       'simkl_cs_bFZ4x7Sgrkc2hhslQDD38LVnkM7D1bI0Ym';
 
-  // NOTE: TRAKT_CLIENT_SECRET is intentionally absent — Trakt device linking
-  // requires a user/operator-provided secret stored in secure storage under
-  // [_traktSecretKey]. Without it [pollLinkedService] answers
-  // `{'error': 'secret_required'}`.
+  /// RFC 8252 custom-scheme redirect. The user registers `noor://callback` as
+  /// a Redirect URI on their Trakt app (one-time, trakt.tv/oauth/applications).
+  static const String traktRedirectUri = 'noor://callback';
+
+  static const String traktAuthorizeUrl = 'https://trakt.tv/oauth/authorize';
+  static const String traktTokenUrl = 'https://api.trakt.tv/oauth/token';
 
   // --------------------------------------------------------------------------
   // Endpoints & timings
@@ -71,7 +82,9 @@ class NoorApi {
 
   static const String _tmdbUserTokenKey = 'noor.tmdb.user-token';
   static const String _legacyTmdbUserTokenKey = 'horse.mobile.tmdb.user-key';
-  static const String _traktSecretKey = 'noor.trakt.client-secret';
+  static const String _traktPkceVerifierKey = 'noor.trakt.pkce.verifier';
+  static const String _traktPkceStateKey = 'noor.trakt.pkce.state';
+  static const String _traktRefreshKey = 'noor.trakt.refresh';
   static const String _debridServiceKey = 'noor.debrid.service';
   static const String _debridSecretPrefix = 'noor.debrid.';
   static const String _iptvPlaylistsKey = 'noor.iptv.playlists';
@@ -89,9 +102,6 @@ class NoorApi {
 
   /// TMDB credential override: v4 JWT ('eyJ…') or 32-hex v3 key.
   String? _tmdbUserToken;
-
-  /// User-provided Trakt OAuth client secret (none is embedded).
-  String? _traktClientSecret;
 
   final Map<String, String> _serviceTokens = <String, String>{};
 
@@ -116,8 +126,6 @@ class NoorApi {
     if (_tmdbUserToken == null || _tmdbUserToken!.isEmpty) {
       _tmdbUserToken = await _secure.read(key: _legacyTmdbUserTokenKey);
     }
-
-    _traktClientSecret = await _secure.read(key: _traktSecretKey);
 
     for (final service in const <String>['trakt', 'simkl']) {
       final token = await _secure.read(key: _serviceTokenKey(service));
@@ -1068,27 +1076,13 @@ class NoorApi {
 
   bool isLinked(String service) => _serviceTokens[service]?.isNotEmpty ?? false;
 
-  /// Starts the device-link flow: Trakt → POST /oauth/device/code, Simkl →
-  /// POST /oauth/device. Returns the provider payload (device_code, user_code,
+  /// Starts the Simkl device-link flow (POST /oauth2/device). Trakt linking
+  /// lives in [startTraktLink] instead — browser PKCE, no client secret
+  /// anywhere. Returns the provider payload (device_code, user_code,
   /// verification_url, expires_in, interval) or null on failure.
   Future<Map<String, dynamic>?> startLinkedService(String service) async {
     try {
       switch (service) {
-        case 'trakt':
-          {
-            final response = await _client.post<dynamic>(
-              '$traktBaseUrl/oauth/device/code',
-              data: <String, String>{'client_id': defaultTraktClientId},
-              options: Options(
-                headers: <String, String>{
-                  'Content-Type': 'application/json',
-                  'trakt-api-version': '2',
-                  'trakt-api-key': defaultTraktClientId,
-                },
-              ),
-            );
-            return _asMap(response.data);
-          }
         case 'simkl':
           {
             // Simkl registers this client as an OAuth 2.0 app: the legacy
@@ -1117,51 +1111,16 @@ class NoorApi {
     }
   }
 
-  /// Polls the device-link token endpoint once. Success stores the access
-  /// token in secure storage and returns `{'status': 'success'}`; pending
-  /// answers return `{'status': 'pending'}`; failures return
-  /// `{'status': 'error'}`. Trakt without a configured client secret returns
-  /// `{'error': 'secret_required'}`.
+  /// Polls the Simkl device-link token endpoint once. Success stores the
+  /// access token in secure storage and returns `{'status': 'success'}`;
+  /// pending answers return `{'status': 'pending'}`; failures return
+  /// `{'status': 'error'}`.
   Future<Map<String, dynamic>?> pollLinkedService(
     String service,
     Map<String, dynamic> start,
   ) async {
     try {
       switch (service) {
-        case 'trakt':
-          {
-            var secret = _traktClientSecret;
-            if (secret == null || secret.isEmpty) {
-              // Settings may write this key directly — re-read so no app
-              // restart is needed.
-              secret = await _secure.read(key: _traktSecretKey);
-              _traktClientSecret = secret;
-            }
-            if (secret == null || secret.isEmpty) {
-              return <String, dynamic>{'error': 'secret_required'};
-            }
-            final response = await _client.post<dynamic>(
-              '$traktBaseUrl/oauth/device/token',
-              data: <String, String>{
-                'code': start['device_code']?.toString() ?? '',
-                'client_id': defaultTraktClientId,
-                'client_secret': secret,
-              },
-              options: Options(
-                headers: <String, String>{
-                  'Content-Type': 'application/json',
-                  'trakt-api-version': '2',
-                  'trakt-api-key': defaultTraktClientId,
-                },
-              ),
-            );
-            final token = _asMap(response.data)?['access_token']?.toString();
-            if (token == null || token.isEmpty) {
-              return <String, dynamic>{'status': 'error'};
-            }
-            await _storeServiceToken('trakt', token);
-            return <String, dynamic>{'status': 'success'};
-          }
         case 'simkl':
           {
             // OAuth 2.0 apps poll /oauth2/token with the RFC 8628 device
@@ -1198,27 +1157,9 @@ class NoorApi {
           (error.response?.data is String
               ? (error.response!.data as String)
               : '');
-      if (service == 'trakt') {
-        // 400 comes back BOTH for authorization_pending (JSON body) and for
-        // a bad client secret (usually an EMPTY body) — only treat the
-        // pending variants as pending, otherwise the UI would poll forever
-        // on a wrong secret. 429 = slow_down.
-        if (status == 429) {
-          return <String, dynamic>{'status': 'pending'};
-        }
-        if (status == 400) {
-          final isPending =
-              detail.contains('pending') || detail.contains('slow_down');
-          return <String, dynamic>{
-            'status': isPending ? 'pending' : 'error',
-            if (!isPending) 'reason': 'invalid_client',
-          };
-        }
-        return <String, dynamic>{'status': 'error'};
-      }
       // Simkl signals pending via a 400/429 body (authorization_pending /
       // slow_down); expired_token means the device code timed out.
-      if (service == 'simkl' && (status == 400 || status == 429)) {
+      if (status == 400 || status == 429) {
         if (detail.contains('pending') || detail.contains('slow_down')) {
           return <String, dynamic>{'status': 'pending'};
         }
@@ -1227,6 +1168,158 @@ class NoorApi {
     } catch (_) {
       return null;
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Trakt browser PKCE (RFC 7636/8252) — the user's Trakt registration is
+  // PKCE-only (Trakt issues NO client secret for it) and Trakt's device grant
+  // rejects secret-less exchanges (verified live: 400 empty body), so Trakt
+  // links through the external browser instead: authorize with an S256 code
+  // challenge, the OS bounces back to `noor://callback`, then the code +
+  // verifier swap below completes the grant. No secret, ever.
+  // --------------------------------------------------------------------------
+
+  /// Generates the PKCE pair + state, persists them for [completeTraktLink]
+  /// and returns the authorize URL to open in the external browser:
+  /// `{'authorizeUrl': ..., 'state': ...}` or null on failure.
+  Future<Map<String, dynamic>?> startTraktLink() async {
+    try {
+      final verifier = _pkceRandom();
+      final state = _pkceRandom();
+      final challenge = base64UrlEncode(
+        sha256.convert(utf8.encode(verifier)).bytes,
+      ).replaceAll('=', '');
+      await _secure.write(key: _traktPkceVerifierKey, value: verifier);
+      await _secure.write(key: _traktPkceStateKey, value: state);
+      final url = Uri.parse(traktAuthorizeUrl).replace(
+        queryParameters: <String, String>{
+          'response_type': 'code',
+          'client_id': defaultTraktClientId,
+          'redirect_uri': traktRedirectUri,
+          'code_challenge': challenge,
+          'code_challenge_method': 'S256',
+          'state': state,
+        },
+      );
+      return <String, dynamic>{'authorizeUrl': url.toString(), 'state': state};
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Forgets a pending PKCE handshake (user cancelled the linking sheet).
+  Future<void> cancelTraktLink() => _clearTraktPkce();
+
+  /// Completes the browser round-trip: validates state, swaps the
+  /// authorization code + PKCE verifier for tokens at /oauth/token and
+  /// stores them. Returns `{'status': 'success'}` plus the Trakt username
+  /// when fetchable, otherwise `{'status': 'error', 'reason': ...}`.
+  Future<Map<String, dynamic>> completeTraktLink(String link) async {
+    final uri = Uri.tryParse(link);
+    if (uri == null || uri.scheme.toLowerCase() != 'noor') {
+      return <String, dynamic>{'status': 'error', 'reason': 'invalid_link'};
+    }
+    final denied = uri.queryParameters['error'];
+    if (denied != null && denied.isNotEmpty) {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': denied};
+    }
+    final code = uri.queryParameters['code'] ?? '';
+    final state = uri.queryParameters['state'] ?? '';
+    if (code.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
+    }
+    final savedState = await _secure.read(key: _traktPkceStateKey);
+    final verifier = await _secure.read(key: _traktPkceVerifierKey);
+    if (savedState == null ||
+        savedState.isEmpty ||
+        verifier == null ||
+        verifier.isEmpty) {
+      // Consumed already or never started — races between duplicate link
+      // events are not user-facing failures.
+      return <String, dynamic>{'status': 'error', 'reason': 'no_pending_flow'};
+    }
+    if (state != savedState) {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': 'state_mismatch'};
+    }
+    try {
+      final response = await _client.post<dynamic>(
+        traktTokenUrl,
+        data: <String, String>{
+          'code': code,
+          'client_id': defaultTraktClientId,
+          'redirect_uri': traktRedirectUri,
+          'grant_type': 'authorization_code',
+          'code_verifier': verifier,
+        },
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      final token = payload?['access_token']?.toString();
+      if (token == null || token.isEmpty) {
+        await _clearTraktPkce();
+        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+      }
+      await _storeServiceToken('trakt', token);
+      final refresh = payload?['refresh_token']?.toString();
+      if (refresh != null && refresh.isNotEmpty) {
+        await _secure.write(key: _traktRefreshKey, value: refresh);
+      }
+      await _clearTraktPkce();
+      return <String, dynamic>{
+        'status': 'success',
+        'username': await traktUsername(token),
+      };
+    } on DioException {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+    } catch (_) {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+    }
+  }
+
+  /// Best-effort display name for the freshly linked account (null on any
+  /// hiccup — the UI falls back to the service title).
+  Future<String?> traktUsername([String? token]) async {
+    final access = token ?? _serviceTokens['trakt'];
+    if (access == null || access.isEmpty) return null;
+    try {
+      final response = await _client.get<dynamic>(
+        '$traktBaseUrl/users/me',
+        options: Options(
+          headers: <String, String>{
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+            'Authorization': 'Bearer $access',
+          },
+        ),
+      );
+      final user = _asMap(response.data)?['user'];
+      final name = user is Map ? user['username']?.toString() : null;
+      return (name == null || name.isEmpty) ? null : name;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 48 random bytes → 64 URL-safe characters (RFC 7636 verifier alphabet).
+  String _pkceRandom() {
+    final random = math.Random.secure();
+    final bytes = List<int>.generate(48, (_) => random.nextInt(256));
+    return base64UrlEncode(bytes).replaceAll('=', '');
+  }
+
+  Future<void> _clearTraktPkce() async {
+    await _secure.delete(key: _traktPkceVerifierKey);
+    await _secure.delete(key: _traktPkceStateKey);
   }
 
   Future<void> _storeServiceToken(String service, String token) async {

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -250,14 +249,10 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   Map<String, dynamic>? _flow;
   bool _busy = false;
   bool _syncing = false;
-  bool _needsSecret = false;
-  final _secret = TextEditingController();
-  static const _secure = FlutterSecureStorage();
 
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _secret.dispose();
     super.dispose();
   }
 
@@ -267,14 +262,34 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     setState(() {
       _busy = true;
       _flow = null;
-      _needsSecret = false;
     });
     try {
+      if (widget.service == 'trakt') {
+        // Browser PKCE (RFC 7636/8252): the user's Trakt app is PKCE-only —
+        // Trakt issues NO client secret for it and its device grant rejects
+        // secret-less exchanges, so the device flow can never complete.
+        // We open the authorize page; the OS bounces back to noor://callback
+        // and IncomingLinkListener finishes the handshake anywhere in the app.
+        final result = await app.api.startTraktLink();
+        final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
+        if (authorizeUrl.isEmpty) {
+          throw const FormatException('تعذر بدء ربط Trakt.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _flow = {'status': 'waiting', 'kind': 'pkce'};
+        });
+        await launchUrl(
+          Uri.parse(authorizeUrl),
+          mode: LaunchMode.externalApplication,
+        );
+        return;
+      }
       final result = await app.api.startLinkedService(widget.service);
       final deviceCode = result?['device_code']?.toString() ?? '';
       final code = result?['user_code']?.toString() ?? '';
       // Simkl's OAuth 2.0 flow names the field verification_uri(_complete);
-      // Trakt uses verification_url — accept every variant.
+      // accept every variant just in case.
       final verificationUrl = (result?['verification_uri_complete'] ??
               result?['verification_uri'] ??
               result?['verification_url'])
@@ -298,6 +313,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               )
               .millisecondsSinceEpoch,
           'status': 'waiting',
+          'kind': 'device',
         };
       });
       await launchUrl(
@@ -327,32 +343,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           );
       if (!mounted) return;
       final status = result?['status']?.toString();
-      if (result?['error']?.toString() == 'secret_required') {
-        // (Trakt) The device flow needs the provider client secret before it
-        // can exchange the device code. NoorApi embeds no secret — the user
-        // pastes theirs below; the API re-reads it at the next poll, so the
-        // pending device code stays alive and the flow simply resumes.
-        _pollTimer?.cancel();
-        setState(() => _needsSecret = true);
-        return;
-      }
-      if (result?['reason']?.toString() == 'invalid_client') {
-        // Trakt rejected the client secret (400 with no JSON body). Re-open
-        // the secret form; the pending device code stays alive and the flow
-        // resumes right after a correct secret is saved.
-        _pollTimer?.cancel();
-        setState(() => _needsSecret = true);
-        if (mounted) {
-          NoorToast.show(
-            context,
-            context.read<AppState>().english
-                ? 'Wrong client secret — copy the Client Secret of the Noor app from trakt.tv/settings/api.'
-                : 'سر العميل غير صحيح — انسخ Client Secret الخاص بتطبيق Noor من trakt.tv/settings/api.',
-            error: true,
-          );
-        }
-        return;
-      }
       if (status == 'success') {
         // NoorApi stores the provider token in secure storage itself; only
         // the display state is mirrored into app state.
@@ -363,7 +353,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         if (!mounted) return;
         setState(() {
           _flow = null;
-          _needsSecret = false;
         });
         NoorToast.show(
           context,
@@ -392,33 +381,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     } catch (_) {
       // Keep the device flow alive through brief mobile-network interruptions.
       if (mounted) _schedulePoll(const Duration(seconds: 8));
-    }
-  }
-
-  /// Persists the Trakt OAuth client secret into secure storage under the
-  /// exact key NoorApi reads at poll time, then resumes the pending flow.
-  Future<void> _saveSecret() async {
-    final value = _secret.text.trim();
-    if (value.isEmpty) return;
-    setState(() => _busy = true);
-    try {
-      // pollLinkedService re-reads 'noor.trakt.client-secret' on every call,
-      // so saving here takes effect without an app restart.
-      await _secure.write(key: 'noor.trakt.client-secret', value: value);
-      _secret.clear();
-      if (!mounted) return;
-      setState(() => _needsSecret = false);
-      NoorToast.show(
-        context,
-        context.read<AppState>().english
-            ? 'Secret saved — completing the link…'
-            : 'تم حفظ السر — جارٍ إكمال الربط…',
-      );
-      _schedulePoll(const Duration(milliseconds: 800));
-    } catch (error) {
-      if (mounted) NoorToast.show(context, _friendlyError(error), error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -457,10 +419,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   void _cancelFlow() {
     _pollTimer?.cancel();
-    setState(() {
-      _flow = null;
-      _needsSecret = false;
-    });
+    if (widget.service == 'trakt') {
+      // Drop the stored PKCE pair so a stale verifier can't complete later.
+      context.read<AppState>().api.cancelTraktLink();
+    }
+    setState(() => _flow = null);
   }
 
   @override
@@ -538,6 +501,48 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ],
             ),
+          ] else if (waiting && _flow?['kind'] == 'pkce') ...[
+            Text(
+              english
+                  ? 'Complete the approval in the Trakt window — the browser hands you back to Noor automatically.'
+                  : 'أكمل الموافقة في نافذة Trakt — سيعيدك المتصفح إلى التطبيق تلقائيًا.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    english ? 'Waiting for approval…' : 'بانتظار الموافقة…',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: HorseTheme.muted,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                onPressed: _cancelFlow,
+                child: Text(english ? 'Cancel' : 'إلغاء'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              english
+                  ? 'One-time setup: add noor://callback as a Redirect URI of the Noor app at trakt.tv/oauth/applications — without it Trakt cannot hand the approval back to the app.'
+                  : 'إعداد لمرة واحدة: أضف noor://callback ضمن Redirect URIs لتطبيق Noor في trakt.tv/oauth/applications — بدونه لا يستطيع Trakt إعادة الموافقة إلى التطبيق.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: HorseTheme.muted,
+                  ),
+            ),
           ] else if (waiting) ...[
             Text(
               english
@@ -596,47 +601,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     color: HorseTheme.muted,
                   ),
             ),
-            if (_needsSecret) ...[
-              const SizedBox(height: 14),
-              Text(
-                english
-                    ? 'Trakt requires the OAuth client secret of the Noor app — verified against the Trakt API. Open trakt.tv/settings/api, select the Noor app, copy the Client Secret and paste it below; the pending code resumes automatically.'
-                    : 'يتطلب Trakt سر العميل (Client Secret) الخاص بتطبيق Noor — وهذا مطلب من واجهة Trakt نفسها. افتح trakt.tv/settings/api واختر تطبيق Noor وانسخ Client Secret وألصقه أدناه، وسيُستأنف الرمز المعلّق تلقائيًا.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFFFF8178),
-                    ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _secret,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                textDirection: TextDirection.ltr,
-                decoration: InputDecoration(
-                  labelText: english
-                      ? '${widget.title} client secret'
-                      : 'سر العميل لـ ${widget.title}',
-                  hintText: english
-                      ? 'Paste the client secret'
-                      : 'ألصق سر العميل',
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: _busy ? null : _saveSecret,
-                  icon: _busy
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.key_rounded),
-                  label: Text(
-                      english ? 'Save secret and continue' : 'حفظ السر والمتابعة'),
-                ),
-              ),
-            ],
           ] else ...[
             SizedBox(
               width: double.infinity,
@@ -655,11 +619,30 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ),
             ),
+            if (widget.service == 'trakt') ...[
+              const SizedBox(height: 6),
+              Text(
+                english
+                    ? 'Opens the browser — one-time setup: register noor://callback as a Redirect URI on trakt.tv/oauth/applications.'
+                    : 'يفتح المتصفح — إعداد لمرة واحدة: سجّل noor://callback ضمن Redirect URIs في trakt.tv/oauth/applications.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: HorseTheme.muted,
+                    ),
+              ),
+            ],
             if (_flow?['status'] != null)
               TextButton.icon(
                 onPressed: _start,
                 icon: const Icon(Icons.refresh_rounded),
-                label: Text(english ? 'Generate a new code' : 'إنشاء رمز جديد'),
+                label: Text(
+                  english
+                      ? (widget.service == 'trakt'
+                          ? 'Restart the link'
+                          : 'Generate a new code')
+                      : (widget.service == 'trakt'
+                          ? 'إعادة بدء الربط'
+                          : 'إنشاء رمز جديد'),
+                ),
               ),
           ],
         ],

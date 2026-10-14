@@ -24,7 +24,7 @@ class NoorApp extends StatelessWidget {
           locale: Locale(app.english ? 'en' : 'ar'),
           supportedLocales: const [Locale('ar'), Locale('en')],
           localizationsDelegates: GlobalMaterialLocalizations.delegates,
-          home: const MagnetLinkListener(child: _LaunchGate()),
+          home: const IncomingLinkListener(child: _LaunchGate()),
         ),
       ),
     );

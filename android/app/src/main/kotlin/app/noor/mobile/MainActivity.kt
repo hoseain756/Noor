@@ -178,10 +178,15 @@ class MainActivity :
         captureLink(intent)
     }
 
-    /** Emits a magnet ACTION_VIEW link to Dart, or parks it until it listens. */
+    /** Emits a magnet / noor:// ACTION_VIEW link to Dart, or parks it. */
     private fun captureLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
-        if (!link.startsWith("magnet:", ignoreCase = true)) return
+        // magnet: → torrent flow; noor://callback → Trakt OAuth PKCE return.
+        if (!link.startsWith("magnet:", ignoreCase = true) &&
+            !link.startsWith("noor:", ignoreCase = true)
+        ) {
+            return
+        }
         synchronized(eventLock) {
             val sink = linkSink
             if (sink != null) {
