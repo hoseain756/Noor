@@ -45,7 +45,7 @@ library, live_tv, anime, kids, calendar, catalog, settings, shell).
 ## Run and build
 
 ```sh
-cd mobile_app
+cd Noor  # repository root is the Flutter project
 flutter pub get
 flutter run
 flutter build apk --release

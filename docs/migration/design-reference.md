@@ -1,6 +1,6 @@
 # Mobile design reference notes
 
-Reviewed references: `mobile_app/docs/1.jpg`, `5.jpg`, `6.jpg`, `7.jpg`,
+Reviewed references: `docs/1.jpg`, `5.jpg`, `6.jpg`, `7.jpg`,
 `8.jpg`, `9.jpg`, `10.jpg`, and `11.jpg`.
 
 ## Shared visual language

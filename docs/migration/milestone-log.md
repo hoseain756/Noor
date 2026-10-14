@@ -288,3 +288,14 @@ Status: GitHub `Noor/main` now publishes only the `mobile_app/` directory.
   the branch's visible history.
 - Kept the complete local Horse checkout intact; this change affects the remote
   `Noor` repository only.
+
+## Milestone 12 — Flatten repository layout (app at root)
+
+Status: GitHub `Noor/main` root IS the Flutter project.
+
+- All previously `mobile_app/`-nested files (lib/, android/, ios/, docs/,
+  pubspec.yaml, analysis_options.yaml, README.md, .gitignore, .metadata) now
+  live at the repository root; the `mobile_app/` directory is gone.
+- Historical documents in `docs/migration/` keep their original
+  `mobile_app/...` paths as written at the time; paths are pre-restructure.
+- Build instructions: clone, `flutter pub get`, `flutter run` from the root.

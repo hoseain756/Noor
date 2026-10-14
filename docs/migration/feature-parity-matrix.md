@@ -4,7 +4,7 @@ Audit baseline: `origin/main` at `428d4f4` in `hoseain756/Horse`.
 Flutter baseline: local `flutter-mobile` at `9e604a6`, based on the fetched
 `origin/flutter-mobile` (`72409ed`, tag `v1.0.0`).
 Backend base URL configured by the app: `https://horse-silk.vercel.app` (see
-`mobile_app/README.md`).
+`README.md` (repo root — the app was flattened out of `mobile_app/` in milestone 12)).
 
 Status distinguishes Flutter implementation, automated verification, and live
 backend/device verification. A passing widget or unit test confirms only the
