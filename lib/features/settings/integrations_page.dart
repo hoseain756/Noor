@@ -468,8 +468,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               Expanded(
                 child: Text(
                   english
-                      ? 'The built-in AniList credentials are placeholders — AniList only accepts the numeric Client ID from your own developer dashboard.'
-                      : 'بيانات AniList المدمجة مؤقتة — لا يقبل AniList إلا معرّف العميل الرقمي من لوحة المطوّر الخاصة بك.',
+                      ? 'One step left: enter the numeric Client ID from anilist.co/settings/developer — your Client Secret is already saved in the app.'
+                      : 'خطوة واحدة متبقية: أدخل معرّف العميل الرقمي من anilist.co/settings/developer — سر العميل محفوظ مسبقًا داخل التطبيق.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
@@ -549,8 +549,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               const SizedBox(height: 8),
               Text(
                 english
-                    ? 'Got only one 40-character value? That IS your Client Secret — the Client ID is the small number shown beside it on the same dashboard page.'
-                    : 'تملك قيمة واحدة فقط بطول 40 حرفًا؟ هذه هي «سر العميل» — أمّا معرّف العميل فهو الرقم الصغير الظاهر بجانبها في نفس صفحة اللوحة.',
+                    ? 'Your 40-character value is already saved as the Client Secret — only the small number (Client ID) shown beside it on the dashboard is missing.'
+                    : 'قيمتك ذات الـ40 حرفًا محفوظة الآن كسر عميل — تبقى فقط إضافة الرقم الصغير (معرّف العميل) الظاهر بجانبها في لوحة المطوّر.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: HorseTheme.muted,
                     ),
@@ -688,8 +688,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           NoorToast.show(
             context,
             app.english
-                ? 'Enter your numeric AniList Client ID first.'
-                : 'أدخل معرّف AniList الرقمي أولًا.',
+                ? 'Just one number missing: your AniList Client ID.'
+                : 'يبقى رقم واحد فقط: معرّف AniList الخاص بك.',
             error: true,
           );
           return;

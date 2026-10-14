@@ -105,13 +105,17 @@ class NoorApi {
   // pendings and push paths; both may be linked simultaneously.
   // --------------------------------------------------------------------------
 
-  /// PLACEHOLDER AniList credential shipped with this build. AniList Client
-  /// IDs are small integers from anilist.co/settings/developer — this
-  /// secret-shaped value is rejected by the authorize page, so
-  /// [startAniListLink] refuses to open the browser until the real numeric
-  /// Client ID (and, for confidential apps, the Client Secret) is saved via
-  /// [saveAniListCredentials] from the integrations card.
-  static const String defaultAniListClientId =
+  /// AniList Client ID — NOT embedded. AniList issues a small numeric ID per
+  /// application (visible next to the secret on anilist.co/settings/developer)
+  /// and the owner's value must be entered from the integrations card. The
+  /// 40-character string the owner supplied is the CLIENT SECRET (embedded
+  /// below), not the ID — AniList's token endpoint rejects it as an ID.
+  static const String defaultAniListClientId = '';
+
+  /// Owner-provided AniList Client Secret for the “Noor” application, saved
+  /// at the owner's explicit request (Task 109). AniList requires the secret
+  /// on EVERY token exchange — there is no public-client mode.
+  static const String defaultAniListClientSecret =
       'b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef';
 
   /// MyAnimeList API client ID (myanimelist.net/settings/apiconfig). MAL is
@@ -1310,17 +1314,21 @@ class NoorApi {
   // --------------------------------------------------------------------------
 
   /// Effective AniList OAuth credentials. The secure-storage override (set
-  /// from the integrations card) wins over the embedded default.
+  /// from the integrations card) wins over the embedded defaults; the secret
+  /// falls back to the owner-provided embedded value.
   Future<(String, String)> aniListCredentials() async {
     final id = (await _secure.read(key: _anilistClientIdKey))?.trim();
     final secret = (await _secure.read(key: _anilistClientSecretKey))?.trim();
     return (
       (id == null || id.isEmpty) ? defaultAniListClientId : id,
-      secret ?? '',
+      (secret == null || secret.isEmpty)
+          ? defaultAniListClientSecret
+          : secret,
     );
   }
 
-  /// Persists the AniList credential override (empty secret = public client).
+  /// Persists the AniList credential override (empty values fall back to the
+  /// embedded defaults).
   Future<void> saveAniListCredentials({
     required String clientId,
     String clientSecret = '',
