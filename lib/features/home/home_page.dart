@@ -10,6 +10,7 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/data/content_classifier.dart';
 import '../../shared/widgets/media_rail.dart';
+import '../../shared/widgets/media_quick_look.dart';
 import '../../shared/widgets/glass_navigation.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'top10_rail.dart';
@@ -732,6 +733,16 @@ class _ContinueCard extends StatelessWidget {
       if (progress > 0) '${(progress * 100).round()}%',
     ].join(', ');
 
+    void openDetail() => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MediaDetailPage(
+              item: item,
+              resumeVideoId: entry.videoId,
+              resumePositionMs: entry.positionMs,
+            ),
+          ),
+        );
+
     return SizedBox(
       width: width,
       height: height,
@@ -740,15 +751,9 @@ class _ContinueCard extends StatelessWidget {
         label: semantics,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => MediaDetailPage(
-                item: item,
-                resumeVideoId: entry.videoId,
-                resumePositionMs: entry.positionMs,
-              ),
-            ),
-          ),
+          onTap: openDetail,
+          onLongPress: () =>
+              showMediaQuickLook(context, item: item, onOpen: openDetail),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1247,7 +1252,7 @@ class _FeaturedOverlay extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           if (year?.isNotEmpty == true) ...[
-                            _HeroOutlinedText(year!),
+                            Text(year!, style: _heroMetadataStyle),
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 10),
                               child: _HeroMetadataDot(),
@@ -1255,14 +1260,19 @@ class _FeaturedOverlay extends StatelessWidget {
                           ],
                           if (genre?.isNotEmpty == true) ...[
                             Flexible(
-                              child: _HeroOutlinedText(genre!),
+                              child: Text(
+                                genre!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: _heroMetadataStyle,
+                              ),
                             ),
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 10),
                               child: _HeroMetadataDot(),
                             ),
                           ],
-                          _HeroOutlinedText(typeLabel),
+                          Text(typeLabel, style: _heroMetadataStyle),
                         ],
                       ),
                     ),
@@ -1374,51 +1384,14 @@ class _FeaturedOverlay extends StatelessWidget {
   }
 }
 
-/// Hero metadata text in the site's outlined style: the glyphs are filled
-/// with the app background color variable and rimmed with a white stroke,
-/// matching the hollow Top 10 numerals.
-class _HeroOutlinedText extends StatelessWidget {
-  const _HeroOutlinedText(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    const style = TextStyle(
-      fontSize: 16,
-      fontWeight: FontWeight.w700,
-      height: 1.15,
-      letterSpacing: .2,
-    );
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: AlignmentDirectional.center,
-      children: [
-        // White rim layer (stroke only).
-        Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: style.copyWith(
-            foreground: Paint()
-              ..color = Colors.white
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.6
-              ..strokeJoin = StrokeJoin.round,
-          ),
-        ),
-        // Fill layer: the app background color variable, so the text melts
-        // into the page behind it and only the white rim stays visible.
-        Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: style.copyWith(color: HorseTheme.canvas),
-        ),
-      ],
-    );
-  }
-}
+/// Hero metadata row: plain white text with a soft shadow, as before the
+/// outlined-text experiment (user: "ارجع نص الهيرو كما هو سابقاً").
+const _heroMetadataStyle = TextStyle(
+  color: Colors.white,
+  fontSize: 16,
+  fontWeight: FontWeight.w700,
+  shadows: [Shadow(color: Colors.black87, blurRadius: 8)],
+);
 
 class _HeroMetadataDot extends StatelessWidget {
   const _HeroMetadataDot();

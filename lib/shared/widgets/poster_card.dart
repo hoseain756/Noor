@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import 'media_quick_look.dart';
 
 class PosterCard extends StatelessWidget {
   const PosterCard({
@@ -33,6 +34,13 @@ class PosterCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(radius),
           onTap: onTap,
+          // Long-press quick look: enlarged poster over a blurred page with
+          // the watch / library / watched menu (shared for every card).
+          onLongPress: () => showMediaQuickLook(
+            context,
+            item: item,
+            onOpen: onTap,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

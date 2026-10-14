@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 abstract final class HorseTheme {
-  static const canvas = Color(0xFF0B0D0E);
+  // Pure black app background (user spec: #000000).
+  static const canvas = Color(0xFF000000);
   static const surface = Color(0xFF131617);
   static const raised = Color(0xFF1A1E1F);
   static const line = Color(0xFF292E2F);

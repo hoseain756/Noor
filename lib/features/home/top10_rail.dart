@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/media_quick_look.dart';
 import '../../shared/widgets/media_rail.dart';
 
 /// Netflix-style "Top 10" rail.
@@ -147,6 +148,11 @@ class Top10Item extends StatelessWidget {
               width: _posterWidth,
               rank: rank,
               onTap: onTap,
+              onLongPress: () => showMediaQuickLook(
+                context,
+                item: item,
+                onOpen: onTap,
+              ),
             ),
           ),
         ],
@@ -155,8 +161,10 @@ class Top10Item extends StatelessWidget {
   }
 }
 
-/// Huge hollow rank number: no fill, thin white rounded stroke, always
-/// Western digits laid out left-to-right (never mirrored to "01" in Arabic).
+/// Huge rank number: the glyph interior is filled with the app background
+/// color (it occludes whatever sits behind it) while the same thin white
+/// rounded stroke stays on top — fill + rim (user spec). Always Western
+/// digits laid out left-to-right (never mirrored to "01" in Arabic).
 /// Rank 10 is a special tight lockup: the "1" and "0" overlap so the whole
 /// unit occupies a single digit's width.
 class OutlinedRankNumber extends StatelessWidget {
@@ -169,11 +177,11 @@ class OutlinedRankNumber extends StatelessWidget {
   final int rank;
   final double fontSize;
 
+  /// The white outline layer (identical to the previous hollow look).
   TextStyle get _style => TextStyle(
         fontSize: fontSize,
         height: .78,
         fontWeight: FontWeight.w900,
-        // Hollow fill: only a thin white outline is painted.
         foreground: Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.5
@@ -181,12 +189,30 @@ class OutlinedRankNumber extends StatelessWidget {
           ..color = Colors.white.withValues(alpha: .85),
       );
 
+  /// The fill layer: the app background color variable (#000000), painted
+  /// under the stroke so the numeral reads as cut out of the page.
+  TextStyle get _fillStyle => TextStyle(
+        fontSize: fontSize,
+        height: .78,
+        fontWeight: FontWeight.w900,
+        color: HorseTheme.canvas,
+      );
+
+  /// One digit = background-colored fill under the white stroke.
+  Widget _glyph(String text) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Text(text, style: _fillStyle),
+          Text(text, style: _style),
+        ],
+      );
+
   @override
   Widget build(BuildContext context) {
     if (rank != 10) {
       return Directionality(
         textDirection: TextDirection.ltr,
-        child: Text('$rank', style: _style),
+        child: _glyph('$rank'),
       );
     }
     // Rank 10 renders as ONE tight unit occupying a single digit's width:
@@ -208,14 +234,14 @@ class OutlinedRankNumber extends StatelessWidget {
             Positioned(
               left: 0,
               top: 0,
-              child: Text('0', style: _style),
+              child: _glyph('0'),
             ),
             // …and the "1" is pulled left onto it until the outlines
             // intersect (one digit appears on top of the other).
             Positioned(
               left: -digitWidth * Top10Item._tenOnePull,
               top: 0,
-              child: Text('1', style: _style),
+              child: _glyph('1'),
             ),
           ],
         ),
@@ -234,12 +260,14 @@ class _Top10Sticker extends StatelessWidget {
     required this.width,
     required this.rank,
     required this.onTap,
+    required this.onLongPress,
   });
 
   final MediaItem item;
   final double width;
   final int rank;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +278,7 @@ class _Top10Sticker extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           width: width,
           decoration: BoxDecoration(
