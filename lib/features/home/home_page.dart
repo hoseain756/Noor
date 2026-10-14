@@ -11,8 +11,8 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/data/content_classifier.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/media_quick_look.dart';
-import '../../shared/widgets/glass_navigation.dart';
 import '../../shared/widgets/noor_toast.dart';
+import '../shell/noor_dock_tabs.dart';
 import 'top10_rail.dart';
 import '../anime/anime_page.dart';
 import '../catalog/catalog_browser_page.dart';
@@ -355,8 +355,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: SizedBox(
-            height: MediaQuery.paddingOf(context).bottom +
-                GlassNavigationBar.contentBottomInset,
+            height: glassDockContentClearance(context),
           ),
         ),
       ],
@@ -1540,12 +1539,11 @@ double _featuredHeroHeight(BuildContext context) {
   final viewPadding = MediaQuery.viewPaddingOf(context);
   // Task: the featured hero takes ~58% of the screen height on every
   // device. It must never exceed the visible area under the system bars
-  // and the glass navigation, and keeps a small floor for very short
+  // and the glass dock, and keeps a small floor for very short
   // viewports (e.g. landscape phones).
   final availableHeight = (size.height -
           viewPadding.top -
-          viewPadding.bottom -
-          GlassNavigationBar.contentBottomInset)
+          glassDockContentClearance(context))
       .clamp(0.0, double.infinity);
   final preferredHeight = (size.height * .58).clamp(280.0, double.infinity);
   return math.min(availableHeight, preferredHeight).toDouble();

@@ -10,7 +10,7 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/poster_card.dart';
-import '../../shared/widgets/glass_navigation.dart';
+import '../shell/noor_dock_tabs.dart';
 import '../player/video_player_page.dart';
 import '../torrent/magnet_opener.dart';
 import 'custom_lists_page.dart';
@@ -180,8 +180,7 @@ class _LibraryPageState extends State<LibraryPage> {
         ],
         SliverToBoxAdapter(
           child: SizedBox(
-            height: MediaQuery.paddingOf(context).bottom +
-                GlassNavigationBar.contentBottomInset,
+            height: glassDockContentClearance(context),
           ),
         ),
       ],

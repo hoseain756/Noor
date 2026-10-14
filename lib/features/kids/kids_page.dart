@@ -8,7 +8,7 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/poster_card.dart';
-import '../../shared/widgets/glass_navigation.dart';
+import '../shell/noor_dock_tabs.dart';
 import '../media/media_detail_page.dart';
 
 class KidsPage extends StatefulWidget {
@@ -190,8 +190,7 @@ class _KidsPageState extends State<KidsPage> {
                   20,
                   0,
                   20,
-                  MediaQuery.paddingOf(context).bottom +
-                      GlassNavigationBar.contentBottomInset,
+                  glassDockContentClearance(context),
                 ),
                 sliver: SliverGrid.builder(
                   itemCount: items.length,

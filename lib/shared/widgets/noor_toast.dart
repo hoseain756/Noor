@@ -110,8 +110,9 @@ class _ToastViewState extends State<_ToastView>
     return Positioned(
       left: 0,
       right: 0,
-      // Above the glass navigation bar (contentBottomInset = 76) plus air.
-      bottom: MediaQuery.paddingOf(context).bottom + 84,
+      // Above the glass dock (tallest phone class tops out at 84 + safe
+      // bottom) plus a little air.
+      bottom: MediaQuery.paddingOf(context).bottom + 92,
       child: Directionality(
         textDirection: widget.direction,
         child: IgnorePointer(

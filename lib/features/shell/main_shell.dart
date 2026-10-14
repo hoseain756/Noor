@@ -16,6 +16,9 @@ import '../live_tv/live_tv_page.dart';
 import '../settings/addons_page.dart';
 import '../settings/settings_page.dart';
 import '../settings/stats_page.dart';
+import 'dock_tab.dart';
+import 'glass_dock.dart';
+import 'noor_dock_tabs.dart';
 import 'search_sheet.dart';
 
 class MainShell extends StatefulWidget {
@@ -31,18 +34,6 @@ class _MainShellState extends State<MainShell> {
   double _scrollDelta = 0;
   bool _tabletNavVisible = false;
 
-  static const _icons = [
-    Icons.home_rounded,
-    Icons.auto_awesome_rounded,
-    Icons.child_care_rounded,
-    Icons.video_library_rounded,
-    Icons.settings_rounded,
-  ];
-
-  List<String> _labels(bool english) => english
-      ? const ['Home', 'Anime', 'Kids', 'My Library', 'Settings']
-      : const ['الرئيسية', 'أنمي', 'الأطفال', 'مكتبتي', 'الإعدادات'];
-
   void _selectTab(int index) {
     if (index == _selected) {
       if (!_chromeVisible) setState(() => _chromeVisible = true);
@@ -55,6 +46,13 @@ class _MainShellState extends State<MainShell> {
     });
   }
 
+  /// Scroll auto-hide for the shared chrome (search button + glass dock).
+  ///
+  /// This shell-level NotificationListener already observes every page's
+  /// primary scrollable (the pages are the IndexedStack children), which is
+  /// the per-page `GlassDockScrollHide` wiring done once; the resulting flag
+  /// is fed to `GlassDock.hidden`, which owns its own hide animation. The
+  /// `dockAutoHide` web setting is honored here, exactly as before.
   bool _onScroll(ScrollNotification notification) {
     if (notification.metrics.axis != Axis.vertical) return false;
     if (notification is! ScrollUpdateNotification) return false;
@@ -104,14 +102,23 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final labels = _labels(app.english);
     final size = MediaQuery.sizeOf(context);
+    // RESPONSIVE DECISION (Task 107-d): Noor already ships a distinct tablet
+    // layout at ≥840px (hamburger → slide-in side panel with every primary
+    // tab + secondary page). That panel plays the role the web dock's
+    // ≥1024px side rail plays, so the glass dock mounts on PHONE widths only
+    // (<840) — Noor's own breakpoint convention — and the tablet navigation
+    // is untouched.
     final tabletLayout = size.width >= 840;
-    final phoneTabOrder = app.english ? const [4, 2, 1, 0] : const [0, 1, 2, 4];
-    final phoneTabIcons = phoneTabOrder.map((index) => _icons[index]).toList();
-    final phoneTabLabels = phoneTabOrder.map((index) => labels[index]).toList();
-    final phoneSelectedIndex =
-        phoneTabOrder.indexOf(_selected == 3 ? 4 : _selected);
+    final dockTabs = noorDockTabsFor(
+      // `hideContent.anime` is a real Noor setting → drop the Anime tab,
+      // mirroring the web dock's hide-anime filter. `kidsMode` is a dormant
+      // web-sync flag with no mobile behavior, so the kids tab filter and
+      // kidsZoom are intentionally not wired (defaults below).
+      hideAnime: (app.webSettings['hideContent'] as Map?)?['anime'] == true,
+      rtl: !app.english,
+    );
+    final dockActiveId = noorDockTabIdForIndex(_selected);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final duration =
         reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
@@ -184,27 +191,22 @@ class _MainShellState extends State<MainShell> {
                 ),
               ),
             if (!tabletLayout)
+              // The glass dock (Harbor web port): one sliding pill, scrub
+              // gesture, size ladder, safe area and its own hidden animation
+              // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
+              // Player/detail pages are pushed as full routes on top of the
+              // shell, which unmounts the dock (the web `showChrome` rule).
               PositionedDirectional(
                 start: 0,
                 end: 0,
                 bottom: 0,
-                child: IgnorePointer(
-                  ignoring: !_chromeVisible,
-                  child: AnimatedSlide(
-                    offset: _chromeVisible ? Offset.zero : const Offset(0, 1.2),
-                    duration: duration,
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: _chromeVisible ? 1 : 0,
-                      duration: duration,
-                      child: GlassNavigationBar(
-                        index: phoneSelectedIndex,
-                        labels: phoneTabLabels,
-                        icons: phoneTabIcons,
-                        onSelected: (index) => _selectTab(phoneTabOrder[index]),
-                      ),
-                    ),
-                  ),
+                child: GlassDock(
+                  tabs: dockTabs,
+                  activeId: dockActiveId,
+                  onTabSelected: (DockTab tab) =>
+                      _selectTab(noorDockIndexForTabId(tab.view)),
+                  languageCode: app.english ? 'en' : 'ar',
+                  hidden: !_chromeVisible,
                 ),
               ),
             if (tabletLayout && _tabletNavVisible) ...[

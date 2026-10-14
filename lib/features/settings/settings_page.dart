@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
-import '../../shared/widgets/glass_navigation.dart';
+import '../shell/noor_dock_tabs.dart';
 import 'addons_page.dart';
 import 'integrations_page.dart';
 import 'stats_page.dart';
@@ -37,8 +37,7 @@ class SettingsPage extends StatelessWidget {
               width >= 700 ? 32 : 20,
               onOpenLibrary == null
                   ? 36
-                  : MediaQuery.paddingOf(context).bottom +
-                      GlassNavigationBar.contentBottomInset,
+                  : glassDockContentClearance(context),
             ),
             children: [
               Text(

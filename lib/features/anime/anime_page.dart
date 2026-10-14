@@ -5,7 +5,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/media_rail.dart';
-import '../../shared/widgets/glass_navigation.dart';
+import '../shell/noor_dock_tabs.dart';
 import '../media/media_detail_page.dart';
 import 'anime_search_sheet.dart';
 
@@ -154,8 +154,7 @@ class _AnimePageState extends State<AnimePage> {
                 ),
               SliverToBoxAdapter(
                 child: SizedBox(
-                  height: MediaQuery.paddingOf(context).bottom +
-                      GlassNavigationBar.contentBottomInset,
+                  height: glassDockContentClearance(context),
                 ),
               ),
             ],
