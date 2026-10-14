@@ -72,15 +72,67 @@ class GlassPillSurface extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: ColorFiltered(
-          colorFilter: _kSaturate,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-            child: ColoredBox(
-              color: _kPanelFill.withValues(alpha: 0.434),
-              child: child,
+        child: Stack(
+          children: [
+            // Glass backdrop: blur(sigma) + saturate(1.35), then the panel
+            // fill — dock recipe 1:1 (search-button layering: the tint
+            // decorations below sit OUTSIDE the saturation filter).
+            Positioned.fill(
+              child: ColorFiltered(
+                colorFilter: _kSaturate,
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+                  child: ColoredBox(
+                    color: _kPanelFill.withValues(alpha: 0.434),
+                  ),
+                ),
+              ),
             ),
-          ),
+            // 160° tint sheen — the layer the pill surface was missing so
+            // every glass pill matches the dock/search buttons verbatim.
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment(-0.34, -1),
+                    end: Alignment(0.34, 1),
+                    stops: [0, 0.6],
+                    colors: [
+                      Color(0x1FBFE6F2), // tint 0.12
+                      Color(0x0DBFE6F2), // tint 0.05
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Inset edges: tinted specular at the top, dark shading at the
+            // bottom (the dock's straight hairlines on the pill form).
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment(0, 0.55),
+                    colors: [Color(0x80BFE6F2), Color(0x00BFE6F2)],
+                  ),
+                ),
+              ),
+            ),
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment(0, 0.8),
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0x24000000)],
+                  ),
+                ),
+              ),
+            ),
+            // Content on top of the glass stack — the NON-positioned child
+            // (it defines the pill's intrinsic size; the fill layers adapt).
+            child,
+          ],
         ),
       ),
     );
@@ -110,8 +162,7 @@ Future<T?> showGlassMenu<T>({
       anchor: anchor,
       width: width,
       gap: gap,
-      maxHeight:
-          maxHeight ?? MediaQuery.sizeOf(menuContext).height * 0.6,
+      maxHeight: maxHeight ?? MediaQuery.sizeOf(menuContext).height * 0.6,
       builder: builder,
       onClose: (value) {
         if (!completer.isCompleted) completer.complete(value);
@@ -178,10 +229,10 @@ class _GlassMenuRouteState<T> extends State<_GlassMenuRoute<T>> {
     const edge = 12.0;
     // Start-align with the anchor, clamped inside the viewport.
     final rtl = Directionality.of(context) == TextDirection.rtl;
-    final double start = (rtl
-            ? screen.width - widget.anchor.right
-            : widget.anchor.left)
-        .clamp(edge, (screen.width - edge - widget.width).clamp(edge, double.infinity));
+    final double start =
+        (rtl ? screen.width - widget.anchor.right : widget.anchor.left).clamp(
+            edge,
+            (screen.width - edge - widget.width).clamp(edge, double.infinity));
     final top = (widget.anchor.bottom + widget.gap)
         .clamp(edge, (screen.height - edge).clamp(edge, double.infinity));
     return Stack(

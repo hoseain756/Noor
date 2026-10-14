@@ -22,6 +22,7 @@ import '../shell/noor_dock_tabs.dart' show glassDockContentClearance;
 import 'detail_hero.dart';
 import 'episode_data.dart';
 import 'episode_views.dart';
+import 'sources_page.dart';
 
 /// Cinematic detail page — the Flutter replica of the Harbor web DetailView:
 /// fixed glass back pill over a full-bleed hero (phone card variant < 700px /
@@ -56,12 +57,28 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   FeaturedArtwork? _art;
   bool _loadingStreams = false;
 
+  /// Episodes subsystem state (season/sort/view) — Task 118. Created lazily
+  /// on the first populated build; the page listens so season/sort/view
+  /// toggles rebuild ONLY the episodes slivers, never the hero or shell.
+  EpisodesController? _episodes;
+
   @override
   void initState() {
     super.initState();
     final app = context.read<AppState>();
     _detail = app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
     _loadFeaturedArtwork(app);
+  }
+
+  @override
+  void dispose() {
+    _episodes?.removeListener(_onEpisodesChanged);
+    _episodes?.dispose();
+    super.dispose();
+  }
+
+  void _onEpisodesChanged() {
+    if (mounted) setState(() {});
   }
 
   /// TMDB textless backdrop + transparent logo (in-memory cached inside the
@@ -89,7 +106,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   void _reloadDetail() {
     final app = context.read<AppState>();
     setState(() {
-      _detail = app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+      _detail =
+          app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
     });
   }
 
@@ -162,6 +180,43 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     final backdrop = _art?.landscape ?? item.background;
     final logo = _art?.logo ?? item.logo;
 
+    // Episodes controller sync (Task 118): created lazily on the first
+    // populated build, refreshed with the freshest item/entries/settings on
+    // every rebuild — then laid out as TRUE slivers of this scroll view
+    // (one unified scroll position; the old nested 68vh scroller used to
+    // swallow drags at its edge and strand the page).
+    List<Widget> episodeSlivers = const [];
+    if (item.type == 'series' && item.videos.isNotEmpty) {
+      final entries = app.history
+          .where((entry) => entry.item.id == item.id)
+          .toList(growable: false);
+      final savedView = app.webSettings['episodesView']?.toString() ?? 'auto';
+      if (_episodes == null) {
+        _episodes = EpisodesController(
+          item: item,
+          entries: entries,
+          savedView: savedView,
+        )..addListener(_onEpisodesChanged);
+      } else {
+        _episodes!.update(item: item, entries: entries, savedView: savedView);
+      }
+      episodeSlivers = buildEpisodeSlivers(
+        controller: _episodes!,
+        english: english,
+        isWide: isWide,
+        contentWidth: viewportSize.width - (isWide ? 68.0 : 40.0),
+        blurUnwatched: app.webSettings['blurEpisodeThumbnails'] == true,
+        ratingsEnabled: app.webSettings['ratingsEnabled'] != false,
+        onViewChange: (view) {
+          // Local toggle first (instant, no AppState round-trip), then a
+          // fire-and-forget persist for the next visit.
+          _episodes!.setView(view);
+          unawaited(app.setSetting('episodesView', view));
+        },
+        onPlay: (video) => _play(item, video: video),
+      );
+    }
+
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
@@ -178,35 +233,19 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             defaultVideo: defaultVideo,
           ),
         ),
-        if (item.type == 'series' && item.videos.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
-              child: EpisodesSection(
-                item: item,
-                english: english,
-                entries: app.history
-                    .where((entry) => entry.item.id == item.id)
-                    .toList(growable: false),
-                blurUnwatched: app.webSettings['blurEpisodeThumbnails'] == true,
-                ratingsEnabled: app.webSettings['ratingsEnabled'] != false,
-                savedView: app.webSettings['episodesView']?.toString() ?? 'auto',
-                onViewChange: (view) =>
-                    unawaited(app.setSetting('episodesView', view)),
-                onPlay: (video) => _play(item, video: video),
-              ),
-            ),
-          ),
+        ...episodeSlivers,
         SliverToBoxAdapter(child: _SimilarTitles(item: item)),
         if (item.type == 'movie' &&
             item.genres.isEmpty &&
             (item.description == null || item.description!.isEmpty))
           SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
+              padding: EdgeInsets.fromLTRB(
+                  isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
               child: Align(
-                alignment:
-                    isWide ? AlignmentDirectional.centerStart : AlignmentDirectional.topCenter,
+                alignment: isWide
+                    ? AlignmentDirectional.centerStart
+                    : AlignmentDirectional.topCenter,
                 child: Text(
                   english
                       ? 'Press Watch Now to fetch playback sources…'
@@ -241,9 +280,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   }) {
     final vh = viewportSize.height;
     final vw = viewportSize.width;
-    final heroHeight = isWide
-        ? (vh * 0.52).clamp(360.0, 680.0)
-        : (vw - 32) * 11 / 16 + 72;
+    final heroHeight =
+        isWide ? (vh * 0.52).clamp(360.0, 680.0) : (vw - 32) * 11 / 16 + 72;
     final overlap = isWide ? (vh * 0.14).clamp(96.0, 168.0) : 0.0;
 
     Widget column = Column(
@@ -360,8 +398,9 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     List<Map<String, dynamic>> videos,
   ) {
     final entry = app.history.where((h) => h.item.id == item.id).firstOrNull;
-    final progress =
-        entry != null && entry.durationMs > 0 ? entry.positionMs / entry.durationMs : 0.0;
+    final progress = entry != null && entry.durationMs > 0
+        ? entry.positionMs / entry.durationMs
+        : 0.0;
 
     if (item.type == 'series') {
       Map<String, dynamic>? video;
@@ -386,8 +425,14 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       }
       if (video == null) return const _ResumePlan();
       final season = (video['season'] as num?)?.toInt() ?? entry?.season ?? 1;
-      final episode = (video['episode'] as num?)?.toInt() ?? entry?.episode ?? 1;
-      return _ResumePlan(video: video, positionMs: position, isResume: true, season: season, episode: episode);
+      final episode =
+          (video['episode'] as num?)?.toInt() ?? entry?.episode ?? 1;
+      return _ResumePlan(
+          video: video,
+          positionMs: position,
+          isResume: true,
+          season: season,
+          episode: episode);
     }
 
     // Movie: the CW hand-off or an in-progress history entry resumes.
@@ -397,7 +442,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         entry != null && entry.positionMs > 0 && progress < 0.92;
     if (cwResume || historyResume) {
       final position = widget.resumePositionMs ?? entry?.positionMs ?? 0;
-      return _ResumePlan(positionMs: position > 0 ? position : null, isResume: true);
+      return _ResumePlan(
+          positionMs: position > 0 ? position : null, isResume: true);
     }
     return const _ResumePlan();
   }
@@ -497,81 +543,49 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     if (!forceSourceSheet && app.webSettings['instantPlay'] == true) {
       selected = streams.where(_isPlayableStream).firstOrNull;
     }
-    selected ??= await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      backgroundColor: HorseTheme.surface,
-      isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                english ? 'Choose a source' : 'اختر مصدر التشغيل',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(context).height * .58,
-                ),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: streams.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(color: HorseTheme.line),
-                  itemBuilder: (context, index) {
-                    final stream = streams[index];
-                    final url = stream['url'] as String?;
-                    final direct = url != null && url.startsWith('http');
-                    final torrent = !direct && stream['infoHash'] is String;
-                    final playable = direct || torrent;
-                    final title = (stream['title'] ??
-                            stream['name'] ??
-                            stream['description'] ??
-                            (playable ? 'HTTP stream' : 'Torrent stream'))
-                        .toString()
-                        .split('\n')
-                        .first;
-                    return ListTile(
-                      dense: app.webSettings['pickerLayout'] == 'condensed',
-                      enabled: playable,
-                      leading: Icon(
-                        playable
-                            ? Icons.play_circle_outline_rounded
-                            : Icons.cloud_off_rounded,
-                        color: playable ? HorseTheme.gold : HorseTheme.muted,
-                      ),
-                      title: Text(
-                        title,
-                        maxLines: app.webSettings['pickerLayout'] == 'condensed'
-                            ? 1
-                            : 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: app.webSettings['pickerLayout'] == 'condensed'
-                          ? null
-                          : Text(
-                              '${stream['addonName'] ?? (english ? 'Add-on' : 'إضافة')}${torrent ? (english ? ' · Torrent source' : ' · مصدر تورنت') : (playable ? '' : (english ? ' · Unsupported source' : ' · مصدر غير مدعوم'))}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                      onTap: playable
-                          ? () => Navigator.pop(context, stream)
-                          : null,
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+    if (selected != null) {
+      await _launchStream(
+        item: item,
+        episode: episode,
+        stream: selected,
+        resumePositionMs: resumePositionMs,
+      );
+      return;
+    }
+    // Full-screen sources page (Task 118 user mandate): tapping an episode —
+    // or "Available streams" — surfaces EVERY source from EVERY enabled
+    // add-on on a browsable page with a filter field, instead of the cramped
+    // bottom sheet. Picking one hands the stream back for resolution.
+    final picked = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => SourcesPage(
+          item: item,
+          video: episode,
+          streams: streams,
+          english: english,
         ),
       ),
     );
-    if (selected == null || !mounted) return;
-    final chosenStream = selected;
+    if (picked == null || !mounted) return;
+    await _launchStream(
+      item: item,
+      episode: episode,
+      stream: picked,
+      resumePositionMs: resumePositionMs,
+    );
+  }
+
+  /// Resolves the chosen stream (direct URL / debrid / on-device torrent)
+  /// and pushes the player — the playback contract carried over unchanged
+  /// from the old inline-sheet flow, now fed by the sources page.
+  Future<void> _launchStream({
+    required MediaItem item,
+    required Map<String, dynamic>? episode,
+    required Map<String, dynamic> stream,
+    required int? resumePositionMs,
+  }) async {
+    final id = (episode?['id'] as String?) ?? item.id;
+    final chosenStream = stream;
     setState(() => _loadingStreams = true);
     PreparedTorrent? prepared;
     try {
@@ -581,8 +595,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
               const <String, dynamic>{};
       final proxyHeaders = (hints['proxyHeaders'] as Map?)
           ?.map((key, value) => MapEntry(key.toString(), value.toString()));
-      final filename =
-          (hints['filename'] ?? chosenStream['title'])?.toString();
+      final filename = (hints['filename'] ?? chosenStream['title'])?.toString();
       final String url;
       if (rawUrl != null && rawUrl.startsWith('http')) {
         // Direct HTTP sources play as-is; the player attaches the source's
@@ -598,7 +611,6 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
           infoHash: infoHash,
           filename: filename,
           filesize: filesize,
-          english: english,
         );
         if (!mounted) return;
         if (resolved == null) {
@@ -618,10 +630,9 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             headers: proxyHeaders,
             filename: filename,
             torrent: prepared,
-            streamName: (chosenStream['title'] ??
-                    chosenStream['addonName'] ??
-                    'Noor')
-                .toString(),
+            streamName:
+                (chosenStream['title'] ?? chosenStream['addonName'] ?? 'Noor')
+                    .toString(),
             videoId: id,
             season: (episode?['season'] as num?)?.toInt(),
             episode: (episode?['episode'] as num?)?.toInt(),
@@ -645,18 +656,21 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   }
 
   /// Resolves an infoHash stream through the connected Debrid service first
-  /// and the on-device torrent engine second. A cancellable progress dialog
-  /// covers the whole preparation. Returns `null` after showing a bilingual
-  /// explanation when no resolution path exists (or the user cancels).
+  /// and the on-device torrent engine second (Task 118): the modal shows the
+  /// LIVE download percentage streamed from the engine (1%, 2%, …) instead
+  /// of a bare spinner, and the player opens as soon as the head pieces are
+  /// down (20s fallback — the local stream server serves mid-download).
+  /// Returns `null` after showing a bilingual explanation when no resolution
+  /// path exists (or the user cancels).
   Future<({String url, PreparedTorrent? torrent})?> _resolveTorrentStream({
     required String displayName,
     required String infoHash,
     required String? filename,
     required int? filesize,
-    required bool english,
   }) async {
     final app = context.read<AppState>();
     final api = app.api;
+    final english = app.english;
     final debridConfigured = api.debridService != null;
     var engineSupported = false;
     if (!debridConfigured) {
@@ -674,37 +688,30 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     if (!mounted) return null;
     final navigator = Navigator.of(context, rootNavigator: true);
     var cancelled = false;
+    var dialogOpen = true;
+    // null = indeterminate phase (debrid round-trip / metadata fetch);
+    // non-null = live engine status with a real percentage.
+    final status = ValueNotifier<TorrentStatus?>(null);
+    Future<void> closeDialog() async {
+      if (dialogOpen) {
+        dialogOpen = false;
+        navigator.pop();
+      }
+    }
+
     unawaited(showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: HorseTheme.surface,
-        content: Row(
-          children: [
-            const SizedBox.square(
-              dimension: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                english ? 'Preparing the stream…' : 'جارٍ تجهيز المصدر…',
-                style: Theme.of(dialogContext).textTheme.bodyMedium,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              cancelled = true;
-              Navigator.of(dialogContext).pop();
-            },
-            child: Text(english ? 'Cancel' : 'إلغاء'),
-          ),
-        ],
+      builder: (dialogContext) => StreamPrepareDialog(
+        english: english,
+        status: status,
+        onCancel: () {
+          cancelled = true;
+          unawaited(closeDialog());
+        },
       ),
     ));
+    StreamSubscription<TorrentStatus>? sub;
     try {
       if (debridConfigured) {
         final url = await api.resolveDebridTorrent(
@@ -741,9 +748,36 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         unawaited(TorrentService.instance.remove(prepared.infoHash));
         return null;
       }
+      // Live progress phase (Task 118): pump engine events into the dialog
+      // and hand off to the player the moment the head pieces land.
+      final ready = Completer<void>();
+      sub = prepared.statusStream.listen(
+        (event) {
+          status.value = event;
+          if (event.ready && !ready.isCompleted) ready.complete();
+        },
+        onDone: () {
+          if (!ready.isCompleted) ready.complete();
+        },
+      );
+      try {
+        await ready.future.timeout(const Duration(seconds: 20));
+      } on TimeoutException {
+        // Proceed anyway — the StreamServer stall-wait serves the remainder
+        // while the player buffers.
+      }
+      await sub.cancel();
+      sub = null;
+      if (cancelled) {
+        unawaited(prepared.stop());
+        unawaited(TorrentService.instance.remove(prepared.infoHash));
+        return null;
+      }
       return (url: prepared.url, torrent: prepared);
     } finally {
-      if (!cancelled) navigator.pop();
+      await sub?.cancel();
+      await closeDialog();
+      status.dispose();
     }
   }
 
@@ -925,12 +959,12 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
   Future<Map<String, dynamic>> _loadRatings() async {
     final item = widget.item;
     final year = item.releaseInfo?.isNotEmpty == true
-        ? item.releaseInfo!
-            .substring(0, item.releaseInfo!.length.clamp(0, 4))
+        ? item.releaseInfo!.substring(0, item.releaseInfo!.length.clamp(0, 4))
         : null;
     final imdb = RegExp(r'^tt\d+$').hasMatch(item.id) ? item.id : null;
-    final anime = item.genres.any((genre) => genre.toLowerCase() == 'animation') &&
-        (item.originCountry ?? '').toLowerCase().contains('japan');
+    final anime =
+        item.genres.any((genre) => genre.toLowerCase() == 'animation') &&
+            (item.originCountry ?? '').toLowerCase().contains('japan');
     final data = await context.read<AppState>().api.ratingsGet(
           type: item.type == 'series' ? 'series' : 'movie',
           title: item.name,
@@ -1052,16 +1086,15 @@ class _RatingChip extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: .30),
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: .08)),
+                border: Border.all(color: Colors.white.withValues(alpha: .08)),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(
                         color: color, borderRadius: BorderRadius.circular(999)),
                     child: Text(label,

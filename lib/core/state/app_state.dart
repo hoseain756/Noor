@@ -221,8 +221,12 @@ class AppState extends ChangeNotifier {
         key: key == 'tmdbKey' || key == 'tmdbUserKey' ? '' : value,
       };
     }
-    await _persistSettings();
+    // Task 118 perf fix: notify the UI FIRST — a disk write must never sit
+    // in front of the frame (the episodes view toggle used to feel heavy
+    // because the settings JSON encode + SharedPreferences write was
+    // awaited before the rebuild).
     notifyListeners();
+    unawaited(_persistSettings());
     _schedulePush(NoorSyncService.bucketSettings);
   }
 
@@ -589,7 +593,8 @@ class AppState extends ChangeNotifier {
               'id': (entry['imdb'] ?? entry['id'] ?? '').toString(),
               'type': entry['type'],
               'name': (entry['title'] ?? entry['name'] ?? '').toString(),
-              if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+              if (entry['year'] != null)
+                'releaseInfo': entry['year'].toString(),
               if (entry['anilist'] != null) 'anilistId': entry['anilist'],
               if (entry['mal'] != null) 'idMal': entry['mal'],
             }),
@@ -604,7 +609,8 @@ class AppState extends ChangeNotifier {
               'id': (entry['imdb'] ?? entry['id'] ?? '').toString(),
               'type': entry['type'],
               'name': (entry['title'] ?? entry['name'] ?? '').toString(),
-              if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+              if (entry['year'] != null)
+                'releaseInfo': entry['year'].toString(),
               if (entry['anilist'] != null) 'anilistId': entry['anilist'],
               if (entry['mal'] != null) 'idMal': entry['mal'],
             });
@@ -1293,7 +1299,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-
   String? _cleanDescription(String? value) {
     final clean = value?.trim();
     if (clean == null || clean.isEmpty) return null;
@@ -1552,7 +1557,10 @@ class AppState extends ChangeNotifier {
         }
       }
     } catch (_) {
-      result = <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+      result = <String, dynamic>{
+        'status': 'error',
+        'reason': 'exchange_failed'
+      };
     }
     final ok = result['status']?.toString() == 'success';
     if (ok && service != null) {
@@ -1583,7 +1591,8 @@ class AppState extends ChangeNotifier {
         final viewer = await api.aniListViewer();
         if (viewer == null) return;
         final stats = _asMapMap(viewer['statistics'])?['anime'];
-        final current = Map<String, dynamic>.from(linkedServices['anilist'] ?? {});
+        final current =
+            Map<String, dynamic>.from(linkedServices['anilist'] ?? {});
         current['username'] = viewer['name']?.toString() ?? current['username'];
         final avatar = _asMapMap(viewer['avatar']);
         if (avatar?['large'] != null) {
@@ -1604,7 +1613,8 @@ class AppState extends ChangeNotifier {
         final profile = await api.malProfile();
         if (profile == null) return;
         final current = Map<String, dynamic>.from(linkedServices['mal'] ?? {});
-        current['username'] = profile['name']?.toString() ?? current['username'];
+        current['username'] =
+            profile['name']?.toString() ?? current['username'];
         if (profile['picture'] != null) {
           current['avatar'] = profile['picture']?.toString();
         }
@@ -1666,8 +1676,7 @@ class AppState extends ChangeNotifier {
     final outcomes = <String, bool>{};
     // Everything null = the tracker sheet's explicit "Remove" — genuinely
     // delete the entries on each reachable provider (never a fake success).
-    final isRemove =
-        status == null && progress == null && score10 == null;
+    final isRemove = status == null && progress == null && score10 == null;
     final anilistId = item.anilistId;
     if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
       var ok = true;

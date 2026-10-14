@@ -41,8 +41,8 @@ ColorFilter _saturate(double s) => ColorFilter.matrix(<double>[
 
 /// One enriched episode item — built once per (season × sort × data) by
 /// [EpisodesSection]; the row/card widgets stay pure presenters.
-class _EpisodeViewData {
-  _EpisodeViewData({
+class EpisodeViewData {
+  EpisodeViewData({
     required this.video,
     required this.season,
     required this.epNum,
@@ -68,7 +68,7 @@ class _EpisodeViewData {
   final double? rating;
   final int? runtimeMin;
 
-  static _EpisodeViewData from(
+  static EpisodeViewData from(
     Map<String, dynamic> video, {
     required int season,
     required bool english,
@@ -89,7 +89,7 @@ class _EpisodeViewData {
       String value => double.tryParse(value.trim()),
       _ => null,
     };
-    return _EpisodeViewData(
+    return EpisodeViewData(
       video: video,
       season: season,
       epNum: epNum,
@@ -108,8 +108,8 @@ class _EpisodeViewData {
   }
 }
 
-class _SeasonOption {
-  const _SeasonOption({
+class SeasonOption {
+  const SeasonOption({
     required this.season,
     required this.label,
     required this.count,
@@ -122,263 +122,335 @@ class _SeasonOption {
   final int watched;
 }
 
-/// The whole episodes block for a series with videos. Owns season/sort/view
-/// state so toggling never rebuilds the rest of the detail page.
-class EpisodesSection extends StatefulWidget {
-  const EpisodesSection({
-    super.key,
-    required this.item,
-    required this.english,
-    required this.entries,
-    required this.blurUnwatched,
-    required this.ratingsEnabled,
-    required this.savedView,
-    required this.onViewChange,
-    required this.onPlay,
-  });
+/// Owns the episodes subsystem state (season/sort/view) so toggling NEVER
+/// round-trips through AppState (Task 118 perf fix: the old path called
+/// app.setSetting on every view toggle, which rebuilt the whole detail page
+/// AND the offstage shell before the frame). The page listens to this
+/// controller and rebuilds only the slivers.
+class EpisodesController extends ChangeNotifier {
+  EpisodesController({
+    required MediaItem item,
+    required List<WatchHistoryEntry> entries,
+    required String savedView,
+  })  : _item = item,
+        _entries = entries,
+        _savedView = savedView {
+    _rebuild();
+  }
 
-  final MediaItem item;
+  MediaItem _item;
+  List<WatchHistoryEntry> _entries;
+  String _savedView;
+  late List<Map<String, dynamic>> _sorted;
+  late List<int> _seasons;
 
-  /// Watch-history entries for this title only (drives watched/progress).
-  final List<WatchHistoryEntry> entries;
-  final bool english;
+  int? pickedSeason;
+  bool sortDesc = false;
 
-  /// `blurEpisodeThumbnails` setting.
-  final bool blurUnwatched;
+  /// Local view override ('list' | 'grid'); null = follow savedView/auto.
+  String? viewOverride;
 
-  /// `ratingsEnabled` setting — false hides the per-episode IMDb chips.
-  final bool ratingsEnabled;
+  MediaItem get item => _item;
+  List<Map<String, dynamic>> get sortedVideos => _sorted;
+  List<int> get seasons => _seasons;
+  String get savedView => _savedView;
 
-  /// Persisted `episodesView` setting: 'auto' | 'list' | 'grid'.
-  final String savedView;
+  /// Called by the page on every rebuild with the freshest data. NEVER
+  /// notifies (it runs inside build); item identity changes are picked up
+  /// silently while season/sort/view survive the refresh.
+  void update({
+    required MediaItem item,
+    required List<WatchHistoryEntry> entries,
+    required String savedView,
+  }) {
+    final itemChanged = !identical(item, _item);
+    _item = item;
+    _entries = entries;
+    if (savedView != _savedView) {
+      _savedView = savedView;
+      viewOverride = null;
+    }
+    if (itemChanged) _rebuild();
+  }
 
-  /// Persists the new view ('list' | 'grid') via app.setSetting.
-  final ValueChanged<String> onViewChange;
-
-  /// Plays the tapped episode's video through the detail page's flow.
-  final ValueChanged<Map<String, dynamic>> onPlay;
-
-  @override
-  State<EpisodesSection> createState() => _EpisodesSectionState();
-}
-
-class _EpisodesSectionState extends State<EpisodesSection> {
-  int? _pickedSeason;
-  bool _sortDesc = false;
-
-  String _seasonLabel(int season) => season == 0
-      ? (widget.english ? 'Specials' : 'حلقات خاصة')
-      : (widget.english ? 'Season $season' : 'الموسم $season');
-
-  @override
-  Widget build(BuildContext context) {
-    final item = widget.item;
-    final english = widget.english;
-    final videos = sortEpisodes(item.videos);
-    final now = DateTime.now();
-    final seasons = <int>{
-      for (final video in videos)
+  void _rebuild() {
+    _sorted = sortEpisodes(_item.videos);
+    _seasons = <int>{
+      for (final video in _sorted)
         if ((video['season'] as num?) != null) (video['season'] as num).toInt(),
     }.toList()
       ..sort();
+  }
 
-    // Header is shared by the populated and empty states.
-    final header = Padding(
-      padding: const EdgeInsetsDirectional.only(bottom: 12),
-      child: Text(
-        english ? 'Episodes' : 'الحلقات',
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: HorseTheme.ink,
+  int get effectiveSeason {
+    if (_seasons.isEmpty) return 0;
+    return pickedSeason ??
+        _sessionSeason[_item.id] ??
+        defaultSeason(
+          videos: _sorted,
+          history: _entries,
+          itemId: _item.id,
+          now: DateTime.now(),
+        ) ??
+        _seasons.first;
+  }
+
+  String seasonLabel(int season, bool english) => season == 0
+      ? (english ? 'Specials' : 'حلقات خاصة')
+      : (english ? 'Season $season' : 'الموسم $season');
+
+  List<SeasonOption> seasonOptions(bool english) {
+    final progressMap = _progressMap();
+    return [
+      for (final season in _seasons)
+        SeasonOption(
+          season: season,
+          label: seasonLabel(season, english),
+          count: _sorted
+              .where((v) => (v['season'] as num?)?.toInt() == season)
+              .length,
+          watched: _sorted
+              .where((v) => (v['season'] as num?)?.toInt() == season)
+              .where((v) => isEpisodeWatched(progressMap, v, _item.id))
+              .length,
+        ),
+    ];
+  }
+
+  List<EpisodeViewData> seasonItems({
+    required bool english,
+    required bool ratingsEnabled,
+  }) {
+    final season = effectiveSeason;
+    final progressMap = _progressMap();
+    final now = DateTime.now();
+    final items = [
+      for (final video in _sorted)
+        if ((video['season'] as num?)?.toInt() == season)
+          EpisodeViewData.from(
+            video,
+            season: season,
+            english: english,
+            progressMap: progressMap,
+            itemId: _item.id,
+            now: now,
+            ratingsEnabled: ratingsEnabled,
+          ),
+    ];
+    items.sort((a, b) => sortDesc ? b.epNum - a.epNum : a.epNum - b.epNum);
+    return items;
+  }
+
+  Map<String, EpisodeProgress> _progressMap() => episodeProgressMap(
+        entries: _entries,
+        itemId: _item.id,
+      );
+
+  /// View resolution: local override wins, then the persisted setting
+  /// ('list'/'grid'), then auto (phone list / ≥700px grid).
+  String resolvedView(bool isWide) =>
+      viewOverride ??
+      switch (_savedView) {
+        'list' => 'list',
+        'grid' => 'grid',
+        _ => isWide ? 'grid' : 'list',
+      };
+
+  void pickSeason(int season) {
+    pickedSeason = season;
+    _sessionSeason[_item.id] = season;
+    notifyListeners();
+  }
+
+  void toggleSort() {
+    sortDesc = !sortDesc;
+    notifyListeners();
+  }
+
+  void setView(String view) {
+    viewOverride = view;
+    notifyListeners();
+  }
+}
+
+/// The episodes block as SLIVERS of the page's CustomScrollView (Task 118):
+/// header + toolbar in a box sliver, then the episodes as a TRUE SliverList.
+/// One scroll position for the whole page — scrolling past the end of the
+/// list continues the page (the old 68vh nested scroller swallowed the drag
+/// at its edge and stranded the user), while SliverList keeps native
+/// virtualization for 100+ episode seasons.
+List<Widget> buildEpisodeSlivers({
+  required EpisodesController controller,
+  required bool english,
+  required bool isWide,
+  required double contentWidth,
+  required bool blurUnwatched,
+  required bool ratingsEnabled,
+  required ValueChanged<String> onViewChange,
+  required ValueChanged<Map<String, dynamic>> onPlay,
+}) {
+  final item = controller.item;
+  final videos = controller.sortedVideos;
+
+  final header = Padding(
+    padding: const EdgeInsetsDirectional.only(bottom: 12),
+    child: Text(
+      english ? 'Episodes' : 'الحلقات',
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        color: HorseTheme.ink,
+      ),
+    ),
+  );
+
+  if (videos.isEmpty || controller.seasons.isEmpty) {
+    return [
+      SliverToBoxAdapter(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            header,
+            Text(
+              english
+                  ? 'No episode information available for this series.'
+                  : 'لا تتوفر معلومات حلقات لهذا المسلسل.',
+              style: const TextStyle(fontSize: 14, color: HorseTheme.muted),
+            ),
+          ],
         ),
       ),
-    );
+    ];
+  }
 
-    if (videos.isEmpty || seasons.isEmpty) {
-      return Column(
+  final view = controller.resolvedView(isWide);
+  final cols = contentWidth < 600
+      ? 2
+      : contentWidth < 1024
+          ? 3
+          : contentWidth < 1360
+              ? 4
+              : 5;
+  final gap = contentWidth >= 1360
+      ? 20.0
+      : contentWidth >= 1024
+          ? 18.0
+          : contentWidth >= 600
+              ? 16.0
+              : 12.0;
+  final thumbWidth =
+      isWide ? 220.0 : (contentWidth * 0.4).clamp(120.0, 168.0).toDouble();
+
+  final seasonControl = controller.seasons.length > 1
+      ? _SeasonDropdown(
+          key: ValueKey('season-${item.id}'),
+          options: controller.seasonOptions(english),
+          value: controller.effectiveSeason,
+          english: english,
+          onChanged: controller.pickSeason,
+        )
+      : Container(
+          height: 48,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            english ? '${videos.length} episodes' : '${videos.length} حلقة',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: HorseTheme.muted,
+            ),
+          ),
+        );
+
+  final sortChip = _SortChip(
+    english: english,
+    sortDesc: controller.sortDesc,
+    onTap: controller.toggleSort,
+  );
+  final viewToggle = _ViewToggle(
+    english: english,
+    view: view,
+    onViewChange: onViewChange,
+  );
+
+  // One adjacent row: season · sort · view (user mandate, Task 118). The
+  // season pill is CONTENT-SIZED instead of stretched, and the Wrap keeps
+  // the trio on a single line on wide canvases, wrapping gracefully when a
+  // phone is too narrow.
+  final toolbar = Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: [seasonControl, sortChip, viewToggle],
+  );
+
+  final items = controller.seasonItems(
+    english: english,
+    ratingsEnabled: ratingsEnabled,
+  );
+  bool blurred(EpisodeViewData entry) =>
+      blurUnwatched && !entry.watched && entry.progress <= 0.02;
+
+  return [
+    SliverToBoxAdapter(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           header,
-          Text(
-            english
-                ? 'No episode information available for this series.'
-                : 'لا تتوفر معلومات حلقات لهذا المسلسل.',
-            style: const TextStyle(fontSize: 14, color: HorseTheme.muted),
+          // RepaintBoundary: the three glass pills' blur layers don't churn
+          // when the list scrolls or the hero repaints.
+          RepaintBoundary(
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(bottom: 12),
+              child: toolbar,
+            ),
           ),
         ],
-      );
-    }
-
-    final progressMap = episodeProgressMap(
-      entries: widget.entries,
-      itemId: item.id,
-    );
-    final effectiveSeason = _pickedSeason ??
-        _sessionSeason[item.id] ??
-        defaultSeason(
-          videos: videos,
-          history: widget.entries,
-          itemId: item.id,
-          now: now,
-        ) ??
-        seasons.first;
-    final seasonVideos = [
-      for (final video in videos)
-        if ((video['season'] as num?)?.toInt() == effectiveSeason) video,
-    ];
-    var items = [
-      for (final video in seasonVideos)
-        _EpisodeViewData.from(
-          video,
-          season: effectiveSeason,
-          english: english,
-          progressMap: progressMap,
-          itemId: item.id,
-          now: now,
-          ratingsEnabled: widget.ratingsEnabled,
-        ),
-    ];
-    items.sort((a, b) => _sortDesc ? b.epNum - a.epNum : a.epNum - b.epNum);
-
-    final seasonOptions = [
-      for (final season in seasons)
-        _SeasonOption(
-          season: season,
-          label: _seasonLabel(season),
-          count: videos
-              .where((v) => (v['season'] as num?)?.toInt() == season)
-              .length,
-          watched: videos
-              .where((v) => (v['season'] as num?)?.toInt() == season)
-              .where((v) => isEpisodeWatched(progressMap, v, item.id))
-              .length,
-        ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        header,
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final isWide = MediaQuery.sizeOf(context).width >= 700;
-
-            // View mode: explicit setting wins; auto = phone list / ≥700 grid.
-            final view = switch (widget.savedView) {
-              'list' => 'list',
-              'grid' => 'grid',
-              _ => isWide ? 'grid' : 'list',
-            };
-            final cols = width < 600
-                ? 2
-                : width < 1024
-                    ? 3
-                    : width < 1360
-                        ? 4
-                        : 5;
-            final gap = width >= 1360
-                ? 20.0
-                : width >= 1024
-                    ? 18.0
-                    : width >= 600
-                        ? 16.0
-                        : 12.0;
-            final thumbWidth =
-                isWide ? 220.0 : (width * 0.4).clamp(120.0, 168.0).toDouble();
-
-            final seasonControl = seasons.length > 1
-                ? _SeasonDropdown(
-                    key: ValueKey('season-${item.id}'),
-                    options: seasonOptions,
-                    value: effectiveSeason,
-                    english: english,
-                    onChanged: (season) {
-                      setState(() {
-                        _pickedSeason = season;
-                        _sessionSeason[item.id] = season;
-                      });
-                    },
-                  )
-                : Container(
-                    height: 48,
-                    alignment: AlignmentDirectional.centerStart,
-                    child: Text(
-                      english
-                          ? '${videos.length} episodes'
-                          : '${videos.length} حلقة',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: HorseTheme.muted,
-                      ),
-                    ),
-                  );
-
-            final sortChip = _SortChip(
-              english: english,
-              sortDesc: _sortDesc,
-              onTap: () => setState(() => _sortDesc = !_sortDesc),
-            );
-            final viewToggle = _ViewToggle(
-              english: english,
-              view: view,
-              onViewChange: widget.onViewChange,
-            );
-
-            final toolbar = width >= 440
-                ? Row(
-                    children: [
-                      seasonControl,
-                      const Spacer(),
-                      sortChip,
-                      const SizedBox(width: 8),
-                      viewToggle,
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      seasonControl,
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Spacer(),
-                          sortChip,
-                          const SizedBox(width: 8),
-                          viewToggle,
-                        ],
-                      ),
-                    ],
-                  );
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(bottom: 12),
-                  child: toolbar,
-                ),
-                _EpisodeScroller(
-                  items: items,
-                  view: view,
-                  cols: cols,
-                  gap: gap,
-                  thumbWidth: thumbWidth,
-                  isWide: isWide,
-                  english: english,
-                  backdropUrl: item.background,
-                  blurUnwatched: widget.blurUnwatched,
-                  onPlay: widget.onPlay,
+      ),
+    ),
+    if (items.isEmpty)
+      const SliverToBoxAdapter(child: SizedBox.shrink())
+    else if (view == 'grid')
+      SliverList.builder(
+        itemCount: (items.length + cols - 1) ~/ cols,
+        itemBuilder: (context, index) => Padding(
+          padding: EdgeInsetsDirectional.only(bottom: gap),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var k = 0; k < cols; k++) ...[
+                if (k > 0) SizedBox(width: gap),
+                Expanded(
+                  child: index * cols + k < items.length
+                      ? _EpisodeCard(
+                          item: items[index * cols + k],
+                          english: english,
+                          isWide: isWide,
+                          backdropUrl: item.background,
+                          blurred: blurred(items[index * cols + k]),
+                          onTap: () => onPlay(items[index * cols + k].video),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ],
-            );
-          },
+            ],
+          ),
         ),
-      ],
-    );
-  }
+      )
+    else
+      SliverList.builder(
+        itemCount: items.length,
+        itemBuilder: (context, index) => _EpisodeRow(
+          item: items[index],
+          thumbWidth: thumbWidth,
+          isWide: isWide,
+          english: english,
+          backdropUrl: item.background,
+          blurred: blurred(items[index]),
+          onTap: () => onPlay(items[index].video),
+        ),
+      ),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +468,7 @@ class _SeasonDropdown extends StatefulWidget {
     required this.onChanged,
   });
 
-  final List<_SeasonOption> options;
+  final List<SeasonOption> options;
   final int value;
   final bool english;
   final ValueChanged<int> onChanged;
@@ -411,8 +483,7 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
 
   Future<void> _openMenu() async {
     if (_open) return;
-    final box =
-        _triggerKey.currentContext?.findRenderObject() as RenderBox?;
+    final box = _triggerKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final anchor = box.localToGlobal(Offset.zero) & box.size;
     setState(() => _open = true);
@@ -422,8 +493,7 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
         context: context,
         anchor: anchor,
         width: 256,
-        maxHeight:
-            (MediaQuery.sizeOf(context).height * 0.6).clamp(0.0, 420.0),
+        maxHeight: (MediaQuery.sizeOf(context).height * 0.6).clamp(0.0, 420.0),
         builder: (close) => Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -433,8 +503,8 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                 onTap: () => close(option.season),
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   child: Row(
                     children: [
                       SizedBox(
@@ -492,10 +562,13 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
   Widget build(BuildContext context) {
     final current =
         widget.options.where((o) => o.season == widget.value).firstOrNull;
-    final label = current?.label ??
-        (widget.english ? 'Select season' : 'اختر الموسم');
+    final label =
+        current?.label ?? (widget.english ? 'Select season' : 'اختر الموسم');
+    // Content-sized (Task 118): no minWidth forcing the pill to fill the
+    // row — the label + chevron set the width, capped at 240dp for very
+    // long labels (the web contract is min-w-40, content-sized).
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
+      constraints: const BoxConstraints(maxWidth: 240),
       child: GlassPillSurface(
         child: Material(
           type: MaterialType.transparency,
@@ -507,8 +580,9 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
               child: Padding(
                 padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 12, 0),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Text(
                         label,
                         maxLines: 1,
@@ -597,17 +671,18 @@ class _SortChip extends StatelessWidget {
 }
 
 /// Glass pill with two 40px circles — list / grid; active = white/16 fill
-/// + gold icon. Persisted through [EpisodesSection.onViewChange].
+/// + gold icon. The page wires the tap to the EpisodesController + a
+/// fire-and-forget settings persist (never a global rebuild).
 class _ViewToggle extends StatelessWidget {
   const _ViewToggle({
     required this.english,
     required this.view,
-    required this.onViewChange,
+    this.onViewChange,
   });
 
   final bool english;
   final String view;
-  final ValueChanged<String> onViewChange;
+  final ValueChanged<String>? onViewChange;
 
   Widget _segment({
     required IconData icon,
@@ -618,7 +693,7 @@ class _ViewToggle extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: active ? null : () => onViewChange(value),
+        onTap: active ? null : () => onViewChange?.call(value),
         customBorder: const CircleBorder(),
         child: Container(
           width: 40,
@@ -665,99 +740,8 @@ class _ViewToggle extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Scroller + rows/cards
+// Rows/cards (built as slivers by [buildEpisodeSlivers])
 // ---------------------------------------------------------------------------
-
-class _EpisodeScroller extends StatelessWidget {
-  const _EpisodeScroller({
-    required this.items,
-    required this.view,
-    required this.cols,
-    required this.gap,
-    required this.thumbWidth,
-    required this.isWide,
-    required this.english,
-    required this.backdropUrl,
-    required this.blurUnwatched,
-    required this.onPlay,
-  });
-
-  final List<_EpisodeViewData> items;
-  final String view;
-  final int cols;
-  final double gap;
-  final double thumbWidth;
-  final bool isWide;
-  final bool english;
-
-  /// Series-level backdrop — the last art fallback before the placeholder.
-  final String? backdropUrl;
-  final bool blurUnwatched;
-  final ValueChanged<Map<String, dynamic>> onPlay;
-
-  bool _blurred(_EpisodeViewData item) =>
-      blurUnwatched && !item.watched && item.progress <= 0.02;
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
-    final viewportHeight = MediaQuery.sizeOf(context).height;
-    final scrollable = items.length > 6;
-    final listView = ListView.builder(
-      shrinkWrap: !scrollable,
-      physics:
-          scrollable ? null : const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      itemCount:
-          view == 'grid' ? (items.length + cols - 1) ~/ cols : items.length,
-      itemBuilder: (context, index) {
-        if (view == 'grid') {
-          return Padding(
-            padding: EdgeInsetsDirectional.only(bottom: gap),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var k = 0; k < cols; k++) ...[
-                  if (k > 0) SizedBox(width: gap),
-                  Expanded(
-                    child: index * cols + k < items.length
-                        ? _EpisodeCard(
-                            item: items[index * cols + k],
-                            english: english,
-                            isWide: isWide,
-                            backdropUrl: backdropUrl,
-                            blurred: _blurred(items[index * cols + k]),
-                            onTap: () => onPlay(items[index * cols + k].video),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ],
-            ),
-          );
-        }
-        final item = items[index];
-        return _EpisodeRow(
-          item: item,
-          thumbWidth: thumbWidth,
-          isWide: isWide,
-          english: english,
-          backdropUrl: backdropUrl,
-          blurred: _blurred(item),
-          onTap: () => onPlay(item.video),
-        );
-      },
-    );
-    if (!scrollable) return listView;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: SizedBox(
-        height: viewportHeight * 0.68,
-        child: listView,
-      ),
-    );
-  }
-}
 
 /// List row: thumbnail at the inline-start (width = [thumbWidth]), text
 /// block beside it — title (2 lines), meta line, story (2 lines).
@@ -772,7 +756,7 @@ class _EpisodeRow extends StatelessWidget {
     required this.onTap,
   });
 
-  final _EpisodeViewData item;
+  final EpisodeViewData item;
   final double thumbWidth;
   final bool isWide;
   final bool english;
@@ -805,7 +789,8 @@ class _EpisodeRow extends StatelessWidget {
           ),
           SizedBox(width: isWide ? 16 : 12),
           Expanded(
-            child: _EpisodeTextBlock(item: item, isWide: isWide, english: english),
+            child:
+                _EpisodeTextBlock(item: item, isWide: isWide, english: english),
           ),
         ],
       ),
@@ -841,7 +826,7 @@ class _EpisodeCard extends StatelessWidget {
     required this.onTap,
   });
 
-  final _EpisodeViewData item;
+  final EpisodeViewData item;
   final bool english;
   final bool isWide;
   final String? backdropUrl;
@@ -869,7 +854,8 @@ class _EpisodeCard extends StatelessWidget {
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsetsDirectional.symmetric(horizontal: 2),
-          child: _EpisodeTextBlock(item: item, isWide: isWide, english: english),
+          child:
+              _EpisodeTextBlock(item: item, isWide: isWide, english: english),
         ),
       ],
     );
@@ -900,7 +886,7 @@ class _EpisodeTextBlock extends StatelessWidget {
     required this.english,
   });
 
-  final _EpisodeViewData item;
+  final EpisodeViewData item;
   final bool isWide;
   final bool english;
 
@@ -982,8 +968,8 @@ class _EpisodeTextBlock extends StatelessWidget {
         if (item.upcoming) ...[
           const SizedBox(height: 8),
           Container(
-            padding:
-                const EdgeInsetsDirectional.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsetsDirectional.symmetric(
+                horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: HorseTheme.line),
@@ -1011,7 +997,12 @@ class _EpisodeTextBlock extends StatelessWidget {
 /// 16:9 episode art with the web overlay kit. The spoiler blur wraps the ART
 /// ONLY — the overlays are siblings outside the filtered subtree and stay
 /// sharp (the web contract).
-class EpisodeThumbnail extends StatelessWidget {
+///
+/// Task 118: stateful so the shimmer underlay DIES on the first image frame
+/// (the old one animated forever under the loaded image and restarted on
+/// every view/season switch), and the network image decodes at the drawn
+/// size via cacheWidth instead of holding a full-res texture.
+class EpisodeThumbnail extends StatefulWidget {
   const EpisodeThumbnail({
     super.key,
     required this.url,
@@ -1034,8 +1025,35 @@ class EpisodeThumbnail extends StatelessWidget {
   final bool blurred;
 
   @override
+  State<EpisodeThumbnail> createState() => _EpisodeThumbnailState();
+}
+
+class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.url.isEmpty) _loaded = true;
+  }
+
+  @override
+  void didUpdateWidget(EpisodeThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.url.isEmpty) _loaded = true;
+  }
+
+  void _markLoaded() {
+    if (!_loaded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _loaded = true);
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasUrl = url.isNotEmpty;
+    final hasUrl = widget.url.isNotEmpty;
     Widget art;
     if (!hasUrl) {
       art = _placeholder();
@@ -1043,28 +1061,43 @@ class EpisodeThumbnail extends StatelessWidget {
       art = Stack(
         fit: StackFit.expand,
         children: [
-          const Positioned.fill(
-            child: ShimmerBox(borderRadius: BorderRadius.zero),
-          ),
+          if (!_loaded)
+            const Positioned.fill(
+              child: ShimmerBox(borderRadius: BorderRadius.zero),
+            ),
           Positioned.fill(
-            child: Image.network(
-              url,
-              fit: BoxFit.cover,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                if (wasSynchronouslyLoaded) return child;
-                return AnimatedOpacity(
-                  opacity: frame == null ? 0 : 1,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  child: child,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                return Image.network(
+                  widget.url,
+                  fit: BoxFit.cover,
+                  cacheWidth:
+                      (constraints.maxWidth * dpr).round().clamp(1, 4096),
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) {
+                    if (frame != null || wasSynchronouslyLoaded) {
+                      _markLoaded();
+                    }
+                    if (wasSynchronouslyLoaded) return child;
+                    return AnimatedOpacity(
+                      opacity: frame == null ? 0 : 1,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                      child: child,
+                    );
+                  },
+                  errorBuilder: (_, __, ___) {
+                    _markLoaded();
+                    return _placeholder();
+                  },
                 );
               },
-              errorBuilder: (_, __, ___) => _placeholder(),
             ),
           ),
         ],
       );
-      if (blurred) {
+      if (widget.blurred) {
         art = ImageFiltered(
           imageFilter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Transform.scale(
@@ -1078,8 +1111,10 @@ class EpisodeThumbnail extends StatelessWidget {
       }
     }
 
-    final showProgress = !watched && progress > 0.02 && progress < kEpisodeWatchedThreshold;
-    final showRating = rating != null && rating! > 0;
+    final showProgress = !widget.watched &&
+        widget.progress > 0.02 &&
+        widget.progress < kEpisodeWatchedThreshold;
+    final showRating = widget.rating != null && widget.rating! > 0;
     final endRadius = const BorderRadiusDirectional.horizontal(
       end: Radius.circular(3),
     ).resolve(Directionality.of(context));
@@ -1090,7 +1125,8 @@ class EpisodeThumbnail extends StatelessWidget {
         aspectRatio: 16 / 9,
         child: Stack(
           children: [
-            Positioned.fill(child: ColoredBox(color: HorseTheme.raised, child: art)),
+            Positioned.fill(
+                child: ColoredBox(color: HorseTheme.raised, child: art)),
             // Legibility scrim for the bottom overlay row.
             Positioned(
               left: 0,
@@ -1118,7 +1154,7 @@ class EpisodeThumbnail extends StatelessWidget {
                 child: Directionality(
                   textDirection: TextDirection.ltr,
                   child: Text(
-                    'E$episodeNumber',
+                    'E${widget.episodeNumber}',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1130,7 +1166,7 @@ class EpisodeThumbnail extends StatelessWidget {
                 ),
               ),
             ),
-            if (watched)
+            if (widget.watched)
               PositionedDirectional(
                 bottom: 6,
                 start: 6,
@@ -1142,7 +1178,7 @@ class EpisodeThumbnail extends StatelessWidget {
                           size: 12, color: _kWatchedGreen),
                       const SizedBox(width: 4),
                       Text(
-                        watchedLabel,
+                        widget.watchedLabel,
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -1183,7 +1219,7 @@ class EpisodeThumbnail extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          rating!.toStringAsFixed(1),
+                          widget.rating!.toStringAsFixed(1),
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -1207,7 +1243,7 @@ class EpisodeThumbnail extends StatelessWidget {
                   color: Colors.black.withValues(alpha: .35),
                   alignment: AlignmentDirectional.centerStart,
                   child: FractionallySizedBox(
-                    widthFactor: progress.clamp(0.0, 1.0),
+                    widthFactor: widget.progress.clamp(0.0, 1.0),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: _kProgressBarRed,
@@ -1234,7 +1270,7 @@ class EpisodeThumbnail extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          '$episodeNumber',
+          '${widget.episodeNumber}',
           style: TextStyle(
             fontSize: 30,
             fontWeight: FontWeight.w900,

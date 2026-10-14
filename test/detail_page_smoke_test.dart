@@ -1,5 +1,6 @@
 // Widget smoke test — pumps the rebuilt detail presentation widgets
-// presentation widgets on phone + tablet sizes to catch layout exceptions.
+// (hero + the Task 118 sliver episodes composition) on phone + tablet sizes
+// to catch layout exceptions.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,79 +43,94 @@ void main() {
     ],
   );
 
-  Widget harness(double width, double height) => MaterialApp(
-        theme: ThemeData.dark(),
-        home: MediaQuery(
-          data: MediaQueryData(size: Size(width, height)),
-          child: Scaffold(
-            body: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  DetailHero(
+  Widget harness(double width, double height) {
+    final isWide = width >= 700;
+    // Fresh controller per pump — mirrors how the page creates it lazily.
+    final controller = EpisodesController(
+      item: item,
+      entries: const [],
+      savedView: 'auto',
+    );
+    return MaterialApp(
+      theme: ThemeData.dark(),
+      home: MediaQuery(
+        data: MediaQueryData(size: Size(width, height)),
+        child: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 240,
+                  child: DetailHero(
                     item: item,
                     backdropUrl: null,
                     logoUrl: null,
-                    isWide: width >= 700,
+                    isWide: isWide,
                     viewportHeight: height,
                     viewportWidth: width,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      children: [
-                        DetailMetaRow(item: item, isWide: width >= 700),
-                        DetailSynopsis(
-                          description: item.description!,
-                          isWide: width >= 700,
-                          viewportWidth: width,
-                        ),
-                        DetailActionRow(
-                          english: false,
-                          isWide: width >= 700,
-                          inList: false,
-                          showTrackAnime: true,
-                          primaryLabel: 'مشاهدة',
-                          primaryIsResume: false,
-                          loading: false,
-                          onPrimaryPressed: () {},
-                          onToggleWatchlist: () {},
-                          onOpenStreams: () {},
-                          onTrackAnime: () {},
-                          onShare: () {},
-                          onAddToList: () {},
-                        ),
-                        DetailCastCrew(item: item, english: false),
-                        EpisodesSection(
-                          item: item,
-                          english: false,
-                          entries: const [],
-                          blurUnwatched: true,
-                          ratingsEnabled: true,
-                          savedView: 'auto',
-                          onViewChange: (_) {},
-                          onPlay: (_) {},
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+              ...buildEpisodeSlivers(
+                controller: controller,
+                english: false,
+                isWide: isWide,
+                contentWidth: width - (isWide ? 68.0 : 40.0),
+                blurUnwatched: true,
+                ratingsEnabled: true,
+                onViewChange: (_) {},
+                onPlay: (_) {},
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      DetailMetaRow(item: item, isWide: isWide),
+                      DetailSynopsis(
+                        description: item.description!,
+                        isWide: isWide,
+                        viewportWidth: width,
+                      ),
+                      DetailActionRow(
+                        english: false,
+                        isWide: isWide,
+                        inList: false,
+                        showTrackAnime: true,
+                        primaryLabel: 'مشاهدة',
+                        primaryIsResume: false,
+                        loading: false,
+                        onPrimaryPressed: () {},
+                        onToggleWatchlist: () {},
+                        onOpenStreams: () {},
+                        onTrackAnime: () {},
+                        onShare: () {},
+                        onAddToList: () {},
+                      ),
+                      DetailCastCrew(item: item, english: false),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 
-
-  // The hero skeleton shimmers forever by design — pumpAndSettle would never
-  // settle; pump a fixed frame budget instead.
+  // The hero shimmer may still be alive during the first frames — pump a
+  // fixed frame budget instead of pumpAndSettle.
   Future<void> settleFrames(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
       await tester.pump(const Duration(milliseconds: 60));
     }
   }
 
-  for (final (label, size) in [('phone', const Size(400, 800)), ('tablet', const Size(900, 1200))]) {
+  for (final (label, size) in [
+    ('phone', const Size(400, 800)),
+    ('tablet', const Size(900, 1200)),
+  ]) {
     testWidgets('layout smoke — $label', (tester) async {
       await tester.pumpWidget(harness(size.width, size.height));
       await tester.pump(const Duration(milliseconds: 50));
@@ -128,11 +144,12 @@ void main() {
       await settleFrames(tester);
 
       // Season dropdown → glass menu opens with season options. Scoped
-      // finder: EpisodesSection's chevron (the DetailActionRow chevron is a
-      // different widget), scrolled into view before the tap.
+      // finder: the season pill carries the ValueKey('season-<id>') key
+      // (the DetailActionRow chevron is a different widget), scrolled into
+      // view before the tap.
       final seasonTrigger = find
           .descendant(
-            of: find.byType(EpisodesSection),
+            of: find.byKey(const ValueKey('season-tt1')),
             matching: find.byIcon(Icons.keyboard_arrow_down_rounded),
           )
           .first;
@@ -150,10 +167,19 @@ void main() {
       await tester.pump(const Duration(milliseconds: 120));
       expect(tester.takeException(), isNull);
 
-      // Action menu trigger → glass menu with the 4 entries.
+      // Action menu trigger → glass menu with the 4 entries. The page is a
+      // real CustomScrollView now (Task 118), so the action row may live
+      // below the viewport's build cache — scroll until it's instantiated.
+      final actionRow = find.byType(DetailActionRow);
+      await tester.scrollUntilVisible(
+        actionRow,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump(const Duration(milliseconds: 100));
       final menuTrigger = find
           .descendant(
-            of: find.byType(DetailActionRow),
+            of: actionRow,
             matching: find.byIcon(Icons.keyboard_arrow_down_rounded),
           )
           .first;

@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/glass_navigation.dart';
 import 'detail_glass.dart';
 
 /// Press feedback shared by the action-row controls (web: active:scale-…).
@@ -35,7 +36,8 @@ class _PressableScaleState extends State<_PressableScale> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: widget.onTap == null ? null : (_) => setState(() => _pressed = true),
+      onTapDown:
+          widget.onTap == null ? null : (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.onTap,
@@ -51,8 +53,11 @@ class _PressableScaleState extends State<_PressableScale> {
 
 const _cubicEmphasized = Cubic(0.2, 0, 0, 1);
 
-/// The 48dp glass back pill — start:16, top: safeTop+12, black/55 fill,
-/// 1px white/15 border, blur-12 backdrop, RTL-mirrored automatically.
+/// The compact glass back button (user mandate, Task 118): a small circular
+/// liquid-glass button in the top-start corner wearing the EXACT same
+/// recipe as the home-page search button (GlassSearchButton) — saturate+
+/// blur backdrop, 0.434 panel fill, 160° sheen, 1px tint ring — just 40dp
+/// with the locale-aware back arrow, RTL-mirrored automatically.
 class DetailBackPill extends StatelessWidget {
   const DetailBackPill({super.key, required this.english});
 
@@ -61,7 +66,6 @@ class DetailBackPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safeTop = MediaQuery.paddingOf(context).top;
-    const radius = BorderRadius.all(Radius.circular(48));
     return Padding(
       padding: EdgeInsetsDirectional.only(
         start: 16,
@@ -69,59 +73,17 @@ class DetailBackPill extends StatelessWidget {
       ),
       child: Align(
         alignment: AlignmentDirectional.topStart,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(color: Colors.white.withValues(alpha: .15)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .35),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: radius,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Material(
-                color: Colors.black.withValues(alpha: .55),
-                child: InkWell(
-                  onTap: () {
-                    final navigator = Navigator.of(context);
-                    if (navigator.canPop()) navigator.pop();
-                  },
-                  child: Padding(
-                    padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 16, 0),
-                    child: Container(
-                      height: 48,
-                      alignment: AlignmentDirectional.center,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.arrow_back_rounded,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            english ? 'Back' : 'رجوع',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        child: GlassSearchButton(
+          size: 40,
+          tooltip: english ? 'Back' : 'رجوع',
+          // RTL: Arabic pages go forward-pointing (right), English pages
+          // back-pointing (left) — the arrow follows reading direction.
+          icon:
+              english ? Icons.arrow_back_rounded : Icons.arrow_forward_rounded,
+          onPressed: () {
+            final navigator = Navigator.of(context);
+            if (navigator.canPop()) navigator.pop();
+          },
         ),
       ),
     );
@@ -152,8 +114,11 @@ class DetailHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!isWide) return _buildPhoneCard(context);
-    return _buildWideBand(context);
+    // RepaintBoundary: hero art/scrims repaint independently of the episodes
+    // list and vice versa (view/season toggles never invalidate this layer).
+    return RepaintBoundary(
+      child: !isWide ? _buildPhoneCard(context) : _buildWideBand(context),
+    );
   }
 
   // ---------------- phone card variant ----------------
@@ -317,30 +282,56 @@ class DetailHero extends StatelessWidget {
   }
 }
 
-/// Backdrop artwork: skeleton underlay + 300ms fade on load, never broken.
-class _HeroImage extends StatelessWidget {
+/// Backdrop artwork: shimmer underlay ONLY until the first image frame
+/// lands (Task 118 perf fix — the old underlay ran an infinite animation
+/// controller for the page's whole lifetime), then a plain painted stack.
+class _HeroImage extends StatefulWidget {
   const _HeroImage({required this.url, this.alignment = Alignment.center});
 
   final String? url;
   final Alignment alignment;
 
   @override
+  State<_HeroImage> createState() => _HeroImageState();
+}
+
+class _HeroImageState extends State<_HeroImage> {
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // No artwork at all — the shimmer never has a frame to retire it.
+    if ((widget.url ?? '').isEmpty) _markLoaded();
+  }
+
+  void _markLoaded() {
+    if (!_loaded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _loaded = true);
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final src = url;
+    final src = widget.url;
     return Stack(
       fit: StackFit.expand,
       children: [
         const ColoredBox(color: HorseTheme.raised),
-        const Positioned.fill(
-          child: ShimmerBox(borderRadius: BorderRadius.zero),
-        ),
+        if (!_loaded && src != null && src.isNotEmpty)
+          const Positioned.fill(
+            child: ShimmerBox(borderRadius: BorderRadius.zero),
+          ),
         if (src != null && src.isNotEmpty)
           Positioned.fill(
             child: Image.network(
               src,
               fit: BoxFit.cover,
-              alignment: alignment,
+              alignment: widget.alignment,
               frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (frame != null || wasSynchronouslyLoaded) _markLoaded();
                 if (wasSynchronouslyLoaded) return child;
                 return AnimatedOpacity(
                   opacity: frame == null ? 0 : 1,
@@ -349,8 +340,10 @@ class _HeroImage extends StatelessWidget {
                   child: child,
                 );
               },
-              errorBuilder: (_, __, ___) =>
-                  const ColoredBox(color: HorseTheme.raised),
+              errorBuilder: (_, __, ___) {
+                _markLoaded();
+                return const ColoredBox(color: HorseTheme.raised);
+              },
             ),
           ),
       ],
@@ -418,7 +411,8 @@ class _HeroTitleLogo extends StatelessWidget {
         color: Colors.white,
         height: 1.15,
         shadows: const [
-          Shadow(offset: Offset(0, 6), blurRadius: 20, color: Color(0xE6000000)),
+          Shadow(
+              offset: Offset(0, 6), blurRadius: 20, color: Color(0xE6000000)),
         ],
       ),
     );
@@ -480,9 +474,8 @@ class DetailMetaRow extends StatelessWidget {
     final score = imdb != null && imdb > 0 ? item.rating!.trim() : null;
     final year = item.releaseInfo?.trim();
     final runtime = item.runtime?.trim();
-    final genre = item.genres
-        .where((value) => value.trim().isNotEmpty)
-        .firstOrNull;
+    final genre =
+        item.genres.where((value) => value.trim().isNotEmpty).firstOrNull;
     final hasAny = score != null ||
         (year != null && year.isNotEmpty) ||
         (runtime != null && runtime.isNotEmpty) ||
@@ -568,9 +561,8 @@ class DetailMetaRow extends StatelessWidget {
           constraints: BoxConstraints(minWidth: constraints.maxWidth),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: isWide
-                ? MainAxisAlignment.start
-                : MainAxisAlignment.center,
+            mainAxisAlignment:
+                isWide ? MainAxisAlignment.start : MainAxisAlignment.center,
             children: [
               for (final chip in chips)
                 Padding(
@@ -816,8 +808,7 @@ class _DetailActionRowState extends State<DetailActionRow> {
 
   Future<void> _toggleMenu() async {
     if (_menuOpen) return;
-    final box =
-        _menuKey.currentContext?.findRenderObject() as RenderBox?;
+    final box = _menuKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final anchor = box.localToGlobal(Offset.zero) & box.size;
     setState(() => _menuOpen = true);
@@ -1123,8 +1114,7 @@ class _ShimmerBoxState extends State<ShimmerBox>
 
   @override
   Widget build(BuildContext context) {
-    final radius =
-        widget.borderRadius ?? BorderRadius.circular(12);
+    final radius = widget.borderRadius ?? BorderRadius.circular(12);
     Widget box = LayoutBuilder(
       builder: (context, constraints) {
         final width = widget.width ?? constraints.maxWidth;
@@ -1201,7 +1191,8 @@ class DetailLoadingSkeleton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: ShimmerBox(
           height: heroHeight,
-          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
+          borderRadius:
+              const BorderRadius.vertical(bottom: Radius.circular(28)),
         ),
       );
     }
@@ -1216,16 +1207,26 @@ class DetailLoadingSkeleton extends StatelessWidget {
             crossAxisAlignment: cross,
             children: [
               const SizedBox(height: 24),
-              const ShimmerBox(width: 288, height: 24, borderRadius: BorderRadius.all(Radius.circular(999))),
+              const ShimmerBox(
+                  width: 288,
+                  height: 24,
+                  borderRadius: BorderRadius.all(Radius.circular(999))),
               const SizedBox(height: 12),
-              const ShimmerBox(height: 14, borderRadius: BorderRadius.all(Radius.circular(8))),
+              const ShimmerBox(
+                  height: 14,
+                  borderRadius: BorderRadius.all(Radius.circular(8))),
               const SizedBox(height: 12),
               FractionallySizedBox(
                 widthFactor: 2 / 3,
-                child: const ShimmerBox(height: 14, borderRadius: BorderRadius.all(Radius.circular(8))),
+                child: const ShimmerBox(
+                    height: 14,
+                    borderRadius: BorderRadius.all(Radius.circular(8))),
               ),
               const SizedBox(height: 14),
-              const ShimmerBox(width: 256, height: 52, borderRadius: BorderRadius.all(Radius.circular(999))),
+              const ShimmerBox(
+                  width: 256,
+                  height: 52,
+                  borderRadius: BorderRadius.all(Radius.circular(999))),
             ],
           ),
         ),

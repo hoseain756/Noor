@@ -9,22 +9,35 @@ import '../../core/theme/horse_theme.dart';
 // `features/shell/noor_dock_tabs.dart` (Task 107-d). Page-content bottom
 // clearance moved with it (`glassDockContentClearance`).
 
-/// Circular floating search button wearing the SAME liquid-glass recipe as
+/// Circular floating glass button wearing the SAME liquid-glass recipe as
 /// the glass dock (user mandate, Task 115: "same liquid glass as the bottom
 /// navigation"): saturate(1.35) + blur(12/14) backdrop, panel fill at
 /// alpha 0.434, the 160° tint sheen, and the 1px tint ring. The only
 /// adaptations for the circular form: the dock's straight 1px inset edges
 /// become curved specular (top) / dark (bottom) gradients, plus a soft drop
 /// shadow so the floating circle separates from scrolling content.
+///
+/// Task 118: parameterized with [icon] and [size] so the detail page's back
+/// button (and any future floating chrome) wears the exact same surface —
+/// defaults keep the original 48dp search look.
 class GlassSearchButton extends StatelessWidget {
   const GlassSearchButton({
     super.key,
     required this.tooltip,
     required this.onPressed,
+    this.icon = Icons.search_rounded,
+    this.size = 48,
   });
 
   final String tooltip;
   final VoidCallback onPressed;
+
+  /// Glyph inside the glass circle (search by default).
+  final IconData icon;
+
+  /// Circle diameter — 48 (dock spec) by default; smaller values shrink
+  /// every recipe layer proportionally (they are all fill-relative).
+  final double size;
 
   // glass_dock.dart's private recipe constants, mirrored verbatim.
   static const Color _kGlassTint = Color(0xFFBFE6F2); // rgb(191 230 242)
@@ -52,8 +65,8 @@ class GlassSearchButton extends StatelessWidget {
       ),
       child: ClipOval(
         child: SizedBox(
-          width: 48,
-          height: 48,
+          width: size,
+          height: size,
           child: Stack(
             children: [
               // Glass backdrop: blur(sigma) + saturate(1.35), then the panel
@@ -122,13 +135,13 @@ class GlassSearchButton extends StatelessWidget {
                   child: IconButton(
                     tooltip: tooltip,
                     onPressed: onPressed,
-                    icon: const Icon(Icons.search_rounded),
+                    icon: Icon(icon),
                     color: HorseTheme.ink,
-                    iconSize: 22,
+                    iconSize: size * 22 / 48,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 48,
-                      height: 48,
+                    constraints: BoxConstraints.tightFor(
+                      width: size,
+                      height: size,
                     ),
                   ),
                 ),
