@@ -93,11 +93,14 @@ class Top10Item extends StatelessWidget {
   /// hides ~35% of the digit (task range 25–35%).
   static const double _singleOverlap = 0.65;
 
-  /// Painted width of the tight "10" unit as a multiple of one digit.
-  static const double _tenWidthFactor = 1.6;
+  /// Horizontal pull of the "1" onto the "0" inside the tight "10" unit,
+  /// as a fraction of one digit width. The two outlines cross so the pair
+  /// reads as a single-digit-wide lockup (Netflix style).
+  static const double _tenOnePull = 0.30;
 
-  /// Poster start as a fraction of the "10" width: only the trailing edge of
-  /// the "0" is hidden (~25% of that digit) instead of most of it.
+  /// Poster start as a fraction of the rank width for rank 10. The "10"
+  /// unit is one digit wide, so only its trailing edge (~12%) is hidden
+  /// behind the poster and the crossing of the two digits stays visible.
   static const double _tenOverlap = 0.88;
 
   static final double _posterHeight = _posterWidth / _posterRatio;
@@ -108,11 +111,13 @@ class Top10Item extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTen = rank >= 10;
+    final isTen = rank == 10;
     // Task: font size is 1.0–1.1x the poster height.
     final fontSize = _posterHeight * 1.05;
+    // The "10" lockup occupies exactly one digit's width — the same
+    // footprint as ranks 1–9 — so only the poster-start fraction differs.
     final digitWidth = fontSize * _digitFactor;
-    final rankWidth = isTen ? digitWidth * _tenWidthFactor : digitWidth;
+    final rankWidth = digitWidth;
     final posterStart = rankWidth * (isTen ? _tenOverlap : _singleOverlap);
 
     // Center the number's text box (height: .78) against the poster, with a
@@ -150,8 +155,10 @@ class Top10Item extends StatelessWidget {
   }
 }
 
-/// Huge hollow digit: no fill, thin white rounded stroke, always Western
-/// digits laid out left-to-right (never mirrored to "01" in Arabic).
+/// Huge hollow rank number: no fill, thin white rounded stroke, always
+/// Western digits laid out left-to-right (never mirrored to "01" in Arabic).
+/// Rank 10 is a special tight lockup: the "1" and "0" overlap so the whole
+/// unit occupies a single digit's width.
 class OutlinedRankNumber extends StatelessWidget {
   const OutlinedRankNumber({
     super.key,
@@ -176,26 +183,42 @@ class OutlinedRankNumber extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (rank < 10) {
+    if (rank != 10) {
       return Directionality(
         textDirection: TextDirection.ltr,
         child: Text('$rank', style: _style),
       );
     }
-    // Rank 10 must read as one tight unit: the "0" is pulled toward the "1"
-    // so the two outlines nearly touch. The inner LTR direction keeps the
-    // digit order fixed even inside an RTL list.
+    // Rank 10 renders as ONE tight unit occupying a single digit's width:
+    // the "1" is pulled onto the "0" until the two outlines cross, so the
+    // digits overlap instead of sitting side by side with a gap. The inner
+    // LTR direction keeps the digit order fixed ("10", never "01") even
+    // inside an RTL list; the whole unit is mirrored as one block by the
+    // parent PositionedDirectional.
+    final digitWidth = fontSize * Top10Item._digitFactor;
     return Directionality(
       textDirection: TextDirection.ltr,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('1', style: _style),
-          Transform.translate(
-            offset: Offset(-fontSize * 0.12, 0),
-            child: Text('0', style: _style),
-          ),
-        ],
+      child: SizedBox(
+        width: digitWidth,
+        height: fontSize * .78,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // The "0" fills the digit box…
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Text('0', style: _style),
+            ),
+            // …and the "1" is pulled left onto it until the outlines
+            // intersect (one digit appears on top of the other).
+            Positioned(
+              left: -digitWidth * Top10Item._tenOnePull,
+              top: 0,
+              child: Text('1', style: _style),
+            ),
+          ],
+        ),
       ),
     );
   }
