@@ -190,6 +190,12 @@ class AppState extends ChangeNotifier {
     }
     await _persist();
     notifyListeners();
+
+    // Resume a Trakt browser handshake that was interrupted by a cold start:
+    // the relay entry (15 min TTL) may still be waiting for us.
+    if (await api.hasPendingTraktLink()) {
+      beginTraktRelayWatch();
+    }
   }
 
   Future<void> setLanguage(bool useEnglish) async {
@@ -442,10 +448,20 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> toggleWatchlist(MediaItem item) async {
-    watchlist = contains(item)
-        ? watchlist.where((entry) => entry.id != item.id).toList()
-        : [item, ...watchlist];
+    final adding = !contains(item);
+    watchlist = adding
+        ? [item, ...watchlist]
+        : watchlist.where((entry) => entry.id != item.id).toList();
     await _persistAndSync(const {NoorSyncService.bucketWatchlist});
+    // Mirror the change to the linked Trakt account (documented
+    // POST /sync/watchlist[//remove]). Best-effort push: only imdb-id items
+    // map to Trakt, and a failure never disturbs the local library.
+    if (linkedServices['trakt']?['linked'] == true &&
+        item.id.startsWith('tt')) {
+      unawaited(
+        api.pushTraktWatchlist(type: item.type, imdb: item.id, add: adding),
+      );
+    }
   }
 
   Future<void> createCustomList(String name, {String? description}) async {
@@ -1004,7 +1020,88 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _pushTimer?.cancel();
+    _traktRelayTimer?.cancel();
     sync.close();
     super.dispose();
+  }
+
+  // --------------------------------------------------------------------------
+  // Trakt browser-PKCE relay watcher (web companion callback bridge)
+  // --------------------------------------------------------------------------
+
+  Timer? _traktRelayTimer;
+  DateTime? _traktRelayDeadline;
+  Map<String, dynamic>? _traktLinkEvent;
+
+  /// Timestamp of the last Trakt link event already surfaced as a toast by
+  /// the link listener (guards against double-toasting one event).
+  int seenTraktLinkEventAt = 0;
+
+  /// Last finished Trakt link round (`{at, ok, reason?}`) — surfaced as a
+  /// toast by [IncomingLinkListener] wherever the user happens to be.
+  Map<String, dynamic>? get traktLinkEvent => _traktLinkEvent;
+
+  /// Watches the web companion relay while a browser Trakt handshake is in
+  /// flight: when the user approves on trakt.tv the browser lands on the
+  /// companion (the registered HTTPS redirect URI), which stores
+  /// code+state at /api/trakt/relay; we fetch it here and finish the
+  /// PKCE exchange. Runs app-wide so closing the linking sheet never loses
+  /// the callback.
+  void beginTraktRelayWatch() {
+    _traktRelayDeadline = DateTime.now().add(const Duration(minutes: 12));
+    _traktRelayTimer?.cancel();
+    _traktRelayTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => unawaited(_traktRelayTick()),
+    );
+  }
+
+  void _stopTraktRelayWatch() {
+    _traktRelayTimer?.cancel();
+    _traktRelayTimer = null;
+    _traktRelayDeadline = null;
+  }
+
+  Future<void> _traktRelayTick() async {
+    final deadline = _traktRelayDeadline;
+    if (deadline == null) return;
+    if (DateTime.now().isAfter(deadline) ||
+        linkedServices['trakt']?['linked'] == true) {
+      _stopTraktRelayWatch();
+      return;
+    }
+    final Map<String, dynamic> result;
+    try {
+      result = await api.pollTraktLink();
+    } catch (_) {
+      return;
+    }
+    final status = result['status']?.toString();
+    if (status == 'pending') return;
+    if (status == 'idle') {
+      // The pending flow was consumed, cancelled or never started — stop
+      // polling quietly (no user-facing event).
+      _stopTraktRelayWatch();
+      return;
+    }
+    _stopTraktRelayWatch();
+    if (status == 'success') {
+      await saveLinkedService('trakt', <String, dynamic>{
+        'linked': true,
+        'linkedAt': DateTime.now().millisecondsSinceEpoch,
+        if (result['username'] != null) 'username': result['username'],
+      });
+      _traktLinkEvent = <String, dynamic>{
+        'at': DateTime.now().millisecondsSinceEpoch,
+        'ok': true,
+      };
+    } else {
+      _traktLinkEvent = <String, dynamic>{
+        'at': DateTime.now().millisecondsSinceEpoch,
+        'ok': false,
+        'reason': result['reason']?.toString(),
+      };
+    }
+    notifyListeners();
   }
 }

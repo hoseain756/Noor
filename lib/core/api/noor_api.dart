@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:math' as math;
 
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../trakt/trakt_pkce.dart';
+import '../trakt/trakt_tokens.dart';
 
 /// Website-free API layer for Noor.
 ///
@@ -14,18 +15,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Plain (non-secret) state lives in [SharedPreferences], secrets live in
 /// [FlutterSecureStorage].
 ///
-/// Trakt linking uses RFC 7636 PKCE over the browser (the user's Trakt app is
-/// PKCE-only — Trakt issues NO client secret for it, and its device grant
-/// rejects secret-less exchanges, verified live): we open trakt.tv/oauth/
-/// authorize with an S256 code challenge and the browser bounces back to
-/// `noor://callback` where [completeTraktLink] swaps code+verifier for tokens.
+/// Trakt linking uses RFC 7636 PKCE over the system browser (the user's
+/// Trakt app is PKCE-only — the current official docs deprecate
+/// client_secret for user sign-in altogether): we open
+/// auth.trakt.tv/oauth/authorize with an S256 code challenge and the
+/// registered HTTPS redirect_uri (App Links return). The browser lands on
+/// the Noor web companion which relays `code`+`state` to /api/trakt/relay;
+/// the app polls it via [pollTraktLink] — or receives the link directly
+/// once Android App Links verification is in place. The legacy
+/// `noor://callback` custom scheme stays wired as a fallback
+/// ([completeTraktLink] accepts both), but the docs discourage custom
+/// schemes so nothing depends on it.
+///
+/// Access tokens live 7 days (docs) — [_validTraktAccessToken] transparently
+/// refreshes them single-flight before every authenticated call, and
+/// [unlinkService] revokes the session server-side (no secret needed).
 ///
 /// Storage map:
 ///  - secure 'noor.tmdb.user-token'      → TMDB credential override (v4 JWT
 ///    starting with 'eyJ' → Bearer header, otherwise treated as a v3 api_key)
 ///  - secure 'noor.trakt.pkce.verifier'  → in-flight PKCE code verifier
 ///  - secure 'noor.trakt.pkce.state'     → in-flight PKCE state (CSRF guard)
-///  - secure 'noor.trakt.refresh'        → Trakt refresh token
+///  - secure 'noor.trakt.pkce.redirect'  → redirect_uri used by this flow
+///  - secure 'noor.trakt.pkce.created'   → pending-flow creation (TTL)
+///  - secure 'noor.trakt.refresh'        → Trakt refresh token (single-use)
+///  - secure 'noor.trakt.expires'        → access-token expiry (epoch ms)
 ///  - secure `noor.<service>.token`     → linked-service access tokens
 ///  - prefs  'noor.debrid.service'       → active debrid service name
 ///  - secure `noor.debrid.<service>`     → debrid API key
@@ -54,12 +68,33 @@ class NoorApi {
   static const String defaultSimklClientSecret =
       'simkl_cs_bFZ4x7Sgrkc2hhslQDD38LVnkM7D1bI0Ym';
 
-  /// RFC 8252 custom-scheme redirect. The user registers `noor://callback` as
-  /// a Redirect URI on their Trakt app (one-time, trakt.tv/oauth/applications).
-  static const String traktRedirectUri = 'noor://callback';
+  // Trakt OAuth — current documented endpoints (developer.trakt.tv, 2026):
+  // authorize + token + revoke live on the auth host; data endpoints stay
+  // on api.trakt.tv. PKCE never sends a client_secret (deprecated for user
+  // sign-in; the user's app is PKCE-only and has none to send).
+  static const String traktAuthorizeUrl = 'https://auth.trakt.tv/oauth/authorize';
+  static const String traktTokenUrl = 'https://auth.trakt.tv/oauth/token';
+  static const String traktRevokeUrl = 'https://auth.trakt.tv/oauth/revoke';
 
-  static const String traktAuthorizeUrl = 'https://trakt.tv/oauth/authorize';
-  static const String traktTokenUrl = 'https://api.trakt.tv/oauth/token';
+  /// Primary return leg (documented): HTTPS on the Noor web companion — the
+  /// redirect_uri already registered on the user's Trakt app. The browser
+  /// lands there and the companion relays the code to the app; Android App
+  /// Links (assetlinks.json is served from the same domain) deliver the
+  /// link straight into the app once the signing-cert SHA-256 is published.
+  static const String traktHttpsRedirectBase =
+      'https://preview-chat-607a5306-ab5d-4ec1-9d61-23b1874d8c08.space-z.ai';
+
+  /// Companion endpoint that bridges the browser callback to the app.
+  static const String traktRelayPath = '/api/trakt/relay';
+
+  /// RFC 8252 fallback return — only active if the user registers it on
+  /// trakt.tv/oauth/applications. Never required: the docs discourage
+  /// custom schemes, so the HTTPS return above is the primary path.
+  static const String traktLegacySchemeRedirectUri = 'noor://callback';
+
+  /// redirect_uri used in BOTH the authorize request and the token exchange
+  /// — must byte-match the dashboard registration (case-sensitive per docs).
+  static const String traktRedirectUri = '$traktHttpsRedirectBase/';
 
   // --------------------------------------------------------------------------
   // Endpoints & timings
@@ -76,6 +111,15 @@ class NoorApi {
   static const Duration _debridTimeout = Duration(seconds: 25);
   static const Duration _ratingsTtl = Duration(hours: 6);
 
+  /// A pending browser handshake dies after this window; the relay drops
+  /// its entry on the same schedule.
+  static const Duration _traktFlowTtl = Duration(minutes: 15);
+
+  /// Proactively refresh when the access token has less than an hour left
+  /// (tokens live 7 days per the docs) so long playback sessions never hit
+  /// a mid-scrobble 401.
+  static const Duration _traktRefreshMargin = Duration(hours: 1);
+
   // --------------------------------------------------------------------------
   // Storage keys
   // --------------------------------------------------------------------------
@@ -84,7 +128,10 @@ class NoorApi {
   static const String _legacyTmdbUserTokenKey = 'horse.mobile.tmdb.user-key';
   static const String _traktPkceVerifierKey = 'noor.trakt.pkce.verifier';
   static const String _traktPkceStateKey = 'noor.trakt.pkce.state';
+  static const String _traktPkceRedirectKey = 'noor.trakt.pkce.redirect';
+  static const String _traktPkceCreatedAtKey = 'noor.trakt.pkce.created';
   static const String _traktRefreshKey = 'noor.trakt.refresh';
+  static const String _traktExpiryKey = 'noor.trakt.expires';
   static const String _debridServiceKey = 'noor.debrid.service';
   static const String _debridSecretPrefix = 'noor.debrid.';
   static const String _iptvPlaylistsKey = 'noor.iptv.playlists';
@@ -104,6 +151,12 @@ class NoorApi {
   String? _tmdbUserToken;
 
   final Map<String, String> _serviceTokens = <String, String>{};
+
+  /// Access-token expiry for Trakt (null = legacy token stored before
+  /// expiry tracking existed — used as-is until it 401s).
+  DateTime? _traktExpiresAt;
+
+  TraktTokenRefresher? _traktRefresherInstance;
 
   String? _debridService;
   String? _debridApiKey;
@@ -133,6 +186,13 @@ class NoorApi {
         _serviceTokens[service] = token;
       }
     }
+
+    final traktExpiry = int.tryParse(
+      await _secure.read(key: _traktExpiryKey) ?? '',
+    );
+    _traktExpiresAt = traktExpiry == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(traktExpiry);
 
     _debridService = _preferences!.getString(_debridServiceKey);
     if (_debridService != null) {
@@ -1171,26 +1231,35 @@ class NoorApi {
   }
 
   // --------------------------------------------------------------------------
-  // Trakt browser PKCE (RFC 7636/8252) — the user's Trakt registration is
-  // PKCE-only (Trakt issues NO client secret for it) and Trakt's device grant
-  // rejects secret-less exchanges (verified live: 400 empty body), so Trakt
-  // links through the external browser instead: authorize with an S256 code
-  // challenge, the OS bounces back to `noor://callback`, then the code +
-  // verifier swap below completes the grant. No secret, ever.
+  // Trakt browser PKCE (RFC 7636) — the user's Trakt registration is
+  // PKCE-only: the current official docs deprecate client_secret for user
+  // sign-in (and Trakt's device grant rejects secret-less exchanges, verified
+  // live), so Trakt links through the external browser: authorize on
+  // auth.trakt.tv with an S256 challenge and the registered HTTPS redirect
+  // URI. The browser lands on the Noor web companion, which relays
+  // code+state to /api/trakt/relay; [pollTraktLink] fetches it — or a
+  // verified Android App Link hands the URL straight to
+  // [completeTraktLink]. The verifier never leaves the device and no secret
+  // is ever sent (none exists).
   // --------------------------------------------------------------------------
 
-  /// Generates the PKCE pair + state, persists them for [completeTraktLink]
+  /// Generates the PKCE pair + state, persists them for the completion leg
   /// and returns the authorize URL to open in the external browser:
   /// `{'authorizeUrl': ..., 'state': ...}` or null on failure.
   Future<Map<String, dynamic>?> startTraktLink() async {
     try {
-      final verifier = _pkceRandom();
-      final state = _pkceRandom();
-      final challenge = base64UrlEncode(
-        sha256.convert(utf8.encode(verifier)).bytes,
-      ).replaceAll('=', '');
+      final verifier = TraktPkce.generateVerifier();
+      final state = TraktPkce.generateState();
+      final challenge = TraktPkce.challengeS256(verifier);
       await _secure.write(key: _traktPkceVerifierKey, value: verifier);
       await _secure.write(key: _traktPkceStateKey, value: state);
+      // The exchange must repeat the redirect_uri byte-for-byte, so the
+      // flow pins whatever it authorized with.
+      await _secure.write(key: _traktPkceRedirectKey, value: traktRedirectUri);
+      await _secure.write(
+        key: _traktPkceCreatedAtKey,
+        value: DateTime.now().millisecondsSinceEpoch.toString(),
+      );
       final url = Uri.parse(traktAuthorizeUrl).replace(
         queryParameters: <String, String>{
           'response_type': 'code',
@@ -1210,27 +1279,115 @@ class NoorApi {
   /// Forgets a pending PKCE handshake (user cancelled the linking sheet).
   Future<void> cancelTraktLink() => _clearTraktPkce();
 
-  /// Completes the browser round-trip: validates state, swaps the
-  /// authorization code + PKCE verifier for tokens at /oauth/token and
-  /// stores them. Returns `{'status': 'success'}` plus the Trakt username
-  /// when fetchable, otherwise `{'status': 'error', 'reason': ...}`.
+  /// True while a browser handshake is pending — used to resume the relay
+  /// watcher after a cold start interrupted the flow.
+  Future<bool> hasPendingTraktLink() async {
+    final state = await _secure.read(key: _traktPkceStateKey);
+    return state != null && state.isNotEmpty;
+  }
+
+  /// True when [link] is an HTTPS return belonging to the registered
+  /// redirect host (used by the native link router to forward App Links).
+  static bool isTraktHttpsReturn(String link) {
+    final uri = Uri.tryParse(link.trim());
+    if (uri == null || uri.scheme.toLowerCase() != 'https') return false;
+    final registeredHost = Uri.tryParse(traktHttpsRedirectBase)?.host ?? '';
+    return registeredHost.isNotEmpty &&
+        uri.host.toLowerCase() == registeredHost.toLowerCase();
+  }
+
+  /// Completes the browser round-trip for a URL that reached the app
+  /// directly (legacy `noor://callback` deep link or a verified App Link):
+  /// parses it, validates state, swaps the authorization code + PKCE
+  /// verifier for tokens at /oauth/token and stores them. Returns
+  /// `{'status': 'success', 'username': ...}` or
+  /// `{'status': 'error', 'reason': ...}`.
   Future<Map<String, dynamic>> completeTraktLink(String link) async {
-    final uri = Uri.tryParse(link);
-    if (uri == null || uri.scheme.toLowerCase() != 'noor') {
+    final registeredHost = Uri.tryParse(traktRedirectUri)?.host ?? '';
+    final callback = TraktCallback.fromUri(
+      link,
+      allowedHttpsHost: registeredHost,
+    );
+    if (callback == null) {
       return <String, dynamic>{'status': 'error', 'reason': 'invalid_link'};
     }
-    final denied = uri.queryParameters['error'];
-    if (denied != null && denied.isNotEmpty) {
+    if (callback.isDenied) {
       await _clearTraktPkce();
-      return <String, dynamic>{'status': 'error', 'reason': denied};
+      return <String, dynamic>{
+        'status': 'error',
+        'reason': callback.error ?? 'access_denied',
+      };
     }
-    final code = uri.queryParameters['code'] ?? '';
-    final state = uri.queryParameters['state'] ?? '';
+    return _finishTraktLink(callback.code, callback.state);
+  }
+
+  /// One relay poll cycle for the pending browser flow. The web companion
+  /// stores `code`+`state` at [traktRelayPath] when Trakt redirects the
+  /// browser; we fetch the entry keyed by OUR state (only the holder of the
+  /// random state can retrieve the code — and the code alone is useless
+  /// without the verifier, which never leaves this device).
+  ///
+  /// Returns `{'status': 'idle'}` (no pending flow), `{'status': 'pending'}`
+  /// (keep polling), or the [completeTraktLink] result map.
+  Future<Map<String, dynamic>> pollTraktLink() async {
+    final state = await _secure.read(key: _traktPkceStateKey);
+    if (state == null || state.isEmpty) {
+      return <String, dynamic>{'status': 'idle'};
+    }
+    final createdAtMs = int.tryParse(
+      await _secure.read(key: _traktPkceCreatedAtKey) ?? '',
+    );
+    if (createdAtMs != null &&
+        DateTime.now().difference(
+              DateTime.fromMillisecondsSinceEpoch(createdAtMs),
+            ) >
+            _traktFlowTtl) {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': 'flow_expired'};
+    }
+    try {
+      final relayUrl = Uri.parse('$traktHttpsRedirectBase$traktRelayPath')
+          .replace(queryParameters: <String, String>{'state': state});
+      final response = await _client.get<dynamic>(
+        relayUrl.toString(),
+        options: Options(
+          headers: <String, String>{'Accept': 'application/json'},
+        ),
+      );
+      final payload = _asMap(response.data);
+      final code = payload?['code']?.toString() ?? '';
+      if (code.isEmpty) {
+        return <String, dynamic>{'status': 'pending'};
+      }
+      final relayState = payload?['state']?.toString() ?? '';
+      if (relayState.isNotEmpty && relayState != state) {
+        // Foreign entry — ignore this cycle.
+        return <String, dynamic>{'status': 'pending'};
+      }
+      return await _finishTraktLink(code, state);
+    } catch (_) {
+      // Relay unreachable (dev server restart, flaky network) — keep polling.
+      return <String, dynamic>{'status': 'pending'};
+    }
+  }
+
+  /// Shared completion leg: validates the pending flow (state equality +
+  /// TTL), validates the token response shape, stores the pair atomically
+  /// and clears the handshake.
+  Future<Map<String, dynamic>> _finishTraktLink(
+    String code,
+    String state,
+  ) async {
     if (code.isEmpty) {
       return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
     }
     final savedState = await _secure.read(key: _traktPkceStateKey);
     final verifier = await _secure.read(key: _traktPkceVerifierKey);
+    final redirect =
+        await _secure.read(key: _traktPkceRedirectKey) ?? traktRedirectUri;
+    final createdAtMs = int.tryParse(
+      await _secure.read(key: _traktPkceCreatedAtKey) ?? '',
+    );
     if (savedState == null ||
         savedState.isEmpty ||
         verifier == null ||
@@ -1243,13 +1400,21 @@ class NoorApi {
       await _clearTraktPkce();
       return <String, dynamic>{'status': 'error', 'reason': 'state_mismatch'};
     }
+    if (createdAtMs == null ||
+        DateTime.now().difference(
+              DateTime.fromMillisecondsSinceEpoch(createdAtMs),
+            ) >
+            _traktFlowTtl) {
+      await _clearTraktPkce();
+      return <String, dynamic>{'status': 'error', 'reason': 'flow_expired'};
+    }
     try {
       final response = await _client.post<dynamic>(
         traktTokenUrl,
         data: <String, String>{
           'code': code,
           'client_id': defaultTraktClientId,
-          'redirect_uri': traktRedirectUri,
+          'redirect_uri': redirect,
           'grant_type': 'authorization_code',
           'code_verifier': verifier,
         },
@@ -1261,35 +1426,54 @@ class NoorApi {
           },
         ),
       );
-      final payload = _asMap(response.data);
-      final token = payload?['access_token']?.toString();
-      if (token == null || token.isEmpty) {
+      final TraktTokenSet tokens;
+      try {
+        tokens = TraktTokenSet.fromResponse(_asMap(response.data) ?? const {});
+      } on FormatException {
         await _clearTraktPkce();
         return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
       }
-      await _storeServiceToken('trakt', token);
-      final refresh = payload?['refresh_token']?.toString();
-      if (refresh != null && refresh.isNotEmpty) {
-        await _secure.write(key: _traktRefreshKey, value: refresh);
-      }
+      await _storeTraktTokens(tokens);
       await _clearTraktPkce();
       return <String, dynamic>{
         'status': 'success',
-        'username': await traktUsername(token),
+        'username': await traktUsername(tokens.accessToken),
       };
-    } on DioException {
+    } on DioException catch (error) {
       await _clearTraktPkce();
-      return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+      return <String, dynamic>{
+        'status': 'error',
+        'reason': error.response?.statusCode == 400
+            ? 'exchange_failed'
+            : 'network_error',
+      };
     } catch (_) {
       await _clearTraktPkce();
       return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
     }
   }
 
+  /// Persists a fresh Trakt token pair. Write order matters: refresh token
+  /// first (the old access token stays valid for a while, so a crash after
+  /// this write still leaves a usable session), then the access token, then
+  /// the expiry.
+  Future<void> _storeTraktTokens(TraktTokenSet tokens) async {
+    final refresh = tokens.refreshToken;
+    if (refresh != null && refresh.isNotEmpty) {
+      await _secure.write(key: _traktRefreshKey, value: refresh);
+    }
+    await _storeServiceToken('trakt', tokens.accessToken);
+    _traktExpiresAt = tokens.expiresAt;
+    await _secure.write(
+      key: _traktExpiryKey,
+      value: tokens.expiresAt.millisecondsSinceEpoch.toString(),
+    );
+  }
+
   /// Best-effort display name for the freshly linked account (null on any
   /// hiccup — the UI falls back to the service title).
   Future<String?> traktUsername([String? token]) async {
-    final access = token ?? _serviceTokens['trakt'];
+    final access = token ?? await _validTraktAccessToken();
     if (access == null || access.isEmpty) return null;
     try {
       final response = await _client.get<dynamic>(
@@ -1305,21 +1489,94 @@ class NoorApi {
       final user = _asMap(response.data)?['user'];
       final name = user is Map ? user['username']?.toString() : null;
       return (name == null || name.isEmpty) ? null : name;
+    } on DioException catch (error) {
+      // Revoked/expired session that the proactive refresh could not see —
+      // drop the stored pair so the UI falls back to the disconnected card.
+      if (error.response?.statusCode == 401) await _clearTraktTokens();
+      return null;
     } catch (_) {
       return null;
     }
   }
 
-  /// 48 random bytes → 64 URL-safe characters (RFC 7636 verifier alphabet).
-  String _pkceRandom() {
-    final random = math.Random.secure();
-    final bytes = List<int>.generate(48, (_) => random.nextInt(256));
-    return base64UrlEncode(bytes).replaceAll('=', '');
+  /// Returns a Trakt access token that is still valid, transparently
+  /// refreshing it (single-flight) when it is expired or inside the
+  /// refresh margin. Null means "no usable session" — the caller skips the
+  /// request; a dead grant also clears the stored tokens so the UI shows
+  /// the disconnected state.
+  Future<String?> _validTraktAccessToken() async {
+    final token = _serviceTokens['trakt'];
+    if (token == null || token.isEmpty) return null;
+    final expiresAt = _traktExpiresAt;
+    if (expiresAt == null) return token; // legacy token without expiry info
+    if (DateTime.now().isBefore(expiresAt.subtract(_traktRefreshMargin))) {
+      return token;
+    }
+    final result = await _traktRefresher.refresh(
+      await _secure.read(key: _traktRefreshKey) ?? '',
+    );
+    if (result.outcome == TraktRefreshOutcome.refreshed) {
+      return result.tokens!.accessToken;
+    }
+    if (result.outcome == TraktRefreshOutcome.grantDead) {
+      // Single-use refresh token consumed, revoked or expired — the session
+      // is unrecoverable; require a fresh user authorization.
+      await _clearTraktTokens();
+    }
+    return null;
+  }
+
+  TraktTokenRefresher get _traktRefresher =>
+      _traktRefresherInstance ??= TraktTokenRefresher(
+        clientId: defaultTraktClientId,
+        exchange: _traktRefreshExchange,
+        persist: _storeTraktTokens,
+      );
+
+  /// HTTP leg of the refresh grant. HTTP 400/401 → null (dead grant per the
+  /// docs' status-code table); everything else rethrows so the refresher
+  /// treats it as transient and the stored session stays put.
+  Future<Map<String, dynamic>?> _traktRefreshExchange(
+    Map<String, String> body,
+  ) async {
+    try {
+      final response = await _client.post<dynamic>(
+        traktTokenUrl,
+        data: body,
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      if (payload == null || !payload.containsKey('access_token')) {
+        return null;
+      }
+      return payload;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      if (status == 400 || status == 401) return null;
+      rethrow;
+    }
+  }
+
+  /// Wipes every stored Trakt credential (access, refresh, expiry).
+  Future<void> _clearTraktTokens() async {
+    _serviceTokens.remove('trakt');
+    _traktExpiresAt = null;
+    await _secure.delete(key: _serviceTokenKey('trakt'));
+    await _secure.delete(key: _traktRefreshKey);
+    await _secure.delete(key: _traktExpiryKey);
   }
 
   Future<void> _clearTraktPkce() async {
     await _secure.delete(key: _traktPkceVerifierKey);
     await _secure.delete(key: _traktPkceStateKey);
+    await _secure.delete(key: _traktPkceRedirectKey);
+    await _secure.delete(key: _traktPkceCreatedAtKey);
   }
 
   Future<void> _storeServiceToken(String service, String token) async {
@@ -1328,21 +1585,90 @@ class NoorApi {
   }
 
   Future<void> unlinkService(String service) async {
+    if (service == 'trakt') {
+      // Documented remote revocation before dropping the local session —
+      // works with just the token + client_id for PKCE apps (verified live:
+      // HTTP 200, no secret involved). RFC 7009 semantics also kill the
+      // associated refresh token.
+      final token = _serviceTokens['trakt'];
+      if (token != null && token.isNotEmpty) {
+        try {
+          await _client.post<dynamic>(
+            traktRevokeUrl,
+            data: <String, String>{
+              'token': token,
+              'client_id': defaultTraktClientId,
+            },
+            options: Options(
+              headers: <String, String>{
+                'Content-Type': 'application/json',
+              },
+            ),
+          );
+        } catch (_) {
+          // Revocation is best-effort; the local session is cleared below
+          // either way and an unrevoked token simply expires unused.
+        }
+      }
+      await _clearTraktTokens();
+      await _clearTraktPkce();
+      return;
+    }
     _serviceTokens.remove(service);
     await _secure.delete(key: _serviceTokenKey(service));
+  }
+
+  /// Mirrors a local watchlist change to the linked Trakt account via the
+  /// documented `POST /sync/watchlist` (add) and `POST /sync/watchlist/remove`
+  /// endpoints. Best-effort: false on any hiccup, never disturbs the local
+  /// library state.
+  Future<bool> pushTraktWatchlist({
+    required String type,
+    required String imdb,
+    required bool add,
+  }) async {
+    if (imdb.isEmpty) return false;
+    final token = await _validTraktAccessToken();
+    if (token == null) return false;
+    try {
+      final entry = <String, dynamic>{
+        'ids': <String, dynamic>{'imdb': imdb},
+      };
+      final body = type.toLowerCase() == 'series'
+          ? <String, dynamic>{'shows': <dynamic>[entry]}
+          : <String, dynamic>{'movies': <dynamic>[entry]};
+      await _client.post<dynamic>(
+        '$traktBaseUrl/sync/watchlist${add ? '' : '/remove'}',
+        data: body,
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+            'Authorization': 'Bearer $token',
+          },
+        ),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Fetches the watchlist or history of a linked service, normalized to
   /// `{type: 'movie'|'series', imdb, title, year}` maps (history entries also
   /// carry `watchedAt` epoch milliseconds when the provider exposes it).
   Future<List<dynamic>> syncLinkedService(String service, String kind) async {
-    final token = _serviceTokens[service];
-    if (token == null || token.isEmpty) return const <dynamic>[];
+    if (service != 'trakt' && (_serviceTokens[service]?.isEmpty ?? true)) {
+      return const <dynamic>[];
+    }
     try {
       switch (service) {
         case 'trakt':
-          return await _syncTrakt(token: token, kind: kind);
+          return await _syncTrakt(kind: kind);
         case 'simkl':
+          final token = _serviceTokens[service];
+          if (token == null || token.isEmpty) return const <dynamic>[];
           return await _syncSimkl(token: token, kind: kind);
         default:
           return const <dynamic>[];
@@ -1352,32 +1678,39 @@ class NoorApi {
     }
   }
 
-  Future<List<dynamic>> _syncTrakt({
-    required String token,
-    required String kind,
-  }) async {
+  Future<List<dynamic>> _syncTrakt({required String kind}) async {
+    // Transparently refreshes an expiring token before the request.
+    final token = await _validTraktAccessToken();
+    if (token == null) return const <dynamic>[];
     final Uri uri = kind == 'history'
         ? Uri.parse('$traktBaseUrl/users/me/history')
             .replace(queryParameters: <String, String>{'limit': '50'})
         : Uri.parse('$traktBaseUrl/users/me/watchlist');
-    final response = await _client.get<dynamic>(
-      uri.toString(),
-      options: Options(
-        headers: <String, String>{
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-          'trakt-api-version': '2',
-          'trakt-api-key': defaultTraktClientId,
-        },
-      ),
-    );
-    final items = response.data is List
-        ? response.data as List
-        : const <dynamic>[];
-    return items
-        .map(_mapTraktItem)
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
+    try {
+      final response = await _client.get<dynamic>(
+        uri.toString(),
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+          },
+        ),
+      );
+      final items = response.data is List
+          ? response.data as List
+          : const <dynamic>[];
+      return items
+          .map(_mapTraktItem)
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+    } on DioException catch (error) {
+      // Token revoked server-side (or hard-expired without expiry metadata):
+      // drop the session so the integrations card returns to "connect".
+      if (error.response?.statusCode == 401) await _clearTraktTokens();
+      return const <dynamic>[];
+    }
   }
 
   Map<String, dynamic>? _mapTraktItem(Object? raw) {
@@ -1490,14 +1823,16 @@ class NoorApi {
     required double progress,
   }) async {
     try {
-      final token = _serviceTokens[service];
-      if (token == null || token.isEmpty) return;
       final percent = progress.clamp(0.0, 100.0).toDouble();
       final normalizedAction =
           const <String>{'start', 'pause', 'stop'}.contains(action)
               ? action
               : 'start';
       if (service == 'trakt') {
+        // Fresh token (auto-refresh) — scrobble must never run on a stale
+        // session mid-playback.
+        final token = await _validTraktAccessToken();
+        if (token == null) return;
         final ids = <String, dynamic>{
           if (imdb != null && imdb.isNotEmpty) 'imdb': imdb,
         };
@@ -1520,6 +1855,8 @@ class NoorApi {
           ),
         );
       } else if (service == 'simkl') {
+        final token = _serviceTokens[service];
+        if (token == null || token.isEmpty) return;
         await _client.post<dynamic>(
           '$simklBaseUrl/scrobble',
           data: <String, dynamic>{

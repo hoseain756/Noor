@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api/noor_api.dart';
 import '../../core/state/app_state.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'magnet_opener.dart';
@@ -12,9 +13,13 @@ import 'magnet_opener.dart';
 /// `noor/links` EventChannel and routes them by scheme:
 ///
 ///  - `magnet:…`  → opens the torrent flow automatically.
-///  - `noor://callback?code=…&state=…` → completes the Trakt browser PKCE
-///    handshake (see NoorApi.completeTraktLink) and mirrors the result into
-///    app state + a toast, wherever the user happens to be in the app.
+///  - `noor://callback?code=…&state=…` → legacy Trakt PKCE return.
+///  - `https://<registered redirect host>/?code=…&state=…` → primary Trakt
+///    PKCE return (Android App Links) — see NoorApi.completeTraktLink.
+///
+/// All Trakt returns finish through the same handshake anywhere in the app;
+/// relay-based completions (the app polling the web companion) are surfaced
+/// here too via [AppState.traktLinkEvent].
 ///
 /// Covers both cold starts (link captured before Flutter was ready and
 /// delivered on first listen) and warm starts (onNewIntent while running).
@@ -29,6 +34,8 @@ class IncomingLinkListener extends StatefulWidget {
 
 class _IncomingLinkListenerState extends State<IncomingLinkListener> {
   StreamSubscription<Object?>? _sub;
+
+  int _seenTraktLinkEventAt = 0;
 
   @override
   void initState() {
@@ -53,6 +60,10 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
       return;
     }
     if (lower.startsWith('noor://')) {
+      unawaited(_completeTrakt(data));
+      return;
+    }
+    if (lower.startsWith('https://') && NoorApi.isTraktHttpsReturn(data)) {
       unawaited(_completeTrakt(data));
     }
   }
@@ -99,7 +110,9 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
         'state_mismatch' =>
           'استجابة ربط غير صالحة (state mismatch) — أعد المحاولة.',
         'exchange_failed' => 'فشل تبادل الرمز مع Trakt — أعد المحاولة.',
+        'flow_expired' => 'انتهت مهلة طلب الربط — ابدأ من جديد.',
         'no_pending_flow' => 'انتهت صلاحية طلب الربط — ابدأ من جديد.',
+        'network_error' => 'انقطاع شبكة أثناء ربط Trakt — أعد المحاولة.',
         _ => 'تعذر إكمال ربط Trakt.',
       };
 
@@ -108,7 +121,9 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
         'state_mismatch' =>
           'Invalid link response (state mismatch) — please retry.',
         'exchange_failed' => 'Token exchange with Trakt failed — retry.',
+        'flow_expired' => 'The pending link timed out — start again.',
         'no_pending_flow' => 'The pending link expired — start again.',
+        'network_error' => 'Network hiccup during Trakt linking — retry.',
         _ => 'Could not finish linking Trakt.',
       };
 
@@ -119,5 +134,38 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    // Relay-based completions (the app polling the web companion while the
+    // user is anywhere in the app) announce themselves through app state;
+    // surface each new event exactly once as a toast.
+    final app = context.watch<AppState>();
+    final event = app.traktLinkEvent;
+    if (event != null) {
+      final at = (event['at'] as num?)?.toInt() ?? 0;
+      if (at > _seenTraktLinkEventAt && at > app.seenTraktLinkEventAt) {
+        _seenTraktLinkEventAt = at;
+        app.seenTraktLinkEventAt = at;
+        final ok = event['ok'] == true;
+        final reason = event['reason']?.toString();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (ok) {
+            NoorToast.show(
+              context,
+              app.english
+                  ? 'Trakt account connected.'
+                  : 'تم ربط حساب Trakt.',
+            );
+          } else {
+            NoorToast.show(
+              context,
+              app.english ? _englishReason(reason) : _arabicReason(reason),
+              error: true,
+            );
+          }
+        });
+      }
+    }
+    return widget.child;
+  }
 }

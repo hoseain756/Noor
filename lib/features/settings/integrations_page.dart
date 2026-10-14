@@ -279,6 +279,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         setState(() {
           _flow = {'status': 'waiting', 'kind': 'pkce'};
         });
+        // App-wide relay watcher: when the user approves on trakt.tv the
+        // browser lands on the Noor companion (registered HTTPS redirect
+        // URI), which stores the code for us — this watcher fetches it and
+        // finishes the PKCE exchange even if this sheet is closed.
+        app.beginTraktRelayWatch();
         await launchUrl(
           Uri.parse(authorizeUrl),
           mode: LaunchMode.externalApplication,
@@ -504,8 +509,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           ] else if (waiting && _flow?['kind'] == 'pkce') ...[
             Text(
               english
-                  ? 'Complete the approval in the Trakt window — the browser hands you back to Noor automatically.'
-                  : 'أكمل الموافقة في نافذة Trakt — سيعيدك المتصفح إلى التطبيق تلقائيًا.',
+                  ? 'Complete the approval in the Trakt browser tab — Noor finishes the link automatically the moment Trakt approves (you may need to switch back to the app).'
+                  : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيُكمل التطبيق الربط تلقائيًا فور الموافقة (قد تحتاج للعودة إلى التطبيق يدويًا).',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
@@ -537,8 +542,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             const SizedBox(height: 4),
             Text(
               english
-                  ? 'One-time setup: add noor://callback as a Redirect URI of the Noor app at trakt.tv/oauth/applications — without it Trakt cannot hand the approval back to the app.'
-                  : 'إعداد لمرة واحدة: أضف noor://callback ضمن Redirect URIs لتطبيق Noor في trakt.tv/oauth/applications — بدونه لا يستطيع Trakt إعادة الموافقة إلى التطبيق.',
+                  ? 'No setup needed — Trakt returns the approval to Noor through the Noor companion site automatically.'
+                  : 'لا حاجة لأي إعداد — يعيد Trakt الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: HorseTheme.muted,
                   ),
@@ -623,8 +628,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               const SizedBox(height: 6),
               Text(
                 english
-                    ? 'Opens the browser — one-time setup: register noor://callback as a Redirect URI on trakt.tv/oauth/applications.'
-                    : 'يفتح المتصفح — إعداد لمرة واحدة: سجّل noor://callback ضمن Redirect URIs في trakt.tv/oauth/applications.',
+                    ? 'Opens the browser — the approval returns to Noor automatically through the Noor companion site. No dashboard setup required.'
+                    : 'يفتح المتصفح — تعود الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب. لا حاجة لأي إعداد في لوحة Trakt.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: HorseTheme.muted,
                     ),

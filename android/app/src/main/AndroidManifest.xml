@@ -42,6 +42,21 @@
                     android:scheme="noor"
                     android:host="callback"/>
             </intent-filter>
+            <!-- Trakt OAuth HTTPS return (documented primary path): the
+                 browser bounces to the registered redirect URI after
+                 approval. autoVerify makes it an Android App Link once
+                 /.well-known/assetlinks.json on that domain carries the
+                 APK signing cert SHA-256; until then the link simply stays
+                 in the browser and the Noor web relay completes the flow. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="preview-chat-607a5306-ab5d-4ec1-9d61-23b1874d8c08.space-z.ai"
+                    android:path="/"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

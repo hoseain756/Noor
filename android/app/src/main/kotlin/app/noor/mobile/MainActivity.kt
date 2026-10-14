@@ -1,6 +1,7 @@
 package app.noor.mobile
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -37,6 +38,10 @@ private const val TAG = "NoorTorrent"
 private const val METHOD_CHANNEL = "noor/torrent"
 private const val EVENT_CHANNEL = "noor/torrent/events"
 private const val LINK_CHANNEL = "noor/links"
+
+/** Host of the registered Trakt OAuth HTTPS redirect (App Links return). */
+private const val TRAKT_LINK_HOST =
+    "preview-chat-607a5306-ab5d-4ec1-9d61-23b1874d8c08.space-z.ai"
 
 /** Hard limit for magnet metadata fetches (matches the Dart-side contract). */
 private const val RESOLVE_TIMEOUT_SECONDS = 30
@@ -178,12 +183,19 @@ class MainActivity :
         captureLink(intent)
     }
 
-    /** Emits a magnet / noor:// ACTION_VIEW link to Dart, or parks it. */
+    /** Emits a magnet / noor:// / Trakt HTTPS ACTION_VIEW link to Dart, or parks it. */
     private fun captureLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
-        // magnet: → torrent flow; noor://callback → Trakt OAuth PKCE return.
+        // magnet: → torrent flow; noor://callback → legacy Trakt OAuth return;
+        // https://<registered redirect host>/?code=… → primary Trakt return
+        // (Android App Links / browser redirect).
+        val isTraktHttpsReturn = link.startsWith("https://", ignoreCase = true) &&
+            runCatching {
+                Uri.parse(link).host?.equals(TRAKT_LINK_HOST, ignoreCase = true) == true
+            }.getOrDefault(false)
         if (!link.startsWith("magnet:", ignoreCase = true) &&
-            !link.startsWith("noor:", ignoreCase = true)
+            !link.startsWith("noor:", ignoreCase = true) &&
+            !isTraktHttpsReturn
         ) {
             return
         }
