@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
@@ -129,110 +130,126 @@ class _MainShellState extends State<MainShell> {
       SettingsPage(onOpenLibrary: () => _selectTab(3)),
     ];
 
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Center(
-                child: SizedBox(
-                  width: math.min(size.width, 1600),
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: _onScroll,
-                    child: IndexedStack(
-                      index: _selected,
-                      children: pages,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (_selected != 4)
-              Positioned(
-                // The design pins search to the physical top-left in both locales.
-                left: 16,
-                top: 12,
-                child: IgnorePointer(
-                  ignoring: !_chromeVisible,
-                  child: AnimatedSlide(
-                    offset:
-                        _chromeVisible ? Offset.zero : const Offset(0, -1.25),
-                    duration: duration,
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: _chromeVisible ? 1 : 0,
-                      duration: duration,
-                      child: GlassSearchButton(
-                        tooltip: app.english ? 'Search' : 'بحث',
-                        onPressed: _openSearch,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // Re-assert the transparent system bars whenever the shell is visible
+      // — the player's immersive mode rewrites the global overlay style, and
+      // this restores the edge-to-edge glass look on return (main.dart only
+      // runs once per launch).
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.light,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
+      ),
+      child: Scaffold(
+        body: SafeArea(
+          bottom: false,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Center(
+                  child: SizedBox(
+                    width: math.min(size.width, 1600),
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _onScroll,
+                      child: IndexedStack(
+                        index: _selected,
+                        children: pages,
                       ),
                     ),
                   ),
                 ),
               ),
-            if (tabletLayout)
-              Positioned(
-                top: 12,
-                right: 16,
-                child: Material(
-                  color: HorseTheme.surface.withValues(alpha: .94),
-                  shape: const CircleBorder(
-                      side: BorderSide(color: HorseTheme.line)),
-                  child: IconButton(
-                    tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
-                    onPressed: () =>
-                        setState(() => _tabletNavVisible = !_tabletNavVisible),
-                    icon: Icon(_tabletNavVisible
-                        ? Icons.close_rounded
-                        : Icons.menu_rounded),
+              if (_selected != 4)
+                Positioned(
+                  // User mandate (Task 115): the glass search button sits at
+                  // the PHYSICAL top-right in both locales; on tablets it
+                  // clears the hamburger button (right: 16, 48px wide).
+                  right: tabletLayout ? 76 : 16,
+                  top: 12,
+                  child: IgnorePointer(
+                    ignoring: !_chromeVisible,
+                    child: AnimatedSlide(
+                      offset:
+                          _chromeVisible ? Offset.zero : const Offset(0, -1.25),
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      child: AnimatedOpacity(
+                        opacity: _chromeVisible ? 1 : 0,
+                        duration: duration,
+                        child: GlassSearchButton(
+                          tooltip: app.english ? 'Search' : 'بحث',
+                          onPressed: _openSearch,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            if (!tabletLayout)
-              // The glass dock (Harbor web port): one sliding pill, scrub
-              // gesture, size ladder, safe area and its own hidden animation
-              // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
-              // Player/detail pages are pushed as full routes on top of the
-              // shell, which unmounts the dock (the web `showChrome` rule).
-              PositionedDirectional(
-                start: 0,
-                end: 0,
-                bottom: 0,
-                child: GlassDock(
-                  tabs: dockTabs,
-                  activeId: dockActiveId,
-                  onTabSelected: (DockTab tab) =>
-                      _selectTab(noorDockIndexForTabId(tab.view)),
-                  languageCode: app.english ? 'en' : 'ar',
-                  hidden: !_chromeVisible,
+              if (tabletLayout)
+                Positioned(
+                  top: 12,
+                  right: 16,
+                  child: Material(
+                    color: HorseTheme.surface.withValues(alpha: .94),
+                    shape: const CircleBorder(
+                        side: BorderSide(color: HorseTheme.line)),
+                    child: IconButton(
+                      tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
+                      onPressed: () => setState(
+                          () => _tabletNavVisible = !_tabletNavVisible),
+                      icon: Icon(_tabletNavVisible
+                          ? Icons.close_rounded
+                          : Icons.menu_rounded),
+                    ),
+                  ),
                 ),
-              ),
-            if (tabletLayout && _tabletNavVisible) ...[
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => setState(() => _tabletNavVisible = false),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: .42)),
+              if (!tabletLayout)
+                // The glass dock (Harbor web port): one sliding pill, scrub
+                // gesture, size ladder, safe area and its own hidden animation
+                // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
+                // Player/detail pages are pushed as full routes on top of the
+                // shell, which unmounts the dock (the web `showChrome` rule).
+                PositionedDirectional(
+                  start: 0,
+                  end: 0,
+                  bottom: 0,
+                  child: GlassDock(
+                    tabs: dockTabs,
+                    activeId: dockActiveId,
+                    onTabSelected: (DockTab tab) =>
+                        _selectTab(noorDockIndexForTabId(tab.view)),
+                    languageCode: app.english ? 'en' : 'ar',
+                    hidden: !_chromeVisible,
+                  ),
                 ),
-              ),
-              AnimatedPositionedDirectional(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                start: 12,
-                top: 68,
-                bottom: 12,
-                width: 286,
-                child: _TabletNavigation(
-                  selected: _selected,
-                  english: app.english,
-                  onClose: () => setState(() => _tabletNavVisible = false),
-                  onTabSelected: _selectTab,
-                  onPageSelected: _openSecondary,
+              if (tabletLayout && _tabletNavVisible) ...[
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _tabletNavVisible = false),
+                    child:
+                        ColoredBox(color: Colors.black.withValues(alpha: .42)),
+                  ),
                 ),
-              ),
+                AnimatedPositionedDirectional(
+                  duration: duration,
+                  curve: Curves.easeOutCubic,
+                  start: 12,
+                  top: 68,
+                  bottom: 12,
+                  width: 286,
+                  child: _TabletNavigation(
+                    selected: _selected,
+                    english: app.english,
+                    onClose: () => setState(() => _tabletNavVisible = false),
+                    onTabSelected: _selectTab,
+                    onPageSelected: _openSecondary,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
