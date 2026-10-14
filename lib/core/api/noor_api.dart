@@ -105,17 +105,11 @@ class NoorApi {
   // pendings and push paths; both may be linked simultaneously.
   // --------------------------------------------------------------------------
 
-  /// AniList Client ID — NOT embedded. AniList issues a small numeric ID per
-  /// application (visible next to the secret on anilist.co/settings/developer)
-  /// and the owner's value must be entered from the integrations card. The
-  /// 40-character string the owner supplied is the CLIENT SECRET (embedded
-  /// below), not the ID — AniList's token endpoint rejects it as an ID.
-  static const String defaultAniListClientId = '';
-
-  /// Owner-provided AniList Client Secret for the “Noor” application, saved
-  /// at the owner's explicit request (Task 109). AniList requires the secret
-  /// on EVERY token exchange — there is no public-client mode.
-  static const String defaultAniListClientSecret =
+  /// AniList OAuth client ID for the owner's “Noor” application, used with
+  /// the official IMPLICIT grant (docs.anilist.co/guide/auth/implicit-grant)
+  /// — the documented secret-less flow for mobile clients. No client secret
+  /// exists anywhere in this integration, by design and by owner directive.
+  static const String defaultAniListClientId =
       'b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef';
 
   /// MyAnimeList API client ID (myanimelist.net/settings/apiconfig). MAL is
@@ -124,8 +118,6 @@ class NoorApi {
 
   static const String anilistAuthorizeEndpoint =
       'https://anilist.co/api/v2/oauth/authorize';
-  static const String anilistTokenEndpoint =
-      'https://anilist.co/api/v2/oauth/token';
   static const String malAuthorizeEndpoint =
       'https://myanimelist.net/v1/oauth2/authorize';
   static const String malTokenEndpoint = 'https://myanimelist.net/v1/oauth2/token';
@@ -1313,64 +1305,39 @@ class NoorApi {
   // token supported, no revocation endpoint.
   // --------------------------------------------------------------------------
 
-  /// Effective AniList OAuth credentials. The secure-storage override (set
-  /// from the integrations card) wins over the embedded defaults; the secret
-  /// falls back to the owner-provided embedded value.
-  Future<(String, String)> aniListCredentials() async {
+  /// Effective AniList client ID. The secure-storage override (set from the
+  /// integrations card) wins over the embedded default.
+  Future<String> aniListClientId() async {
     final id = (await _secure.read(key: _anilistClientIdKey))?.trim();
-    final secret = (await _secure.read(key: _anilistClientSecretKey))?.trim();
-    return (
-      (id == null || id.isEmpty) ? defaultAniListClientId : id,
-      (secret == null || secret.isEmpty)
-          ? defaultAniListClientSecret
-          : secret,
-    );
+    return (id == null || id.isEmpty) ? defaultAniListClientId : id;
   }
 
-  /// Persists the AniList credential override (empty values fall back to the
-  /// embedded defaults).
-  Future<void> saveAniListCredentials({
-    required String clientId,
-    String clientSecret = '',
-  }) async {
-    final trimmedId = clientId.trim();
-    if (trimmedId.isEmpty) {
+  /// Persists the AniList client-ID override (empty clears it) and drops any
+  /// legacy secret override — the implicit grant carries no secret.
+  Future<void> saveAniListClientId(String clientId) async {
+    await _secure.delete(key: _anilistClientSecretKey);
+    final trimmed = clientId.trim();
+    if (trimmed.isEmpty) {
       await _secure.delete(key: _anilistClientIdKey);
     } else {
-      await _secure.write(key: _anilistClientIdKey, value: trimmedId);
-    }
-    final trimmedSecret = clientSecret.trim();
-    if (trimmedSecret.isEmpty) {
-      await _secure.delete(key: _anilistClientSecretKey);
-    } else {
-      await _secure.write(key: _anilistClientSecretKey, value: trimmedSecret);
+      await _secure.write(key: _anilistClientIdKey, value: trimmed);
     }
   }
 
-  /// Starts the AniList browser flow: authorize URL + pending marker
-  /// (bare epoch stamp). AniList does not echo a state parameter, so the
-  /// pending is matched by presence — one flow at a time, 15-minute TTL.
-  ///
-  /// Guard: when the effective Client ID is not a numeric AniList ID (e.g.
-  /// the placeholder build default, or a secret pasted into the ID slot)
-  /// the browser is NOT opened — opening it would land the user on an
-  /// unknown-client error page. The caller is told via `status:
-  /// invalid_client_id` so it can surface the credentials editor instead.
+  /// Starts the AniList browser flow using the official IMPLICIT grant
+  /// (docs.anilist.co/guide/auth/implicit-grant): the authorize URL carries
+  /// only the client ID and `response_type=token`; after approval AniList
+  /// redirects to the dashboard-registered Redirect URL with the JWT access
+  /// token in the URL fragment. No secret and no code exchange anywhere.
   Future<Map<String, dynamic>?> startAniListLink() async {
     try {
-      final (clientId, _) = await aniListCredentials();
-      if (!isValidAniListClientId(clientId)) {
-        return <String, dynamic>{'status': 'invalid_client_id'};
-      }
+      final clientId = await aniListClientId();
       await _secure.write(
         key: _anilistPendingKey,
         value: DateTime.now().millisecondsSinceEpoch.toString(),
       );
       return <String, dynamic>{
-        'authorizeUrl': aniListAuthorizeUrl(
-          clientId: clientId,
-          redirectUri: animeRedirectUri,
-        ),
+        'authorizeUrl': aniListAuthorizeUrl(clientId: clientId),
       };
     } catch (_) {
       return null;
@@ -1423,62 +1390,63 @@ class NoorApi {
 
   Future<void> cancelMalLink() => _clearMalPending();
 
-  /// Manual completion with a code pasted from the browser (fallback when
-  /// the custom-scheme bounce never fires). AniList needs no extra state;
-  /// MAL requires its pending verifier to exist.
-  Future<Map<String, dynamic>> submitAniListCode(String code) =>
-      completeAniListLink(code);
+  /// Manual completion with whatever the user pasted from the browser:
+  /// the full redirect URL (fragment included), an `access_token=…` text or
+  /// the bare implicit-grant token. Legacy `?code=…` pastes return a clear
+  /// error — the implicit flow never issues codes.
+  Future<Map<String, dynamic>> submitAniListCode(String input) {
+    final token = extractAniListAccessToken(input);
+    if (token == null || token.isEmpty) {
+      return Future<Map<String, dynamic>>.value(
+        <String, dynamic>{
+          'status': 'error',
+          'reason': 'missing_code',
+          'hint': 'token',
+        },
+      );
+    }
+    return completeAniListToken(token);
+  }
 
   Future<Map<String, dynamic>> submitMalCode(String code) =>
       completeMalLink(code);
 
-  /// Completes the AniList round-trip: swaps the authorization code for a
-  /// token, stores it (+ expiry) and clears the pending marker.
-  Future<Map<String, dynamic>> completeAniListLink(String code) async {
-    final trimmed = code.trim();
+  /// Completes the AniList IMPLICIT grant: stores the fragment access token
+  /// (JWT, ~1 year per AniList), verifies it with a Viewer query and clears
+  /// the pending marker. No secret and no token-endpoint exchange — the
+  /// implicit flow delivers the final token directly.
+  Future<Map<String, dynamic>> completeAniListToken(
+    String token, {
+    int? expiresInSeconds,
+  }) async {
+    final trimmed = token.trim();
     if (trimmed.isEmpty) {
       return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
     }
-    final (clientId, clientSecret) = await aniListCredentials();
+    await _storeServiceToken('anilist', trimmed);
+    _anilistExpiresAt = DateTime.now().add(
+      Duration(
+        seconds: (expiresInSeconds != null && expiresInSeconds > 0)
+            ? expiresInSeconds
+            : 365 * 24 * 60 * 60, // AniList: long-lived, ~1 year
+      ),
+    );
+    await _secure.write(
+      key: _anilistExpiresKey,
+      value: _anilistExpiresAt!.millisecondsSinceEpoch.toString(),
+    );
     try {
-      final response = await _client.post<dynamic>(
-        anilistTokenEndpoint,
-        data: <String, dynamic>{
-          'grant_type': 'authorization_code',
-          'client_id': clientId,
-          if (clientSecret.isNotEmpty) 'client_secret': clientSecret,
-          'redirect_uri': animeRedirectUri,
-          'code': trimmed,
-        },
-        options: Options(
-          headers: <String, String>{
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
-      final payload = _asMap(response.data);
-      final token = payload?['access_token']?.toString() ?? '';
-      if (token.isEmpty) {
-        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
-      }
-      await _storeServiceToken('anilist', token);
-      await _secure.delete(key: _anilistPendingKey);
-      final expiresIn = (payload?['expires_in'] as num?)?.toInt();
-      if (expiresIn != null && expiresIn > 0) {
-        _anilistExpiresAt = DateTime.now().add(Duration(seconds: expiresIn));
-        await _secure.write(
-          key: _anilistExpiresKey,
-          value: _anilistExpiresAt!.millisecondsSinceEpoch.toString(),
-        );
-      }
       final viewer = await aniListViewer();
+      if (viewer == null) {
+        // Dead/foreign token — drop everything so the card shows unlinked.
+        await _clearAniListSession();
+        return <String, dynamic>{'status': 'error', 'reason': 'invalid_token'};
+      }
+      await _secure.delete(key: _anilistPendingKey);
       return <String, dynamic>{
         'status': 'success',
-        if (viewer?['name'] != null) 'username': viewer!['name'],
+        if (viewer['name'] != null) 'username': viewer['name'],
       };
-    } on DioException catch (error) {
-      return _trackOAuthError(error);
     } catch (_) {
       return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
     }

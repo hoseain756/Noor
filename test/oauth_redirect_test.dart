@@ -103,5 +103,38 @@ void main() {
       );
       expect(OAuthRedirect.parse('https://attacker.example/?code=x'), isNull);
     });
+
+    group('AniList implicit grant returns (fragment token)', () {
+      const jwt =
+          'eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2FuaWxpc3QuY28ifQ.sig';
+
+      test('parses access_token + expires_in from the URL fragment', () {
+        final callback = OAuthRedirect.parse(
+          'app.noor.mobile://callback#access_token=$jwt&expires_in=31536000&token_type=Bearer',
+        );
+        expect(callback, isNotNull);
+        expect(callback!.isImplicit, isTrue);
+        expect(callback.accessToken, jwt);
+        expect(callback.expiresIn, 31536000);
+        expect(callback.code, isEmpty);
+      });
+
+      test('parses a user-denied error sent in the fragment', () {
+        final callback = OAuthRedirect.parse(
+          'app.noor.mobile://callback#error=access_denied&error_description=nope',
+        );
+        expect(callback, isNotNull);
+        expect(callback!.isDenied, isTrue);
+        expect(callback.error, 'access_denied');
+      });
+
+      test('fragment without access_token still resolves to the code path',
+          () {
+        expect(
+          OAuthRedirect.parse('app.noor.mobile://callback#foo=bar'),
+          isNull,
+        );
+      });
+    });
   });
 }

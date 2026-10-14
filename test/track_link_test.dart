@@ -221,18 +221,45 @@ void main() {
   });
 
   group('authorize URL builders', () {
-    test('aniListAuthorizeUrl encodes client id and redirect', () {
-      final url = aniListAuthorizeUrl(
-        clientId: '12345',
-        redirectUri: 'app.noor.mobile://callback',
-      );
+    test('aniListAuthorizeUrl is the implicit grant — client id only', () {
+      final url = aniListAuthorizeUrl(clientId: 'b5a2wwLwux7QbOnf8koDJJe');
       expect(url, startsWith('https://anilist.co/api/v2/oauth/authorize?'));
-      expect(url, contains('client_id=12345'));
-      expect(
-        url,
-        contains('redirect_uri=app.noor.mobile%3A%2F%2Fcallback'),
-      );
-      expect(url, endsWith('&response_type=code'));
+      expect(url, contains('client_id=b5a2wwLwux7QbOnf8koDJJe'));
+      expect(url, endsWith('&response_type=token'));
+      // Implicit grant: no secret, no code, no redirect_uri parameter —
+      // the redirect comes from the dashboard's registered Redirect URL.
+      expect(url, isNot(contains('redirect_uri=')));
+      expect(url, isNot(contains('response_type=code')));
+      expect(url, isNot(contains('client_secret')));
+    });
+
+    group('extractAniListAccessToken', () {
+      const jwt =
+          'eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2FuaWxpc3QuY28ifQ.sig';
+      test('parses the implicit fragment of a full redirect URL', () {
+        expect(
+          extractAniListAccessToken(
+            'app.noor.mobile://callback#access_token=$jwt&expires_in=31536000&token_type=Bearer',
+          ),
+          jwt,
+        );
+      });
+      test('parses a bare access_token= text paste', () {
+        expect(
+          extractAniListAccessToken('access_token=$jwt&token_type=Bearer'),
+          jwt,
+        );
+      });
+      test('treats a bare token paste as the token itself', () {
+        expect(extractAniListAccessToken('  $jwt  '), jwt);
+      });
+      test('returns null for legacy ?code= callbacks and empty input', () {
+        expect(
+          extractAniListAccessToken('app.noor.mobile://callback?code=abc123'),
+          isNull,
+        );
+        expect(extractAniListAccessToken('   '), isNull);
+      });
     });
 
     test('malAuthorizeUrl carries the plain PKCE challenge + state', () {

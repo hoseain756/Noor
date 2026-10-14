@@ -8,7 +8,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
-import '../../core/track/track_link.dart';
 import '../../shared/widgets/noor_toast.dart';
 
 class IntegrationsPage extends StatelessWidget {
@@ -275,15 +274,12 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   // Paste fallback shared by every browser-OAuth service (Trakt/AniList/MAL).
   final TextEditingController _codeCtrl = TextEditingController();
   bool _submittingCode = false;
-  // AniList credential override editor (the embedded Client ID is a
-  // placeholder AniList rejects — the real numeric ID lives in the user's
-  // developer dashboard, and confidential apps also need the secret).
+  // AniList credential editor — only the Client ID (the implicit grant has
+  // no secret); the editor lets the owner swap the embedded ID without a
+  // rebuild.
   bool _showCredEditor = false;
   final TextEditingController _credIdCtrl = TextEditingController();
-  final TextEditingController _credSecretCtrl = TextEditingController();
   bool _savingCred = false;
-  String? _credError;
-  bool _anilistNeedsSetup = false;
 
   @override
   void initState() {
@@ -309,14 +305,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       });
     }
     if (widget.service == 'anilist') {
-      // Pre-fill the credentials editor with the effective override so the
-      // user sees exactly what the OAuth URL will carry.
-      context.read<AppState>().api.aniListCredentials().then((creds) {
+      // Pre-fill the editor with the effective client ID (override or the
+      // embedded owner default).
+      context.read<AppState>().api.aniListClientId().then((id) {
         if (!mounted) return;
-        setState(() {
-          _credIdCtrl.text = creds.$1;
-          _credSecretCtrl.text = creds.$2;
-        });
+        setState(() => _credIdCtrl.text = id);
       });
     }
   }
@@ -326,7 +319,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     _pollTimer?.cancel();
     _codeCtrl.dispose();
     _credIdCtrl.dispose();
-    _credSecretCtrl.dispose();
     super.dispose();
   }
 
@@ -363,22 +355,12 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     final english = app.english;
     if (result['status']?.toString() == 'success') {
       _codeCtrl.clear();
-      setState(() {
-        _flow = null;
-        _anilistNeedsSetup = false;
-      });
+      setState(() => _flow = null);
       if (widget.service == 'anilist' || widget.service == 'mal') {
         unawaited(app.refreshTrackerProfile(widget.service));
       }
       NoorToast.show(context, english ? 'Account connected.' : 'تم ربط الحساب.');
     } else {
-      final failedCredentials = result['reason']?.toString() == 'invalid_client';
-      setState(() {
-        if (widget.service == 'anilist' && failedCredentials) {
-          _showCredEditor = true;
-          _anilistNeedsSetup = true;
-        }
-      });
       NoorToast.show(
         context,
         _oauthFailureText(app.english, result['reason']?.toString()),
@@ -390,8 +372,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   String _oauthFailureText(bool english, String? reason) {
     if (reason == 'invalid_client') {
       return english
-          ? 'AniList rejected the app credentials — enter the numeric Client ID (and secret) below and retry.'
-          : 'رفض AniList بيانات التطبيق — أدخل معرّف العميل الرقمي (والسر) أدناه وأعد المحاولة.';
+          ? 'The provider rejected the app credentials — update them under the card and retry.'
+          : 'رفض الموقع بيانات التطبيق — حدّثها من أسفل البطاقة وأعد المحاولة.';
+    }
+    if (reason == 'invalid_token') {
+      return english
+          ? 'That access token was rejected — copy it again from the AniList page and retry.'
+          : 'رُفض رمز الوصول — انسخه من جديد من صفحة AniList وأعد المحاولة.';
     }
     if (reason == 'state_mismatch' || reason == 'flow_expired' || reason == 'no_pending_flow') {
       return english
@@ -403,88 +390,36 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.';
   }
 
-  /// Persists the AniList credential override in secure storage after
-  /// validating the shape (AniList IDs are numeric). Empty id clears the
-  /// override; an invalid id keeps the editor open with an inline error.
+  /// Persists the AniList client-ID override (the implicit grant needs no
+  /// secret); empty text restores the embedded default.
   Future<void> _saveCredentials() async {
     if (_savingCred) return;
     final app = context.read<AppState>();
-    final english = app.english;
-    final id = _credIdCtrl.text.trim();
-    final secret = _credSecretCtrl.text.trim();
-    if (id.isNotEmpty && !isValidAniListClientId(id)) {
-      setState(() {
-        _credError = english
-            ? 'AniList Client IDs are numbers (e.g. 2789) — this doesn\'t look like one.'
-            : 'معرّفات AniList أرقام فقط (مثل 2789) — هذه القيمة لا تشبهها.';
-      });
-      return;
-    }
-    setState(() {
-      _savingCred = true;
-      _credError = null;
-    });
-    await app.api.saveAniListCredentials(
-      clientId: id,
-      clientSecret: secret,
-    );
+    setState(() => _savingCred = true);
+    await app.api.saveAniListClientId(_credIdCtrl.text.trim());
     if (!mounted) return;
     setState(() {
       _savingCred = false;
       _showCredEditor = false;
-      _anilistNeedsSetup = false;
     });
     NoorToast.show(
       context,
-      english
-          ? 'AniList credentials saved securely.'
-          : 'تم حفظ بيانات AniList بأمان.',
+      app.english
+          ? 'AniList Client ID saved.'
+          : 'تم حفظ معرّف AniList.',
     );
   }
 
-  /// The always-available AniList credentials section: warning banner when a
-  /// flow failed on credentials, the toggle, the developer-dashboard
-  /// walkthrough and the editor itself (numeric-ID validated).
+  /// The always-available AniList credentials section: the toggle, the
+  /// developer-dashboard walkthrough (implicit grant — no secret involved)
+  /// and the Client ID editor itself.
   List<Widget> _anilistCredentialsSection(bool english) {
     return [
-      if (_anilistNeedsSetup) ...[
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(11),
-          decoration: BoxDecoration(
-            color: HorseTheme.gold.withValues(alpha: .09),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: HorseTheme.gold.withValues(alpha: .35)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(
-                Icons.warning_amber_rounded,
-                size: 18,
-                color: HorseTheme.gold,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  english
-                      ? 'One step left: enter the numeric Client ID from anilist.co/settings/developer — your Client Secret is already saved in the app.'
-                      : 'خطوة واحدة متبقية: أدخل معرّف العميل الرقمي من anilist.co/settings/developer — سر العميل محفوظ مسبقًا داخل التطبيق.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
       const SizedBox(height: 6),
       Align(
         alignment: AlignmentDirectional.centerStart,
         child: TextButton.icon(
-          onPressed: () => setState(() {
-            _showCredEditor = !_showCredEditor;
-            _credError = null;
-          }),
+          onPressed: () => setState(() => _showCredEditor = !_showCredEditor),
           icon: const Icon(Icons.key_rounded, size: 17),
           label: Text(
             english
@@ -511,8 +446,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             children: [
               Text(
                 english
-                    ? 'One-time setup — get your AniList credentials:'
-                    : 'إعداد لمرة واحدة — احصل على بيانات AniList:',
+                    ? 'One-time setup — point Noor at your AniList app:'
+                    : 'إعداد لمرة واحدة — اربط Noor بتطبيقك على AniList:',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -522,8 +457,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 english,
                 '1',
                 english
-                    ? 'Open anilist.co/settings/developer and press “Create New App”.'
-                    : 'افتح anilist.co/settings/developer واضغط «Create New App».',
+                    ? 'Open anilist.co/settings/developer and press “Create New App”. (Skip if your “Noor” app already exists.)'
+                    : 'افتح anilist.co/settings/developer واضغط «Create New App». (تجاوز الخطوة إذا كان تطبيقك “Noor” موجودًا).',
               ),
               _credStep(
                 english,
@@ -536,21 +471,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 english,
                 '3',
                 english
-                    ? 'Copy the Client ID (a number like 2789) and the Client Secret.'
-                    : 'انسخ معرّف العميل (رقم مثل 2789) وسر العميل.',
-              ),
-              _credStep(
-                english,
-                '4',
-                english
-                    ? 'Paste both below, save, then press Connect again.'
-                    : 'الصقهما أدناه واحفظ، ثم اضغط «ربط» من جديد.',
+                    ? 'Copy the Client ID, paste it below, save, then press Connect.'
+                    : 'انسخ معرّف العميل، الصقه أدناه واحفظ، ثم اضغط «ربط».',
               ),
               const SizedBox(height: 8),
               Text(
                 english
-                    ? 'Your 40-character value is already saved as the Client Secret — only the small number (Client ID) shown beside it on the dashboard is missing.'
-                    : 'قيمتك ذات الـ40 حرفًا محفوظة الآن كسر عميل — تبقى فقط إضافة الرقم الصغير (معرّف العميل) الظاهر بجانبها في لوحة المطوّر.',
+                    ? 'No client secret needed — Noor uses AniList’s official Implicit Grant for mobile apps: after you approve, AniList returns the access token straight to the app.'
+                    : 'لا حاجة لسر العميل — يستخدم Noor منح AniList الضمني الرسمي لتطبيقات الجوال: بعد الموافقة يعيد AniList رمز الوصول إلى التطبيق مباشرة.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: HorseTheme.muted,
                     ),
@@ -579,31 +507,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           controller: _credIdCtrl,
           autocorrect: false,
           enableSuggestions: false,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           textDirection: TextDirection.ltr,
           style: Theme.of(context).textTheme.bodySmall,
           decoration: InputDecoration(
             isDense: true,
             labelText: english ? 'Client ID' : 'معرّف العميل',
-            hintText: english ? 'e.g. 2789' : 'مثال: 2789',
-            errorText: _credError,
-            border: const OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _credSecretCtrl,
-          autocorrect: false,
-          enableSuggestions: false,
-          obscureText: true,
-          textDirection: TextDirection.ltr,
-          style: Theme.of(context).textTheme.bodySmall,
-          decoration: InputDecoration(
-            isDense: true,
-            labelText: english
-                ? 'Client secret (AniList requires it for every app)'
-                : 'سر العميل (يشترطه AniList لكل تطبيق)',
             border: const OutlineInputBorder(),
           ),
         ),
@@ -676,24 +584,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         final result = widget.service == 'anilist'
             ? await app.api.startAniListLink()
             : await app.api.startMalLink();
-        if (widget.service == 'anilist' &&
-            result?['status']?.toString() == 'invalid_client_id') {
-          // The authorize page would only show an unknown-client error —
-          // surface the credentials editor with the setup guide instead.
-          if (!mounted) return;
-          setState(() {
-            _showCredEditor = true;
-            _anilistNeedsSetup = true;
-          });
-          NoorToast.show(
-            context,
-            app.english
-                ? 'Just one number missing: your AniList Client ID.'
-                : 'يبقى رقم واحد فقط: معرّف AniList الخاص بك.',
-            error: true,
-          );
-          return;
-        }
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
           throw const FormatException('تعذر بدء الربط.');
@@ -1030,9 +920,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             ),
             const SizedBox(height: 12),
             Text(
-              english
-                  ? 'Browser stuck or showing an auth code? Paste it here:'
-                  : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:',
+              widget.service == 'anilist'
+                  ? (english
+                      ? 'Browser stuck on a token page? Paste the full URL or the access token here:'
+                      : 'المتصفح متوقف عند صفحة الرمز؟ الصق الرابط كاملًا أو رمز الوصول هنا:')
+                  : (english
+                      ? 'Browser stuck or showing an auth code? Paste it here:'
+                      : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 6),

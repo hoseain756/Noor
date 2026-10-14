@@ -168,16 +168,54 @@ bool isValidAniListClientId(String id) {
   return parsed != null && parsed > 0 && trimmed.length <= 10;
 }
 
-/// Builds the AniList authorize URL (Authorization Code Grant).
-/// `redirectUri` must byte-match the developer-dashboard registration.
-String aniListAuthorizeUrl({
-  required String clientId,
-  required String redirectUri,
-}) {
+/// Builds the AniList authorize URL using the official IMPLICIT grant —
+/// AniList's documented flow for clients that cannot hold a secret
+/// (docs.anilist.co/guide/auth/implicit-grant): mobile apps redirect with
+/// ONLY the client ID and `response_type=token`; the dashboard-registered
+/// redirect URL carries the JWT access token straight back in the URL
+/// fragment. No client secret and no code exchange exist in this flow.
+String aniListAuthorizeUrl({required String clientId}) {
   return 'https://anilist.co/api/v2/oauth/authorize'
       '?client_id=${Uri.encodeQueryComponent(clientId)}'
-      '&redirect_uri=${Uri.encodeQueryComponent(redirectUri)}'
-      '&response_type=code';
+      '&response_type=token';
+}
+
+/// Extracts an AniList implicit-grant access token from whatever the user
+/// (or the OS return leg) hands over:
+///
+///  - a full redirect URL with the token in its fragment
+///    (`app.noor.mobile://callback#access_token=…&expires_in=…`),
+///  - the same payload pasted as plain `access_token=…` text, or
+///  - the bare token itself.
+///
+/// Returns null when the input clearly carries no token (e.g. a legacy
+/// `?code=…` callback, which the implicit flow never produces).
+String? extractAniListAccessToken(String input) {
+  final text = input.trim();
+  if (text.isEmpty) return null;
+  if (text.contains('://')) {
+    final uri = Uri.tryParse(text);
+    if (uri == null) return null;
+    if (uri.fragment.isNotEmpty) {
+      final token =
+          (Uri(query: uri.fragment).queryParameters['access_token'] ?? '')
+              .trim();
+      if (token.isNotEmpty) return token;
+    }
+    final fromQuery = uri.queryParameters['access_token']?.trim() ?? '';
+    return fromQuery.isEmpty ? null : fromQuery;
+  }
+  if (text.contains('access_token=')) {
+    final index = text.indexOf('access_token=');
+    final token = text
+        .substring(index + 'access_token='.length)
+        .split('&')
+        .first
+        .trim();
+    return token.isEmpty ? null : token;
+  }
+  // Anything else is treated as the bare token the user copied by hand.
+  return text;
 }
 
 /// Builds the MyAnimeList authorize URL: PKCE (plain) is REQUIRED, state is

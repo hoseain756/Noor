@@ -1201,13 +1201,15 @@ class AppState extends ChangeNotifier {
 
   /// Stores a freshly parsed OAuth return and dispatches it to whichever
   /// tracker handshake is pending (AniList presence-match or MyAnimeList
-  /// state-match). Completion updates [linkedServices] and emits
-  /// [oauthLinkEvent] for the toast.
+  /// state-match). Implicit-grant returns (AniList: access token in the URL
+  /// fragment) carry no code/state and complete via the token path.
   void announceOAuthCallback(OAuthCallback callback) {
     _oauthCallback = <String, dynamic>{
       'at': DateTime.now().millisecondsSinceEpoch,
       'code': callback.code,
       'state': callback.state,
+      if (callback.isImplicit) 'accessToken': callback.accessToken,
+      if (callback.expiresIn != null) 'expiresIn': callback.expiresIn,
       if (callback.isDenied) 'error': callback.error,
     };
     notifyListeners();
@@ -1229,18 +1231,27 @@ class AppState extends ChangeNotifier {
     Map<String, dynamic> result;
     try {
       service = await api.pendingOAuthService(state: callback.state);
-      switch (service) {
-        case 'anilist':
-          result = await api.completeAniListLink(callback.code);
-        case 'mal':
-          result = await api.completeMalLink(
-            callback.code,
-            state: callback.state,
-          );
-        default:
-          // No pending flow (stale/duplicate callback) — stay silent unless
-          // the service never linked.
-          return;
+      if (callback.isImplicit) {
+        // AniList implicit grant: the OS return carries the final JWT in
+        // its fragment — nothing to exchange, just store + verify it.
+        result = await api.completeAniListToken(
+          callback.accessToken,
+          expiresInSeconds: callback.expiresIn,
+        );
+      } else {
+        switch (service) {
+          case 'anilist':
+            result = await api.completeAniListToken(callback.code);
+          case 'mal':
+            result = await api.completeMalLink(
+              callback.code,
+              state: callback.state,
+            );
+          default:
+            // No pending flow (stale/duplicate callback) — stay silent unless
+            // the service never linked.
+            return;
+        }
       }
     } catch (_) {
       result = <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};

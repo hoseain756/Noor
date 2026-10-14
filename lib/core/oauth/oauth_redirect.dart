@@ -1,14 +1,18 @@
 /// Generic OAuth return leg for services that redirect back into Noor over
 /// the app-identifier private-use scheme (RFC 8252 §7.1):
 ///
-///     app.noor.mobile://callback?code=…&state=…
+///     app.noor.mobile://callback?code=…&state=…          (code grants)
+///     app.noor.mobile://callback#access_token=…&expires_in=…  (implicit)
 ///
 /// Both AniList and MyAnimeList officially accept private-use URI schemes as
 /// redirect URIs:
 ///
 ///  - AniList (docs.anilist.co/guide/auth): the application redirect URL
 ///    "can be any valid URI, including custom URI schemes"; registered at
-///    anilist.co/settings/developer. Codes come back as `?code=…`.
+///    anilist.co/settings/developer. MyAnimeList-style code grants come back
+///    as `?code=…`, while AniList's IMPLICIT grant (the documented secret-
+///    less flow for mobile apps) delivers the JWT access token in the URL
+///    FRAGMENT (`#access_token=…`), never as a query parameter.
 ///  - MyAnimeList (official staff API guide): "The IETF best current practice
 ///    recommends using a private-use URI scheme … you may register the custom
 ///    myapp://auth handler to obtain the Authorisation Code from MAL's
@@ -43,13 +47,33 @@ class OAuthRedirect {
         uri.host.toLowerCase() == callbackHost;
   }
 
-  /// Parses an OAuth return carried on the app-identifier scheme. Returns
-  /// null for anything that is not THIS app's callback or that carries
-  /// neither a code nor an error (foreign/other-feature
+  /// Parses an OAuth return carried on the app-identifier scheme. Handles
+  /// both shapes:
+  ///
+  ///  - AniList implicit grant: `#access_token=…&expires_in=…` fragment;
+  ///  - code grants (MyAnimeList): `?code=…&state=…` query.
+  ///
+  /// Returns null for anything that is not THIS app's callback or that
+  /// carries neither a token nor a code nor an error (foreign/other-feature
   /// `app.noor.mobile://…` links must not reach the OAuth path).
   static OAuthCallback? parse(String link) {
     if (!isCallback(link)) return null;
     final uri = Uri.tryParse(link.trim())!;
+    // AniList implicit return first — the token lives in the fragment.
+    if (uri.fragment.isNotEmpty) {
+      final fragment = Uri(query: uri.fragment).queryParameters;
+      final fragmentError = fragment['error']?.trim() ?? '';
+      if (fragmentError.isNotEmpty) {
+        return OAuthCallback(error: fragmentError);
+      }
+      final token = fragment['access_token']?.trim() ?? '';
+      if (token.isNotEmpty) {
+        return OAuthCallback(
+          accessToken: token,
+          expiresIn: int.tryParse(fragment['expires_in'] ?? ''),
+        );
+      }
+    }
     final query = uri.queryParameters;
     final error = query['error']?.trim() ?? '';
     if (error.isNotEmpty) {
@@ -61,18 +85,30 @@ class OAuthRedirect {
   }
 }
 
-/// Parsed OAuth return: an authorization `code` (+ `state` echo when the
-/// provider sends one) or a user-denied `error`.
+/// Parsed OAuth return: an AniList implicit-grant access token (fragment),
+/// an authorization `code` (+ `state` echo when the provider sends one) or a
+/// user-denied `error`.
 class OAuthCallback {
   const OAuthCallback({
     this.code = '',
     this.state = '',
+    this.accessToken = '',
+    this.expiresIn,
     this.error,
   });
 
   final String code;
   final String state;
+
+  /// AniList implicit grant: JWT access token taken from the URL fragment.
+  final String accessToken;
+
+  /// Token lifetime in seconds when the provider sends it (AniList does).
+  final int? expiresIn;
   final String? error;
 
   bool get isDenied => error != null && error!.isNotEmpty;
+
+  /// True when this return carries an implicit-grant token instead of a code.
+  bool get isImplicit => accessToken.isNotEmpty;
 }
