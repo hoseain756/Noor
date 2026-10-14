@@ -1,10 +1,16 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../core/torrent/torrent_service.dart';
 
 class SettingsDataPage extends StatelessWidget {
   const SettingsDataPage({super.key});
@@ -23,6 +29,7 @@ class SettingsDataPage extends StatelessWidget {
             padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 36),
             children: [
               _SupabaseSyncCard(app: app),
+              const _TorrentDownloadsCard(),
               _DataRow(
                 icon: Icons.download_outlined,
                 title: english ? 'Export backup' : 'تصدير نسخة احتياطية',
@@ -310,6 +317,241 @@ Future<void> _restoreBackup(BuildContext context, AppState app) async {
         ));
       }
     }
+  }
+}
+
+/// Lists the on-disk torrent downloads (`<docs>/torrents/<hash>/`) with
+/// their sizes and offers per-torrent / clear-all deletion.
+class _TorrentDownloadsCard extends StatefulWidget {
+  const _TorrentDownloadsCard();
+
+  @override
+  State<_TorrentDownloadsCard> createState() => _TorrentDownloadsCardState();
+}
+
+class _TorrentEntry {
+  _TorrentEntry({required this.hash, required this.size, required this.files});
+
+  final String hash;
+  final int size;
+  final int files;
+}
+
+class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
+  List<_TorrentEntry>? _entries;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scan();
+  }
+
+  Future<void> _scan() async {
+    final entries = <_TorrentEntry>[];
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final root = Directory('${docs.path}/torrents');
+      if (await root.exists()) {
+        await for (final dir in root.list()) {
+          if (dir is! Directory) continue;
+          var size = 0;
+          var files = 0;
+          await for (final entity in dir.list(
+            recursive: true,
+            followLinks: false,
+          )) {
+            if (entity is File) {
+              try {
+                size += await entity.length();
+                files += 1;
+              } catch (_) {
+                // File vanished mid-scan — ignore.
+              }
+            }
+          }
+          entries.add(
+            _TorrentEntry(
+              hash: dir.uri.pathSegments.where((s) => s.isNotEmpty).last,
+              size: size,
+              files: files,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // Storage scan failed — show the empty state rather than an error.
+    }
+    entries.sort((a, b) => b.size.compareTo(a.size));
+    if (mounted) setState(() => _entries = entries);
+  }
+
+  Future<void> _delete(_TorrentEntry entry) async {
+    setState(() => _busy = true);
+    try {
+      try {
+        await TorrentService.instance.remove(entry.hash, deleteFiles: true);
+      } catch (_) {
+        // Not in the engine anymore — just clean the disk below.
+      }
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory('${docs.path}/torrents/${entry.hash}');
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (_) {
+      // Best effort; rescan below reflects what actually remains.
+    }
+    if (mounted) {
+      setState(() => _busy = false);
+      await _scan();
+    }
+  }
+
+  Future<void> _clearAll() async {
+    final entries = _entries;
+    if (entries == null || entries.isEmpty) return;
+    setState(() => _busy = true);
+    for (final entry in entries) {
+      try {
+        await TorrentService.instance.remove(entry.hash, deleteFiles: true);
+      } catch (_) {
+        // Ignore engine misses.
+      }
+      try {
+        final docs = await getApplicationDocumentsDirectory();
+        final dir = Directory('${docs.path}/torrents/${entry.hash}');
+        if (await dir.exists()) await dir.delete(recursive: true);
+      } catch (_) {
+        // Best effort.
+      }
+    }
+    if (mounted) {
+      setState(() => _busy = false);
+      await _scan();
+    }
+  }
+
+  static String _formatSize(int bytes) {
+    if (bytes <= 0) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    final exp = math.min(
+      (math.log(bytes) / math.log(1024)).floor(),
+      units.length - 1,
+    );
+    final value = bytes / math.pow(1024, exp);
+    final text = value >= 100 || exp <= 1
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+    return '$text ${units[exp]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final english = app.english;
+    final entries = _entries;
+    final total =
+        entries?.fold<int>(0, (sum, e) => sum + e.size) ?? 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: HorseTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: HorseTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bolt_rounded, color: HorseTheme.gold, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  english ? 'Torrent downloads' : 'تنزيلات التورنت',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (entries != null && entries.isNotEmpty)
+                TextButton(
+                  onPressed: _busy ? null : _clearAll,
+                  child: Text(
+                    english ? 'Clear all' : 'حذف الكل',
+                    style: const TextStyle(color: Color(0xFFE0705A)),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            entries == null
+                ? (english ? 'Checking storage…' : 'جارٍ فحص التخزين…')
+                : entries.isEmpty
+                    ? (english
+                        ? 'Nothing on disk — streamed torrents can be kept for instant resume.'
+                        : 'لا شيء على القرص — التورنتات المشاهدة تُحفظ للاستئناف الفوري.')
+                    : (english
+                        ? '${entries.length} torrent(s) · ${_formatSize(total)} on disk'
+                        : '${entries.length} تورنت · ${_formatSize(total)} على القرص'),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: HorseTheme.muted),
+          ),
+          if (entries != null && entries.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...entries.map((entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.hash.length > 18
+                                  ? '${entry.hash.substring(0, 18)}…'
+                                  : entry.hash,
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontFamily: 'monospace',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_formatSize(entry.size)} · ${entry.files} ${english ? 'files' : 'ملف'}',
+                              style: const TextStyle(
+                                color: HorseTheme.muted,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: english ? 'Delete' : 'حذف',
+                        onPressed:
+                            _busy ? null : () => unawaited(_delete(entry)),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                          color: Color(0xFFE0705A),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
+        ],
+      ),
+    );
   }
 }
 
