@@ -214,6 +214,37 @@ void main() {
     expect(picked, isEmpty);
   });
 
+  testWidgets(
+      'scrub release AND cancel clear the press state '
+      '(no stuck 0.96 scale / state layer)', (tester) async {
+    Set<double> pressedScales() => tester
+        .widgetList<AnimatedScale>(find.byType(AnimatedScale))
+        .map((w) => w.scale)
+        .toSet();
+
+    // Release path.
+    await tester.pumpWidget(host(tabs: ltrTabs, activeId: 'home'));
+    await tester.pumpAndSettle();
+    final g = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.home_outlined)));
+    await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
+    await g.moveBy(const Offset(-120, 0));
+    await tester.pump(const Duration(milliseconds: 60));
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(pressedScales(), {1.0}); // every tab back at rest scale
+
+    // Cancel path.
+    final g2 = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.home_outlined)));
+    await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
+    await g2.moveBy(const Offset(-120, 0));
+    await tester.pump(const Duration(milliseconds: 60));
+    await g2.cancel();
+    await tester.pumpAndSettle();
+    expect(pressedScales(), {1.0});
+  });
+
 
   testWidgets('pill transform: translation math + scrub grow share ONE matrix',
       (tester) async {

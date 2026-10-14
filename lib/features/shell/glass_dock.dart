@@ -352,6 +352,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
       _samples.clear();
       _scrubbing = false;
       _litIndex = null;
+      _pressedIndex = null;
     }
     if (!_scrubbing &&
         (idsChanged || oldWidget.activeId != widget.activeId)) {
@@ -480,6 +481,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     setState(() {
       _scrubbing = false;
       _litIndex = null;
+      _pressedIndex = null; // cancel clears the press state too
     });
     _startMotion(toFrac: _resolvedActiveSlot.toDouble(), toScale: 1);
   }
@@ -497,7 +499,13 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     _grow.forward(from: 0);
     _scrubClock = Stopwatch()..start();
     _samples.clear();
-    setState(() => _scrubbing = true);
+    setState(() {
+      _scrubbing = true;
+      // End the press affordance: once scrub takes over, the pill grow + the
+      // lit preview ARE the feedback (web: pointer capture moves :active off
+      // the button). Also guarantees no slot can stay pressed after release.
+      _pressedIndex = null;
+    });
     _updateScrub(localX); // seed the pill at the pointer + light nearest slot
     HapticFeedback.lightImpact(); // web navigator.vibrate(10)
   }
@@ -539,6 +547,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     setState(() {
       _scrubbing = false;
       _litIndex = null;
+      _pressedIndex = null; // release MUST clear the press scale + state layer
     });
     _startMotion(toFrac: target.toDouble(), toScale: 1); // 350ms snap
     final tab = widget.tabs[target];
