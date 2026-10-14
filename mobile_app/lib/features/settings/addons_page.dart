@@ -83,8 +83,8 @@ class _AddonsPageState extends State<AddonsPage> {
               const SizedBox(height: 7),
               Text(
                 english
-                    ? 'Horse uses the open Stremio add-on protocol. Add-ons provide catalogs, streams, and subtitles.'
-                    : 'يستخدم Horse بروتوكول إضافات Stremio المفتوح. توفّر الإضافات الكتالوجات ومصادر البث والترجمات.',
+                    ? 'Noor uses the open Stremio add-on protocol. Add-ons provide catalogs, streams, and subtitles.'
+                    : 'يستخدم Noor بروتوكول إضافات Stremio المفتوح. توفّر الإضافات الكتالوجات ومصادر البث والترجمات.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: HorseTheme.muted),
@@ -212,8 +212,8 @@ class _AddonsPageState extends State<AddonsPage> {
                     Expanded(
                       child: Text(
                         english
-                            ? 'Add-ons are independent services. Horse only loads catalog metadata and plays sources you choose.'
-                            : 'الإضافات خدمات مستقلة. يعرض Horse بيانات الكتالوج ويشغّل المصدر الذي تختاره.',
+                            ? 'Add-ons are independent services. Noor only loads catalog metadata and plays sources you choose.'
+                            : 'الإضافات خدمات مستقلة. يعرض Noor بيانات الكتالوج ويشغّل المصدر الذي تختاره.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),

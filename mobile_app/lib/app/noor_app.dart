@@ -18,7 +18,7 @@ class NoorApp extends StatelessWidget {
       value: state,
       child: Consumer<AppState>(
         builder: (context, app, _) => MaterialApp(
-          title: 'Horse',
+          title: 'Noor',
           debugShowCheckedModeBanner: false,
           theme: HorseTheme.dark,
           locale: Locale(app.english ? 'en' : 'ar'),
@@ -67,10 +67,10 @@ class _LaunchGateState extends State<_LaunchGate> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const _HorseMark(size: 68),
+                  const _NoorMark(size: 68),
                   const SizedBox(height: 20),
                   Text(
-                    state.english ? 'Horse could not start' : 'تعذر بدء Horse',
+                    state.english ? 'Noor could not start' : 'تعذر بدء Noor',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
@@ -98,7 +98,7 @@ class _LaunchGateState extends State<_LaunchGate> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _HorseMark(size: 68),
+              _NoorMark(size: 68),
               SizedBox(height: 18),
               SizedBox(
                 width: 20,
@@ -117,8 +117,8 @@ class _LaunchGateState extends State<_LaunchGate> {
   }
 }
 
-class _HorseMark extends StatelessWidget {
-  const _HorseMark({required this.size});
+class _NoorMark extends StatelessWidget {
+  const _NoorMark({required this.size});
   final double size;
 
   @override

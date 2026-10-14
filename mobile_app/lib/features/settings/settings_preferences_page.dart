@@ -294,8 +294,8 @@ class SettingsPreferencesPage extends StatelessWidget {
                             ? 'Language preferences select tracks supplied by your add-ons. This app does not translate subtitle files automatically.'
                             : 'تفضيلات اللغة تختار المسارات التي توفرها إضافاتك. التطبيق لا يترجم ملفات الترجمة تلقائيًا.')
                         : (english
-                            ? 'Native playback uses Horse server streams. Browser-only proxy, transcoding, and WebTorrent controls are not available here.'
-                            : 'يستخدم التشغيل الأصلي مصادر خادم Horse. خيارات الوسيط والتحويل ومحرك WebTorrent الخاصة بالمتصفح غير متاحة هنا.'),
+                            ? 'Playback runs natively on this device — direct URLs, Debrid, or the built-in torrent engine. Browser-only proxy, transcoding, and WebTorrent controls are not available here.'
+                            : 'يعمل التشغيل محليًا على هذا الجهاز — روابط مباشرة أو Debrid أو محرك التورنت المدمج. خيارات الوسيط والتحويل ومحرك WebTorrent الخاصة بالمتصفح غير متاحة هنا.'),
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall

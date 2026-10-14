@@ -19,7 +19,7 @@ class StatsPage extends StatelessWidget {
         padding: const EdgeInsets.all(22),
         children: [
           Text(
-            english ? 'Your time with Horse' : 'رحلتك مع Horse',
+            english ? 'Your time with Noor' : 'رحلتك مع Noor',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 6),

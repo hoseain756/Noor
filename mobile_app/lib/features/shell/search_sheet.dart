@@ -133,7 +133,7 @@ class _SearchSheetState extends State<SearchSheet> {
             if (_controller.text.trim().length < 2) ...[
               const SizedBox(height: 14),
               Text(
-                english ? 'Browse Horse' : 'تصفّح Horse',
+                english ? 'Browse Noor' : 'تصفّح Noor',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 8),

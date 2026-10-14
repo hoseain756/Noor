@@ -52,8 +52,8 @@ class SettingsDataPage extends StatelessWidget {
                 icon: Icons.restore_rounded,
                 title: english ? 'Restore backup' : 'استعادة نسخة احتياطية',
                 detail: english
-                    ? 'Paste a Horse mobile JSON backup to restore this device.'
-                    : 'الصق نسخة Horse الاحتياطية بصيغة JSON لاستعادتها على هذا الجهاز.',
+                    ? 'Paste a Noor mobile JSON backup to restore this device.'
+                    : 'الصق نسخة Noor الاحتياطية بصيغة JSON لاستعادتها على هذا الجهاز.',
                 onTap: () => _restoreBackup(context, app),
               ),
               _DataRow(
@@ -652,7 +652,7 @@ class SettingsAboutPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final english = context.watch<AppState>().english;
     return Scaffold(
-      appBar: AppBar(title: Text(english ? 'About Horse' : 'حول Horse')),
+      appBar: AppBar(title: Text(english ? 'About Noor' : 'حول Noor')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -669,13 +669,13 @@ class SettingsAboutPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Horse',
+                    Text('Noor',
                         style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 12),
                     Text(
                       english
-                          ? 'An independent, open-source media center for the Stremio add-on protocol. Horse is not affiliated with Stremio, does not host or ship media, and users install their own add-ons.'
-                          : 'مركز وسائط مستقل ومفتوح المصدر لبروتوكول إضافات Stremio. لا يرتبط Horse بـ Stremio ولا يستضيف أو يوزّع محتوى؛ ويثبّت المستخدم إضافاته بنفسه.',
+                          ? 'An independent, open-source media center for the Stremio add-on protocol. Noor is not affiliated with Stremio, does not host or ship media, and users install their own add-ons.'
+                          : 'مركز وسائط مستقل ومفتوح المصدر لبروتوكول إضافات Stremio. لا يرتبط Noor بـ Stremio ولا يستضيف أو يوزّع محتوى؛ ويثبّت المستخدم إضافاته بنفسه.',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 12),

@@ -321,7 +321,7 @@ class _TabletNavigation extends StatelessWidget {
                 const Icon(Icons.brightness_7_rounded, color: HorseTheme.gold),
                 const SizedBox(width: 10),
                 Expanded(
-                    child: Text('Horse',
+                    child: Text('Noor',
                         style: Theme.of(context).textTheme.titleLarge)),
                 IconButton(
                     tooltip: english ? 'Close navigation' : 'إغلاق التنقل',

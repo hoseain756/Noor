@@ -179,8 +179,8 @@ class SettingsDisplayPage extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 english
-                    ? 'Horse keeps its signature dark and bronze colors. Browser-only options such as desktop side-rail order are not available on mobile.'
-                    : 'يحافظ Horse على ألوانه الداكنة والذهبية. خيارات المتصفح الخاصة مثل ترتيب الشريط الجانبي المكتبي غير متاحة على الجوال.',
+                    ? 'Noor keeps its signature dark and bronze colors. Browser-only options such as desktop side-rail order are not available on mobile.'
+                    : 'يحافظ Noor على ألوانه الداكنة والذهبية. خيارات المتصفح الخاصة مثل ترتيب الشريط الجانبي المكتبي غير متاحة على الجوال.',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall

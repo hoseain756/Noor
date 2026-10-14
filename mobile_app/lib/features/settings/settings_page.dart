@@ -42,7 +42,7 @@ class SettingsPage extends StatelessWidget {
             ),
             children: [
               Text(
-                english ? 'Your Horse' : 'تطبيق Horse',
+                english ? 'Your Noor' : 'تطبيق Noor',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 6),
@@ -148,7 +148,7 @@ class SettingsPage extends StatelessWidget {
               ),
               _SettingsTile(
                 icon: Icons.palette_outlined,
-                title: english ? 'Horse design' : 'تصميم Horse',
+                title: english ? 'Noor design' : 'تصميم Noor',
                 subtitle: english
                     ? 'The signature dark and bronze look'
                     : 'الهوية الداكنة والذهبية المعتمدة',
@@ -189,7 +189,7 @@ class SettingsPage extends StatelessWidget {
               _SectionTitle(title: english ? 'About' : 'حول التطبيق'),
               _SettingsTile(
                 icon: Icons.info_outline_rounded,
-                title: english ? 'About Horse' : 'حول Horse',
+                title: english ? 'About Noor' : 'حول Noor',
                 subtitle: english
                     ? 'Version, license, and acknowledgements'
                     : 'الإصدار والترخيص والإسناد',
