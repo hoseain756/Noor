@@ -116,6 +116,26 @@ class MediaItem {
         idMal: idMal ?? this.idMal,
       );
 
+  /// Copy with replacement artwork (used when a rail enriches poster art
+  /// after the initial row fetch).
+  MediaItem withArtwork({String? poster, String? background}) => MediaItem(
+        id: id,
+        type: type,
+        name: name,
+        logo: logo,
+        poster: poster ?? this.poster,
+        background: background ?? this.background,
+        description: description,
+        releaseInfo: releaseInfo,
+        rating: rating,
+        certification: certification,
+        originCountry: originCountry,
+        genres: genres,
+        videos: videos,
+        anilistId: anilistId,
+        idMal: idMal,
+      );
+
   static String? _string(dynamic value) =>
       value is String && value.isNotEmpty ? value : null;
 

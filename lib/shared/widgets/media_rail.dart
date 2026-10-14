@@ -12,10 +12,15 @@ class MediaRail extends StatelessWidget {
     required this.title,
     required this.items,
     required this.onTap,
+    this.subtitle,
     this.onOpenSection,
   });
 
   final String title;
+
+  /// Optional source line under the rail title (the add-on name on the web
+  /// AddonRail).
+  final String? subtitle;
   final List<MediaItem> items;
   final ValueChanged<MediaItem> onTap;
 
@@ -64,10 +69,31 @@ class MediaRail extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                child: subtitle == null
+                    ? Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            subtitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: HorseTheme.muted),
+                          ),
+                        ],
+                      ),
               ),
               if (onOpenSection != null) _SectionChevron(onTap: onOpenSection!),
             ],

@@ -3038,6 +3038,119 @@ query ($userId: Int) {
     return result;
   }
 
+  // --------------------------------------------------------------------------
+  // Linked-service continue-watching + rail sources
+  // --------------------------------------------------------------------------
+
+  /// AniList MediaListCollection entries (all list statuses) with cover art
+  /// and episode totals — one request feeds both the linked continue-watching
+  /// cards (CURRENT) and the AniList watchlist rail (PLANNING). Raw provider
+  /// rows; the semantic mapping lives in IntegrationCwEntry.fromAniListRow.
+  static const String _aniListEntriesQuery = r'''
+query ($userId: Int) {
+  MediaListCollection(userId: $userId, type: ANIME) {
+    lists {
+      entries {
+        id
+        status
+        progress
+        updatedAt
+        media {
+          id
+          idMal
+          title { romaji english native }
+          coverImage { large }
+          format
+          episodes
+          seasonYear
+        }
+      }
+    }
+  }
+}''';
+
+  /// Trakt paused-playback points (`/users/me/playback`) — Trakt's own
+  /// continue-watching feed: items paused below the scrobble threshold, each
+  /// with a progress percentage and the exact pause moment. Auto-refreshes
+  /// the access token; silently empty when Trakt is not linked or fails.
+  Future<List<dynamic>> traktPlayback() async {
+    final token = await _validTraktAccessToken();
+    if (token == null) return const <dynamic>[];
+    try {
+      final response = await _client.get<dynamic>(
+        '$traktBaseUrl/users/me/playback',
+        queryParameters: <String, dynamic>{'limit': '20'},
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+            'trakt-api-version': '2',
+            'trakt-api-key': defaultTraktClientId,
+          },
+        ),
+      );
+      return response.data is List ? response.data as List : const <dynamic>[];
+    } on DioException catch (error) {
+      // Token revoked server-side — drop the session like the other Trakt
+      // calls so the integrations card returns to "connect".
+      if (error.response?.statusCode == 401) await _clearTraktTokens();
+      return const <dynamic>[];
+    } catch (_) {
+      return const <dynamic>[];
+    }
+  }
+
+  /// AniList anime list entries with covers (raw rows). Silently empty when
+  /// AniList is not linked or the viewer/collection lookup fails.
+  Future<List<dynamic>> aniListEntries() async {
+    if (!isLinked('anilist')) return const <dynamic>[];
+    try {
+      final viewer = await aniListViewer();
+      final userId = (viewer?['id'] as num?)?.toInt();
+      if (userId == null) return const <dynamic>[];
+      final data = await _aniListQuery(_aniListEntriesQuery, <String, dynamic>{
+        'userId': userId,
+      });
+      final collection = _asMap(data?['MediaListCollection']);
+      final lists = collection?['lists'];
+      if (lists is! List) return const <dynamic>[];
+      final rows = <dynamic>[];
+      for (final list in lists.whereType<Map>()) {
+        rows.addAll(list['entries'] as List? ?? const <dynamic>[]);
+      }
+      return rows;
+    } catch (_) {
+      return const <dynamic>[];
+    }
+  }
+
+  /// MyAnimeList animelist rows for one list status (`watching` feeds the
+  /// linked continue-watching cards, `plan_to_watch` the watchlist rail).
+  Future<List<dynamic>> malList({required String status}) async {
+    final token = await _validMalAccessToken();
+    if (token == null) return const <dynamic>[];
+    try {
+      final response = await _client.get<dynamic>(
+        '$malApiBase/users/@me/animelist',
+        queryParameters: <String, String>{
+          'status': status,
+          'limit': '50',
+          'nsfw': 'true',
+          'fields': 'id,title,main_picture{large},start_season{year},'
+              'media_type,list_status{num_episodes_watched,updated_at}',
+        },
+        options: Options(headers: await _malBearer(token)),
+      );
+      final data = _asMap(response.data);
+      return data?['data'] is List ? data!['data'] as List : const <dynamic>[];
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) await _clearMalSession();
+      return const <dynamic>[];
+    } catch (_) {
+      return const <dynamic>[];
+    }
+  }
+
   /// Fire-and-forget scrobble. Never throws; silently no-ops when the
   /// service is not linked.
   Future<void> scrobbleLinkedService(

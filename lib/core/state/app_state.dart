@@ -9,6 +9,7 @@ import '../api/noor_api.dart';
 import '../data/catalog_repository.dart';
 import '../models/addon.dart';
 import '../models/custom_list.dart';
+import '../models/integration_cw.dart';
 import '../models/media_item.dart';
 import '../oauth/oauth_redirect.dart';
 import '../sync/noor_sync.dart';
@@ -315,6 +316,9 @@ class AppState extends ChangeNotifier {
       _encode(linkedServices),
     );
     notifyListeners();
+    // New link → its continue-watching cards and watchlist rail should
+    // appear promptly (bypasses the TTL cache).
+    unawaited(refreshLinkedContent(force: true));
   }
 
   Future<void> unlinkService(String service) async {
@@ -329,6 +333,210 @@ class AppState extends ChangeNotifier {
       _encode(linkedServices),
     );
     notifyListeners();
+    unawaited(refreshLinkedContent(force: true));
+  }
+
+  // ------------------------------------------------------------------------
+  // Linked-service content: continue-watching cards + watchlist rails
+  // ------------------------------------------------------------------------
+
+  /// Continue-watching entries sourced from linked services (Trakt paused
+  /// playback, AniList/MAL currently-watching). Newest first, deduped,
+  /// capped — rendered right after the local Continue Watching rail.
+  List<IntegrationCwEntry> linkedContinueWatching = const [];
+
+  /// Catalog rails contributed by linked services, keyed for the home page:
+  /// 'trakt' / 'simkl' → the service watchlist, 'anilist' / 'mal' → the
+  /// plan-to-watch list. Rows never carry position data and are purely
+  /// additive presentation state.
+  final Map<String, List<MediaItem>> linkedCatalogItems = {};
+
+  static const Duration _linkedContentTtl = Duration(minutes: 5);
+  DateTime? _linkedContentAt;
+  bool _linkedContentLoading = false;
+  int _linkedContentGeneration = 0;
+
+  /// Signature of the linked-services map — the home page includes it in its
+  /// reload signature so linking/unlinking a service refreshes the rails.
+  String get linkedServicesSignature =>
+      (linkedServices.keys.toList()..sort()).join('|');
+
+  /// Refreshes the linked-service continue-watching cards and catalog rails
+  /// (5-minute TTL, concurrency-guarded, force-able after a link change).
+  /// Fail-soft by design: a provider hiccup keeps the previous rows and
+  /// never disturbs local history or the sync machinery.
+  Future<void> refreshLinkedContent({bool force = false}) async {
+    if (_linkedContentLoading) return;
+    if (!force &&
+        _linkedContentAt != null &&
+        DateTime.now().difference(_linkedContentAt!) < _linkedContentTtl) {
+      return;
+    }
+    final linked = linkedServices;
+    if (linked.isEmpty) {
+      if (linkedContinueWatching.isNotEmpty || linkedCatalogItems.isNotEmpty) {
+        linkedContinueWatching = const [];
+        linkedCatalogItems.clear();
+        _linkedContentAt = DateTime.now();
+        notifyListeners();
+      }
+      return;
+    }
+    _linkedContentLoading = true;
+    final generation = ++_linkedContentGeneration;
+    try {
+      final jobs = <String, Future<List<dynamic>>>{
+        if (linked['trakt']?['linked'] == true)
+          'trakt-playback': api.traktPlayback(),
+        if (linked['trakt']?['linked'] == true)
+          'trakt-watchlist': api.syncLinkedService('trakt', 'watchlist'),
+        if (linked['simkl']?['linked'] == true)
+          'simkl-watchlist': api.syncLinkedService('simkl', 'watchlist'),
+        if (linked['anilist']?['linked'] == true)
+          'anilist-entries': api.aniListEntries(),
+        if (linked['mal']?['linked'] == true)
+          'mal-watching': api.malList(status: 'watching'),
+        if (linked['mal']?['linked'] == true)
+          'mal-planning': api.malList(status: 'plan_to_watch'),
+      };
+      if (jobs.isEmpty) {
+        linkedContinueWatching = const [];
+        linkedCatalogItems.clear();
+        _linkedContentAt = DateTime.now();
+        return;
+      }
+      final keys = jobs.keys.toList(growable: false);
+      final results = await Future.wait(jobs.values);
+      if (generation != _linkedContentGeneration) return;
+      final rowsByKey = Map<String, List<dynamic>>.fromIterables(
+        keys,
+        results,
+      );
+
+      // Continue-watching cards: Trakt paused points + the anime trackers'
+      // currently-watching entries with real progress.
+      final anilistRows = rowsByKey['anilist-entries'] ?? const <dynamic>[];
+      final cw = IntegrationCwEntry.merge([
+        if (rowsByKey['trakt-playback'] != null)
+          rowsByKey['trakt-playback']!
+              .map((row) => IntegrationCwEntry.fromTraktPlayback(row))
+              .whereType<IntegrationCwEntry>(),
+        anilistRows
+            .map((row) =>
+                IntegrationCwEntry.fromAniListRow(row, statusFilter: 'CURRENT'))
+            .whereType<IntegrationCwEntry>()
+            .where((entry) => entry.isContinueable),
+        if (rowsByKey['mal-watching'] != null)
+          rowsByKey['mal-watching']!
+              .map((row) => IntegrationCwEntry.fromMalRow(row))
+              .whereType<IntegrationCwEntry>()
+              .where((entry) => entry.isContinueable),
+      ]);
+      linkedContinueWatching = cw;
+
+      // Catalog rails. Trakt/Simkl watchlist rows carry only identities, so
+      // the first cards get their artwork resolved through the meta add-ons
+      // (bounded, fail-soft); the tracker lists carry provider covers.
+      linkedCatalogItems
+        ..clear()
+        ..addAll(await _linkedCatalogRails(
+          traktWatchlist: rowsByKey['trakt-watchlist'],
+          simklWatchlist: rowsByKey['simkl-watchlist'],
+          anilistEntries: anilistRows,
+          malPlanning: rowsByKey['mal-planning'],
+        ));
+      _linkedContentAt = DateTime.now();
+      notifyListeners();
+    } catch (_) {
+      // Provider hiccup — keep the previous content; the next tick retries.
+    } finally {
+      if (generation == _linkedContentGeneration) {
+        _linkedContentLoading = false;
+      }
+    }
+  }
+
+  Future<Map<String, List<MediaItem>>> _linkedCatalogRails({
+    List<dynamic>? traktWatchlist,
+    List<dynamic>? simklWatchlist,
+    List<dynamic>? anilistEntries,
+    List<dynamic>? malPlanning,
+  }) async {
+    final rails = <String, List<MediaItem>>{};
+    if (traktWatchlist != null && traktWatchlist.isNotEmpty) {
+      final items = await _enrichedWatchlistItems(traktWatchlist);
+      if (items.isNotEmpty) rails['trakt'] = items;
+    }
+    if (simklWatchlist != null && simklWatchlist.isNotEmpty) {
+      final items = await _enrichedWatchlistItems(simklWatchlist);
+      if (items.isNotEmpty) rails['simkl'] = items;
+    }
+    if (anilistEntries != null && anilistEntries.isNotEmpty) {
+      final items = <MediaItem>[];
+      final seen = <String>{};
+      for (final row in anilistEntries) {
+        final entry =
+            IntegrationCwEntry.fromAniListRow(row, statusFilter: 'PLANNING');
+        if (entry == null) continue;
+        if (!seen.add(entry.item.id)) continue;
+        items.add(entry.item);
+        if (items.length >= 24) break;
+      }
+      if (items.isNotEmpty) rails['anilist'] = items;
+    }
+    if (malPlanning != null && malPlanning.isNotEmpty) {
+      final items = <MediaItem>[];
+      final seen = <String>{};
+      for (final row in malPlanning) {
+        final entry = IntegrationCwEntry.fromMalRow(row);
+        if (entry == null) continue;
+        if (!seen.add(entry.item.id)) continue;
+        items.add(entry.item);
+        if (items.length >= 24) break;
+      }
+      if (items.isNotEmpty) rails['mal'] = items;
+    }
+    return rails;
+  }
+
+  /// Watchlist rows carry only identities (no artwork). Resolve posters for
+  /// the first few cards through the meta add-ons / Cinemeta, bounded and
+  /// fail-soft, so the rail renders with real art instead of placeholders.
+  Future<List<MediaItem>> _enrichedWatchlistItems(List<dynamic> rows) async {
+    final items = <MediaItem>[];
+    final seen = <String>{};
+    for (final row in rows) {
+      final item = IntegrationCwEntry.watchlistItemFromRow(row);
+      if (item == null || !seen.add(item.id)) continue;
+      items.add(item);
+      if (items.length >= 24) break;
+    }
+    final pending = items
+        .where((item) => item.poster == null && item.id.startsWith('tt'))
+        .take(8)
+        .toList();
+    if (pending.isEmpty) return items;
+    final resolved = await Future.wait(pending.map((item) async {
+      try {
+        return await catalogs
+            .detail(item.type, item.id, addons)
+            .timeout(const Duration(seconds: 10), onTimeout: () => null);
+      } catch (_) {
+        return null;
+      }
+    }));
+    final art = <String, MediaItem>{};
+    for (final detail in resolved) {
+      if (detail != null) art[detail.id] = detail;
+    }
+    return items
+        .map((item) => art.containsKey(item.id)
+            ? item.withArtwork(
+                poster: art[item.id]!.poster,
+                background: art[item.id]!.background,
+              )
+            : item)
+        .toList();
   }
 
   Future<(int, int)> syncLinkedService(String service) async {

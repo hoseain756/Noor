@@ -7,6 +7,20 @@ import '../models/anime_airing.dart';
 import '../models/featured_artwork.dart';
 import '../models/media_item.dart';
 
+/// One home "catalog rail": an enabled add-on plus one of its catalog
+/// entries that deserves its own row (same shape as the Harbor web home
+/// `AddonRail`).
+class AddonCatalogRow {
+  const AddonCatalogRow({required this.addon, required this.catalog});
+
+  final Addon addon;
+  final AddonCatalog catalog;
+
+  String get key => '${addon.id}:${catalog.type}:${catalog.id}';
+  String get title => catalog.name;
+  String get subtitle => addon.name;
+}
+
 class CatalogRepository {
   CatalogRepository(this.api);
 
@@ -539,6 +553,37 @@ query ($weekStart: Int!, $weekEnd: Int!) {
       if (jobs.length >= (showAll ? 100 : 8)) break;
     }
     return _merge(await Future.wait(jobs.map(_softList)));
+  }
+
+  /// Pure selection of add-on catalogs that deserve their own home row —
+  /// ported from the Harbor web home `addonRows` memo: enabled add-ons only,
+  /// movie/series catalogs only, catalogs that REQUIRE a search term are
+  /// skipped, one row per normalized catalog name (first add-on wins), and
+  /// `type:id` pairs already rendered as anchor rails are skipped.
+  static List<AddonCatalogRow> selectAddonCatalogRows(
+    List<Addon> addons, {
+    Set<String> anchorKeys = const {},
+    int limit = 8,
+  }) {
+    final seenNames = <String>{};
+    final rows = <AddonCatalogRow>[];
+    for (final addon in addons) {
+      if (rows.length >= limit) break;
+      if (!addon.enabled) continue;
+      for (final catalog in addon.catalogs) {
+        if (rows.length >= limit) break;
+        if (catalog.type != 'movie' && catalog.type != 'series') continue;
+        if (anchorKeys.contains('${catalog.type}:${catalog.id}')) continue;
+        final requiresSearch = catalog.extra.any(
+          (entry) => entry['name'] == 'search' && entry['isRequired'] == true,
+        );
+        if (requiresSearch) continue;
+        final name = catalog.name.toLowerCase().trim();
+        if (!seenNames.add(name)) continue;
+        rows.add(AddonCatalogRow(addon: addon, catalog: catalog));
+      }
+    }
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> streams(

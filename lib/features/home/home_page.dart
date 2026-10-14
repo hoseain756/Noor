@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/data/catalog_repository.dart';
+import '../../core/models/integration_cw.dart';
 import '../../core/models/media_item.dart';
 import '../../core/models/featured_artwork.dart';
 import '../../core/state/app_state.dart';
@@ -16,6 +18,7 @@ import 'cw_upcoming.dart';
 import 'top10_rail.dart';
 import '../anime/anime_page.dart';
 import '../catalog/catalog_browser_page.dart';
+import '../catalog/catalog_grid_page.dart';
 import '../media/media_detail_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -36,10 +39,14 @@ class _HomePageState extends State<HomePage> {
   Future<List<MediaItem>>? _anime;
   Future<List<MediaItem>>? _animeMovies;
   Future<List<MediaItem>>? _newEpisodes;
-  Future<List<MediaItem>>? _addons;
   Future<List<MediaItem>>? _recommendations;
+  /// Per-catalog home rows (web AddonRail parity): every eligible add-on
+  /// catalog gets its own rail with its own future, deduped against the
+  /// anchor rows above.
+  List<AddonCatalogRow> _catalogRows = const [];
+  final Map<String, Future<List<MediaItem>>> _catalogRowFutures = {};
   String? _addonSignature;
-  // AniList taps resolve to a playable Stremio identity before opening.
+  // AniList/MAL taps resolve to a playable Stremio identity before opening.
   final Set<String> _resolving = {};
 
   @override
@@ -57,11 +64,15 @@ class _HomePageState extends State<HomePage> {
       app.webSettings['tmdbEnabled'],
       app.webSettings['tmdbLanguage'],
       app.webSettings['region'],
+      app.linkedServicesSignature,
     ].join('|');
     if (_topTen == null || signature != _addonSignature) {
       _addonSignature = signature;
       _load(app);
     }
+    // Linked-service cards + rails refresh on a short TTL; a link/unlink
+    // change forces an immediate refresh from inside AppState.
+    unawaited(app.refreshLinkedContent());
   }
 
   void _load(AppState app) {
@@ -88,12 +99,31 @@ class _HomePageState extends State<HomePage> {
     _newEpisodes = app.catalogs
         .catalog('series', 'last-videos')
         .then((items) => _visibleItems(app, items));
-    _addons = app.catalogs
-        .addonCatalogs(
-          app.addons,
-          showAll: app.webSettings['homeShowAllAddonRows'] == true,
-        )
-        .then((items) => _visibleItems(app, items));
+    // Per-catalog rows (web AddonRail parity): eligible add-on catalogs each
+    // get their own rail; the "show all" setting lifts the row cap.
+    final showAllRows = app.webSettings['homeShowAllAddonRows'] == true;
+    _catalogRows = CatalogRepository.selectAddonCatalogRows(
+      app.addons,
+      anchorKeys: const {
+        'movie:trailer',
+        'series:trailer',
+        'movie:top',
+        'series:last-videos',
+      },
+      limit: showAllRows ? 30 : 8,
+    );
+    _catalogRowFutures
+      ..clear()
+      ..addEntries(
+        _catalogRows.map(
+          (row) => MapEntry(
+            row.key,
+            app.catalogs
+                .catalog(row.catalog.type, row.catalog.id, addon: row.addon)
+                .then((items) => _visibleItems(app, items)),
+          ),
+        ),
+      );
     _featuredSlides = Future.wait<List<MediaItem>>([
       _movies!.catchError((Object _) => <MediaItem>[]),
       _theaters!.catchError((Object _) => <MediaItem>[]),
@@ -226,6 +256,22 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
+        // Continue watching sourced from the LINKED tracking services
+        // (Trakt paused playback + AniList/MAL currently-watching) — same
+        // Harbor-web card spec, rendered right after the local row.
+        if (app.linkedContinueWatching.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsetsDirectional.only(
+                bottom: MediaRail.sectionSpacing(context),
+              ),
+              child: _LinkedContinueRail(
+                entries: app.linkedContinueWatching,
+                english: english,
+                onOpen: _open,
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: _AsyncMediaSection(
             title: english ? 'Recommended for you' : 'مقترح لك',
@@ -302,25 +348,32 @@ class _HomePageState extends State<HomePage> {
             english: english,
           ),
         ),
-        SliverToBoxAdapter(
-          child: _AsyncMediaSection(
-            title: english ? 'From your add-ons' : 'من إضافاتك',
-            future: _addons!,
-            onTap: _open,
-            onOpenSection: () => _openSection(
-              const CatalogBrowserPage(mode: CatalogBrowseMode.catalogs),
+        // One rail per eligible add-on catalog (web AddonRail parity) —
+        // rows that fail or stay empty simply don't render.
+        for (final row in _catalogRows)
+          SliverToBoxAdapter(
+            child: _AsyncMediaSection(
+              title: row.title,
+              subtitle: row.subtitle,
+              future: _catalogRowFutures[row.key] ??
+                  Future<List<MediaItem>>.value(const <MediaItem>[]),
+              onTap: _open,
+              onRetry: () => setState(() => _load(app)),
+              onOpenSection: () => _openSection(
+                CatalogGridPage(
+                  title: row.title,
+                  subtitle: row.subtitle,
+                  onOpen: _open,
+                  loader: () => context.read<AppState>().catalogs.catalog(
+                        row.catalog.type,
+                        row.catalog.id,
+                        addon: row.addon,
+                      ),
+                ),
+              ),
+              english: english,
             ),
-            onRetry: () => setState(
-              () => _addons = app.catalogs
-                  .addonCatalogs(
-                    app.addons,
-                    showAll: app.webSettings['homeShowAllAddonRows'] == true,
-                  )
-                  .then((items) => _visibleItems(app, items)),
-            ),
-            english: english,
           ),
-        ),
         SliverToBoxAdapter(
           child: _AsyncMediaSection(
             title: english ? 'New episodes' : 'حلقات جديدة',
@@ -353,6 +406,28 @@ class _HomePageState extends State<HomePage> {
             english: english,
           ),
         ),
+        // Watchlist rails from the linked services — Trakt / Simkl
+        // watchlists and the AniList / MyAnimeList plan-to-watch lists.
+        for (final rail in _linkedRails(app, english))
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsetsDirectional.only(
+                bottom: MediaRail.sectionSpacing(context),
+              ),
+              child: MediaRail(
+                title: rail.$1,
+                items: rail.$2,
+                onTap: _open,
+                onOpenSection: () => _openSection(
+                  CatalogGridPage(
+                    title: rail.$1,
+                    items: rail.$2,
+                    onOpen: _open,
+                  ),
+                ),
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: SizedBox(
             height: glassDockContentClearance(context),
@@ -363,14 +438,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _open(MediaItem item) {
-    if (!item.id.startsWith('anilist:')) {
+    final needsResolve =
+        item.id.startsWith('anilist:') || item.id.startsWith('mal:');
+    if (!needsResolve) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => MediaDetailPage(item: item)),
       );
       return;
     }
-    // AniList records resolve to their Stremio identity first, mirroring the
-    // anime page behavior.
+    // Tracker records resolve to their playable Stremio identity first,
+    // mirroring the anime page behavior.
     unawaited(_openAnime(item));
   }
 
@@ -413,6 +490,29 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// Linked-service catalog rails: one watchlist rail per linked service
+  /// (Trakt/Simkl watchlists, AniList/MAL plan-to-watch) as `(title, items)`.
+  /// Hidden entirely when anime content is hidden — the tracker rails are
+  /// anime-only by definition.
+  List<(String, List<MediaItem>)> _linkedRails(
+    AppState app,
+    bool english,
+  ) {
+    if ((app.webSettings['hideContent'] as Map?)?['anime'] == true) {
+      return const [];
+    }
+    return [
+      for (final service in const <(String, String, String)>[
+        ('trakt', 'Watchlist · Trakt', 'قائمة المشاهدة · Trakt'),
+        ('simkl', 'Watchlist · Simkl', 'قائمة المشاهدة · Simkl'),
+        ('anilist', 'Watchlist · AniList', 'قائمة المشاهدة · AniList'),
+        ('mal', 'Watchlist · MyAnimeList', 'قائمة المشاهدة · MyAnimeList'),
+      ])
+        if (app.linkedCatalogItems[service.$1]?.isNotEmpty ?? false)
+          (english ? service.$2 : service.$3, app.linkedCatalogItems[service.$1]!),
+    ];
+  }
+
   void _openSection(Widget page) =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
 }
@@ -424,12 +524,17 @@ class _AsyncMediaSection extends StatelessWidget {
     required this.onTap,
     required this.onRetry,
     required this.english,
+    this.subtitle,
     this.numbered = false,
     this.showEmptyState = false,
     this.onOpenSection,
   });
 
   final String title;
+
+  /// Optional source line under the rail title (the add-on name, mirroring
+  /// the web Rail subtitle).
+  final String? subtitle;
   final Future<List<MediaItem>> future;
   final ValueChanged<MediaItem> onTap;
   final VoidCallback onRetry;
@@ -481,6 +586,7 @@ class _AsyncMediaSection extends StatelessWidget {
                 ? Top10Rail(title: title, items: items, onTap: onTap)
                 : MediaRail(
                     title: title,
+                    subtitle: subtitle,
                     items: items,
                     onTap: onTap,
                     onOpenSection: onOpenSection,
@@ -695,6 +801,21 @@ class _ContinueRailState extends State<_ContinueRail> {
     _ensureEnrichment();
   }
 
+  /// Web token parity: movies show the remaining-time subtitle
+  /// ("1h 20m left" / "تبقى 1س 20د") when more than a minute remains.
+  static String? _remainingLabel(WatchHistoryEntry entry, bool english) {
+    final remaining = entry.durationMs - entry.positionMs;
+    if (remaining <= 60000) return null;
+    final totalMin = (remaining / 60000).round();
+    final h = totalMin ~/ 60;
+    final m = totalMin % 60;
+    final parts = <String>[
+      if (h > 0) '$h${english ? 'h' : 'س'}',
+      if (m > 0 || h == 0) '$m${english ? 'm' : 'د'}',
+    ];
+    return english ? '${parts.join(' ')} left' : 'تبقى ${parts.join(' ')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     // Most recently watched first — same ordering as the Harbor web row.
@@ -738,13 +859,69 @@ class _ContinueRailState extends State<_ContinueRail> {
             scrollDirection: Axis.horizontal,
             itemCount: sorted.length,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, index) => _ContinueCard(
-              entry: sorted[index],
-              english: widget.english,
-              width: cardWidth,
-              height: cardHeight,
-              enrichment: _enrichment[sorted[index].item.id],
-            ),
+            itemBuilder: (context, index) {
+              final entry = sorted[index];
+              final item = entry.item;
+              final isSeries = item.type == 'series' &&
+                  entry.season != null &&
+                  entry.episode != null;
+              final enrichment = _enrichment[item.id];
+              final epName = enrichment?.episodeName;
+              final data = _CwCardData(
+                id: '${entry.item.id}:${entry.watchedAt}',
+                item: item,
+                progress: entry.durationMs > 0
+                    ? (entry.positionMs / entry.durationMs).clamp(0.0, 1.0)
+                    : 0.0,
+                epTag:
+                    isSeries ? 'S${entry.season} E${entry.episode}' : null,
+                subtitle: isSeries
+                    ? (epName != null && epName.isNotEmpty
+                        ? epName
+                        : (widget.english
+                            ? 'Episode ${entry.episode}'
+                            : 'الحلقة ${entry.episode}'))
+                    : _remainingLabel(entry, widget.english),
+                badge: cwUpcomingLabel(
+                    enrichment?.nextAirMs, widget.english, DateTime.now()),
+                fresh: enrichment?.fresh ?? false,
+              );
+              return _ContinueCard(
+                data: data,
+                english: widget.english,
+                width: cardWidth,
+                height: cardHeight,
+                onOpen: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => MediaDetailPage(
+                      item: item,
+                      resumeVideoId: entry.videoId,
+                      resumePositionMs: entry.positionMs,
+                    ),
+                  ),
+                ),
+                onMarkWatched: () {
+                  unawaited(
+                    context
+                        .read<AppState>()
+                        .markContinueWatchingWatched(item.id)
+                        .then((_) {
+                      if (context.mounted) {
+                        NoorToast.show(
+                          context,
+                          widget.english
+                              ? 'Marked as watched'
+                              : 'تم التحديد كمشاهد',
+                        );
+                      }
+                    }),
+                  );
+                },
+                onRemove: () => unawaited(
+                  context.read<AppState>().removeContinueWatchingEntry(item.id),
+                ),
+              );
+            },
           ),
         ),
       ],
@@ -752,64 +929,74 @@ class _ContinueRailState extends State<_ContinueRail> {
   }
 }
 
+/// Visual payload of one continue-watching card — built either from a local
+/// history entry (with metadata enrichment) or from a linked-service entry
+/// (source tag instead of menu actions).
+class _CwCardData {
+  const _CwCardData({
+    required this.id,
+    required this.item,
+    required this.progress,
+    this.epTag,
+    this.subtitle,
+    this.badge,
+    this.fresh = false,
+    this.sourceLabel,
+  });
+
+  final String id;
+  final MediaItem item;
+
+  /// 0..1 — drives the red track-less progress bar (0 hides it).
+  final double progress;
+  final String? epTag;
+  final String? subtitle;
+  final String? badge;
+  final bool fresh;
+
+  /// Small provenance pill ("Trakt" / "AniList" / "MyAnimeList") on cards
+  /// sourced from a linked service.
+  final String? sourceLabel;
+}
+
 class _ContinueCard extends StatelessWidget {
   const _ContinueCard({
-    required this.entry,
+    required this.data,
     required this.english,
     required this.width,
     required this.height,
-    this.enrichment,
+    required this.onOpen,
+    this.onMarkWatched,
+    this.onRemove,
   });
 
-  final WatchHistoryEntry entry;
+  final _CwCardData data;
   final bool english;
   final double width;
   final double height;
 
-  /// Bounded metadata enrichment for series cards (Task 111): the saved
-  /// episode's name, the "upcoming episode" air badge and the amber fresh
-  /// dot. Null while the lookup is in flight or unavailable — the card then
-  /// renders exactly like the pre-enrichment site fallback.
-  final CwEnrichment? enrichment;
+  final VoidCallback onOpen;
+
+  /// Present only on LOCAL continue-watching cards — they unlock the
+  /// "mark as watched" / "remove" actions in the long-press menu.
+  final VoidCallback? onMarkWatched;
+  final VoidCallback? onRemove;
 
   // Web token: --cw-progress: #e53935.
   static const _progressRed = Color(0xFFE53935);
   // Web token: --cw-fresh-dot: #f5b301.
   static const _freshDot = Color(0xFFF5B301);
 
-  String? _remainingLabel() {
-    final remaining = entry.durationMs - entry.positionMs;
-    if (remaining <= 60000) return null;
-    final totalMin = (remaining / 60000).round();
-    final h = totalMin ~/ 60;
-    final m = totalMin % 60;
-    final parts = <String>[
-      if (h > 0) '$h${english ? 'h' : 'س'}',
-      if (m > 0 || h == 0) '$m${english ? 'm' : 'د'}',
-    ];
-    return english ? '${parts.join(' ')} left' : 'تبقى ${parts.join(' ')}';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final item = entry.item;
-    final progress = entry.durationMs > 0
-        ? (entry.positionMs / entry.durationMs).clamp(0.0, 1.0)
-        : 0.0;
+    final item = data.item;
+    final progress = data.progress;
     final image = item.background ?? item.poster;
-    final isSeries =
-        item.type == 'series' && entry.season != null && entry.episode != null;
-    // Web seasonEpisodeTag: "S1 E4", bidi-isolated LTR.
-    final epTag = isSeries ? 'S${entry.season} E${entry.episode}' : null;
-    // Web fallback: episode name (when metadata resolves it), else the
-    // "الحلقة {n}" episode-number fallback; remaining time for movies.
-    final epName = enrichment?.episodeName;
-    final subtitle = isSeries
-        ? (epName != null && epName.isNotEmpty
-            ? epName
-            : (english ? 'Episode ${entry.episode}' : 'الحلقة ${entry.episode}'))
-        : _remainingLabel();
-    final badge = cwUpcomingLabel(enrichment?.nextAirMs, english, DateTime.now());
+    final epTag = data.epTag;
+    final subtitle = data.subtitle;
+    final badge = data.badge;
+    final fresh = data.fresh;
+    final sourceLabel = data.sourceLabel;
     final semantics = [
       english ? 'Resume' : 'استئناف',
       item.name,
@@ -819,20 +1006,12 @@ class _ContinueCard extends StatelessWidget {
       if (progress > 0) '${(progress * 100).round()}%',
     ].join(', ');
 
-    void openDetail() => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => MediaDetailPage(
-              item: item,
-              resumeVideoId: entry.videoId,
-              resumePositionMs: entry.positionMs,
-            ),
-          ),
-        );
+    void openDetail() => onOpen();
 
     /// Harbor-web long-press menu (web CwContextMenu → the mobile M3 sheet):
-    /// view details / mark as watched / remove from Continue Watching.
+    /// view details always; mark-as-watched / remove only on LOCAL cards —
+    /// linked-service cards carry no local position data to act on.
     Future<void> openMenu() {
-      final app = context.read<AppState>();
       return showModalBottomSheet<void>(
         context: context,
         useSafeArea: true,
@@ -866,41 +1045,32 @@ class _ContinueCard extends StatelessWidget {
                     openDetail();
                   },
                 ),
-                ListTile(
-                  leading: const Icon(Icons.visibility_outlined),
-                  title: Text(english ? 'Mark as watched' : 'تحديد كمشاهد'),
-                  onTap: () {
-                    close();
-                    unawaited(
-                      app.markContinueWatchingWatched(item.id).then((_) {
-                        if (context.mounted) {
-                          NoorToast.show(
-                            context,
-                            english
-                                ? 'Marked as watched'
-                                : 'تم التحديد كمشاهد',
-                          );
-                        }
-                      }),
-                    );
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: _progressRed,
+                if (onMarkWatched != null)
+                  ListTile(
+                    leading: const Icon(Icons.visibility_outlined),
+                    title: Text(english ? 'Mark as watched' : 'تحديد كمشاهد'),
+                    onTap: () {
+                      close();
+                      onMarkWatched!();
+                    },
                   ),
-                  title: Text(
-                    english
-                        ? 'Remove from Continue Watching'
-                        : 'إزالة من متابعة المشاهدة',
-                    style: const TextStyle(color: _progressRed),
+                if (onRemove != null)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: _progressRed,
+                    ),
+                    title: Text(
+                      english
+                          ? 'Remove from Continue Watching'
+                          : 'إزالة من متابعة المشاهدة',
+                      style: const TextStyle(color: _progressRed),
+                    ),
+                    onTap: () {
+                      close();
+                      onRemove!();
+                    },
                   ),
-                  onTap: () {
-                    close();
-                    unawaited(app.removeContinueWatchingEntry(item.id));
-                  },
-                ),
               ],
             ),
           );
@@ -1049,8 +1219,38 @@ class _ContinueCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                      // Source pill (linked-service cards only): top-start
+                      // black-60 pill naming the provider — Trakt, AniList,
+                      // MyAnimeList — so provenance is visible at a glance.
+                      if (sourceLabel != null)
+                        PositionedDirectional(
+                          top: 8,
+                          start: 8,
+                          child: Container(
+                            height: 20,
+                            padding: const EdgeInsetsDirectional.symmetric(
+                              horizontal: 7,
+                            ),
+                            alignment: AlignmentDirectional.center,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: .6),
+                              borderRadius: BorderRadius.circular(7),
+                            ),
+                            child: Text(
+                              sourceLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: .2,
+                                color: Colors.white.withValues(alpha: .92),
+                              ),
+                            ),
+                          ),
+                        ),
                       // Web .cw-fresh: 5px amber dot above the progress bar.
-                      if (enrichment?.fresh ?? false)
+                      if (fresh)
                         const PositionedDirectional(
                           start: 8,
                           bottom: 12,
@@ -1086,6 +1286,105 @@ class _ContinueCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Continue-watching cards sourced from the LINKED tracking services —
+/// Trakt paused playback and the anime trackers' "currently watching" list.
+/// Exactly the Harbor-web card spec (16:9, scrim, S/E tag, red progress
+/// bar) plus a small source pill; taps flow through the tracker-resolve
+/// path for `anilist:`/`mal:` identities. The long-press menu intentionally
+/// offers "view details" only — there is no local position data to mark or
+/// remove.
+class _LinkedContinueRail extends StatelessWidget {
+  const _LinkedContinueRail({
+    required this.entries,
+    required this.english,
+    required this.onOpen,
+  });
+
+  final List<IntegrationCwEntry> entries;
+  final bool english;
+  final ValueChanged<MediaItem> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 700;
+    final cardWidth = math.min(MediaQuery.sizeOf(context).width * .66, 300.0);
+    final cardHeight = cardWidth * 9 / 16;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 20),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 19,
+                decoration: BoxDecoration(
+                  color: HorseTheme.gold,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  english
+                      ? 'Continue Watching · Linked accounts'
+                      : 'متابعة المشاهدة · الحسابات المرتبطة',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: cardHeight,
+          child: ListView.separated(
+            padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 20),
+            scrollDirection: Axis.horizontal,
+            itemCount: entries.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return _ContinueCard(
+                data: _cardData(entry, english),
+                english: english,
+                width: cardWidth,
+                height: cardHeight,
+                onOpen: () => onOpen(entry.item),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Anime trackers surface the NEXT episode to watch as the subtitle
+  /// (there is no mid-episode position to resume); Trakt carries a real
+  /// pause percentage and, for shows, the exact season/episode.
+  static _CwCardData _cardData(IntegrationCwEntry entry, bool english) {
+    final isTracker = entry.source != 'trakt';
+    final next = entry.nextEpisode;
+    return _CwCardData(
+      id: '${entry.source}:${entry.item.id}',
+      item: entry.item,
+      progress: entry.progress,
+      epTag: entry.season != null && entry.episode != null
+          ? 'S${entry.season} E${entry.episode}'
+          : null,
+      subtitle: isTracker && next != null
+          ? (english ? 'Episode $next' : 'الحلقة $next')
+          : null,
+      sourceLabel: switch (entry.source) {
+        'trakt' => 'Trakt',
+        'anilist' => 'AniList',
+        _ => 'MyAnimeList',
+      },
     );
   }
 }

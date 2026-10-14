@@ -39,7 +39,8 @@ abstract final class ContentClassifier {
   };
 
   static bool isAnime(MediaItem item) {
-    if (item.id.toLowerCase().startsWith('anilist:')) return true;
+    final id = item.id.toLowerCase();
+    if (id.startsWith('anilist:') || id.startsWith('mal:')) return true;
     final genres = _genres(item);
     if (genres.contains('anime')) return true;
     return genres.contains('animation') && _isJapanese(item.originCountry);
