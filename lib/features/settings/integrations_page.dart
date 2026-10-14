@@ -546,6 +546,15 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     ? 'Paste both below, save, then press Connect again.'
                     : 'الصقهما أدناه واحفظ، ثم اضغط «ربط» من جديد.',
               ),
+              const SizedBox(height: 8),
+              Text(
+                english
+                    ? 'Got only one 40-character value? That IS your Client Secret — the Client ID is the small number shown beside it on the same dashboard page.'
+                    : 'تملك قيمة واحدة فقط بطول 40 حرفًا؟ هذه هي «سر العميل» — أمّا معرّف العميل فهو الرقم الصغير الظاهر بجانبها في نفس صفحة اللوحة.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: HorseTheme.muted,
+                    ),
+              ),
               const SizedBox(height: 4),
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -593,8 +602,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           decoration: InputDecoration(
             isDense: true,
             labelText: english
-                ? 'Client secret (required for confidential apps)'
-                : 'سر العميل (مطلوب للتطبيقات السرية)',
+                ? 'Client secret (AniList requires it for every app)'
+                : 'سر العميل (يشترطه AniList لكل تطبيق)',
             border: const OutlineInputBorder(),
           ),
         ),
