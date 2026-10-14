@@ -1352,10 +1352,16 @@ class AppState extends ChangeNotifier {
     double? score10,
   }) async {
     final outcomes = <String, bool>{};
+    // Everything null = the tracker sheet's explicit "Remove" — genuinely
+    // delete the entries on each reachable provider (never a fake success).
+    final isRemove =
+        status == null && progress == null && score10 == null;
     final anilistId = item.anilistId;
     if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
       var ok = true;
-      if (status != null) {
+      if (isRemove) {
+        ok = await api.removeAniListEntry(anilistId);
+      } else if (status != null) {
         ok = await api.pushAniListEntryStatus(
           mediaId: anilistId,
           status: status,
@@ -1367,7 +1373,7 @@ class AppState extends ChangeNotifier {
           progress: progress,
         );
       }
-      if (ok && score10 != null) {
+      if (!isRemove && ok && score10 != null) {
         ok = await api.pushAniListScore(
           mediaId: anilistId,
           score10: score10,
@@ -1378,7 +1384,9 @@ class AppState extends ChangeNotifier {
     final malId = item.idMal;
     if (malId != null && linkedServices['mal']?['linked'] == true) {
       var ok = true;
-      if (status != null) {
+      if (isRemove) {
+        ok = await api.removeMalEntry(malId);
+      } else if (status != null) {
         ok = await api.pushMalEntryStatus(
           malId: malId,
           status: status,
@@ -1387,7 +1395,7 @@ class AppState extends ChangeNotifier {
       } else if (progress != null) {
         ok = await api.pushMalProgress(malId: malId, episodes: progress);
       }
-      if (ok && score10 != null) {
+      if (!isRemove && ok && score10 != null) {
         ok = await api.pushMalScore(malId: malId, score10: score10);
       }
       outcomes['mal'] = ok;

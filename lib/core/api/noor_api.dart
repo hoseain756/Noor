@@ -2043,6 +2043,47 @@ mutation ($id: Int) {
     }
   }
 
+  /// Explicit "remove from my list" from the tracker sheet — deletes the
+  /// user's entry entirely (progress and score included), mirroring what
+  /// AniList's and MAL's own apps do for this action. Idempotent: true when
+  /// no entry exists.
+  Future<bool> removeAniListEntry(int mediaId) async {
+    if (!isLinked('anilist')) return false;
+    try {
+      final entry = await aniListEntry(mediaId);
+      if (entry == null) return true;
+      final entryId = (entry['id'] as num?)?.toInt();
+      if (entryId == null) return true;
+      return await _aniListDeleteEntry(entryId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// MyAnimeList variant of the explicit tracker-sheet removal — DELETE
+  /// /anime/{id}/my_list_status clears the row (status, progress, score).
+  /// Idempotent: 404 counts as already-removed.
+  Future<bool> removeMalEntry(int malId) async {
+    if (!isLinked('mal')) return false;
+    final token = await _validMalAccessToken();
+    if (token == null) return false;
+    try {
+      final response = await _client.delete<dynamic>(
+        '$malApiBase/anime/$malId/my_list_status',
+        options: Options(headers: await _malBearer(token)),
+      );
+      final status = response.statusCode ?? 0;
+      return status == 200 || status == 404;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      if (status == 404) return true;
+      if (status == 401) await _clearMalSession();
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Explicit status save from the tracker sheet (status + optional
   /// progress in one call). AniList variant.
   Future<bool> pushAniListEntryStatus({
