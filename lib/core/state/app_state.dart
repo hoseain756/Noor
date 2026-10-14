@@ -1056,6 +1056,23 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  /// Manual completion of a pending Trakt flow with an authorization code
+  /// the user pasted from the browser. Mirrors the relay-watch success
+  /// handling so app state updates identically regardless of which leg
+  /// (deep link, relay poll, or this paste) delivered the code. Returns the
+  /// NoorApi result map for caller-side toasts.
+  Future<Map<String, dynamic>> completeTraktWithCode(String code) async {
+    final result = await api.submitTraktCode(code);
+    if (result['status']?.toString() == 'success') {
+      await saveLinkedService('trakt', <String, dynamic>{
+        'linked': true,
+        'linkedAt': DateTime.now().millisecondsSinceEpoch,
+        if (result['username'] != null) 'username': result['username'],
+      });
+    }
+    return result;
+  }
+
   void _stopTraktRelayWatch() {
     _traktRelayTimer?.cancel();
     _traktRelayTimer = null;

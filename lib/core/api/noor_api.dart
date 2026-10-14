@@ -130,6 +130,7 @@ class NoorApi {
   static const String _traktPkceStateKey = 'noor.trakt.pkce.state';
   static const String _traktPkceRedirectKey = 'noor.trakt.pkce.redirect';
   static const String _traktPkceCreatedAtKey = 'noor.trakt.pkce.created';
+  static const String _traktLinkMethodKey = 'noor.trakt.link.method';
   static const String _traktRefreshKey = 'noor.trakt.refresh';
   static const String _traktExpiryKey = 'noor.trakt.expires';
   static const String _debridServiceKey = 'noor.debrid.service';
@@ -1246,8 +1247,21 @@ class NoorApi {
   /// Generates the PKCE pair + state, persists them for the completion leg
   /// and returns the authorize URL to open in the external browser:
   /// `{'authorizeUrl': ..., 'state': ...}` or null on failure.
+  ///
+  /// The return leg follows the user's chosen link method ([traktLinkMethod]):
+  ///  - `direct` (default): `noor://callback` — the OS bounces straight back
+  ///    into Noor the moment Trakt approves; no website involved. Requires
+  ///    `noor://callback` registered once on trakt.tv/oauth/applications.
+  ///  - `relay`: the registered HTTPS companion URL — the browser lands on
+  ///    the Noor web companion which relays code+state to /api/trakt/relay
+  ///    and [pollTraktLink] fetches it.
+  /// Either way the flow pins its redirect byte-for-byte for the exchange.
   Future<Map<String, dynamic>?> startTraktLink() async {
     try {
+      final method = await traktLinkMethod();
+      final redirect = method == 'relay'
+          ? traktRedirectUri
+          : traktLegacySchemeRedirectUri;
       final verifier = TraktPkce.generateVerifier();
       final state = TraktPkce.generateState();
       final challenge = TraktPkce.challengeS256(verifier);
@@ -1255,7 +1269,7 @@ class NoorApi {
       await _secure.write(key: _traktPkceStateKey, value: state);
       // The exchange must repeat the redirect_uri byte-for-byte, so the
       // flow pins whatever it authorized with.
-      await _secure.write(key: _traktPkceRedirectKey, value: traktRedirectUri);
+      await _secure.write(key: _traktPkceRedirectKey, value: redirect);
       await _secure.write(
         key: _traktPkceCreatedAtKey,
         value: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -1264,7 +1278,7 @@ class NoorApi {
         queryParameters: <String, String>{
           'response_type': 'code',
           'client_id': defaultTraktClientId,
-          'redirect_uri': traktRedirectUri,
+          'redirect_uri': redirect,
           'code_challenge': challenge,
           'code_challenge_method': 'S256',
           'state': state,
@@ -1278,6 +1292,40 @@ class NoorApi {
 
   /// Forgets a pending PKCE handshake (user cancelled the linking sheet).
   Future<void> cancelTraktLink() => _clearTraktPkce();
+
+  /// Selected return leg for new Trakt flows: `direct` (noor://callback —
+  /// back into the app immediately, no website) or `relay` (the registered
+  /// HTTPS companion). Defaults to direct.
+  Future<String> traktLinkMethod() async {
+    final value = await _secure.read(key: _traktLinkMethodKey);
+    return value == 'relay' ? 'relay' : 'direct';
+  }
+
+  /// Persists the return-leg choice; changing it drops any pending flow so
+  /// a stale verifier can never complete against the wrong redirect.
+  Future<void> setTraktLinkMethod(String method) async {
+    await cancelTraktLink();
+    await _secure.write(
+      key: _traktLinkMethodKey,
+      value: method == 'relay' ? 'relay' : 'direct',
+    );
+  }
+
+  /// Manual completion leg: the user pastes an authorization code they can
+  /// see in the browser (companion card, address bar, or any visible
+  /// surface). The pending flow's state + verifier are already on this
+  /// device, so the pasted code alone is enough — no relay round-trip.
+  Future<Map<String, dynamic>> submitTraktCode(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
+    }
+    final savedState = await _secure.read(key: _traktPkceStateKey);
+    if (savedState == null || savedState.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'no_pending_flow'};
+    }
+    return _finishTraktLink(code, savedState);
+  }
 
   /// True while a browser handshake is pending — used to resume the relay
   /// watcher after a cold start interrupted the flow.
@@ -1344,6 +1392,13 @@ class NoorApi {
             _traktFlowTtl) {
       await _clearTraktPkce();
       return <String, dynamic>{'status': 'error', 'reason': 'flow_expired'};
+    }
+    // Direct-return flows (noor://callback) complete via the deep link or a
+    // manual paste — there is nothing to poll for on the relay.
+    final pinnedRedirect =
+        await _secure.read(key: _traktPkceRedirectKey) ?? traktRedirectUri;
+    if (!pinnedRedirect.toLowerCase().startsWith('https://')) {
+      return <String, dynamic>{'status': 'idle'};
     }
     try {
       final relayUrl = Uri.parse('$traktHttpsRedirectBase$traktRelayPath')

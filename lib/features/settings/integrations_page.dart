@@ -249,11 +249,69 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   Map<String, dynamic>? _flow;
   bool _busy = false;
   bool _syncing = false;
+  // Trakt return-leg choice: 'direct' (noor://callback — straight back into
+  // the app, no website) or 'relay' (the registered HTTPS companion).
+  String _traktMethod = 'direct';
+  bool _traktMethodLoaded = false;
+  final TextEditingController _traktCodeCtrl = TextEditingController();
+  bool _submittingCode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.service == 'trakt') {
+      context.read<AppState>().api.traktLinkMethod().then((method) {
+        if (mounted) {
+          setState(() {
+            _traktMethod = method;
+            _traktMethodLoaded = true;
+          });
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _traktCodeCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickTraktMethod(String method) async {
+    if (method == _traktMethod) return;
+    // Changing the return leg invalidates any pending handshake — drop it
+    // so a stale verifier can never complete against the wrong redirect.
+    await context.read<AppState>().api.setTraktLinkMethod(method);
+    if (!mounted) return;
+    setState(() {
+      _traktMethod = method;
+      _flow = null;
+    });
+  }
+
+  Future<void> _submitTraktCode() async {
+    final code = _traktCodeCtrl.text.trim();
+    if (code.isEmpty || _submittingCode) return;
+    setState(() => _submittingCode = true);
+    final app = context.read<AppState>();
+    final result = await app.completeTraktWithCode(code);
+    if (!mounted) return;
+    setState(() => _submittingCode = false);
+    final english = app.english;
+    if (result['status']?.toString() == 'success') {
+      _traktCodeCtrl.clear();
+      setState(() => _flow = null);
+      NoorToast.show(context, english ? 'Trakt linked.' : 'تم ربط Trakt.');
+    } else {
+      NoorToast.show(
+        context,
+        english
+            ? 'Could not complete with this code — check it or restart the link.'
+            : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.',
+        error: true,
+      );
+    }
   }
 
   Future<void> _start() async {
@@ -268,8 +326,10 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         // Browser PKCE (RFC 7636/8252): the user's Trakt app is PKCE-only —
         // Trakt issues NO client secret for it and its device grant rejects
         // secret-less exchanges, so the device flow can never complete.
-        // We open the authorize page; the OS bounces back to noor://callback
-        // and IncomingLinkListener finishes the handshake anywhere in the app.
+        // Return leg per the user's choice: direct (noor://callback — the OS
+        // bounces back into Noor the moment Trakt approves) or relay (the
+        // companion site stores the code and the app-wide watcher fetches
+        // it). IncomingLinkListener finishes the handshake either way.
         final result = await app.api.startTraktLink();
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
@@ -279,11 +339,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         setState(() {
           _flow = {'status': 'waiting', 'kind': 'pkce'};
         });
-        // App-wide relay watcher: when the user approves on trakt.tv the
-        // browser lands on the Noor companion (registered HTTPS redirect
-        // URI), which stores the code for us — this watcher fetches it and
-        // finishes the PKCE exchange even if this sheet is closed.
-        app.beginTraktRelayWatch();
+        if (_traktMethod == 'relay') {
+          // Relay leg only: the browser lands on the Noor companion which
+          // stores the code — this watcher fetches it and finishes the
+          // exchange even if this sheet is closed. Direct flows complete
+          // via the noor:// deep link instead; there is nothing to poll.
+          app.beginTraktRelayWatch();
+        }
         await launchUrl(
           Uri.parse(authorizeUrl),
           mode: LaunchMode.externalApplication,
@@ -508,9 +570,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             ),
           ] else if (waiting && _flow?['kind'] == 'pkce') ...[
             Text(
-              english
-                  ? 'Complete the approval in the Trakt browser tab — Noor finishes the link automatically the moment Trakt approves (you may need to switch back to the app).'
-                  : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيُكمل التطبيق الربط تلقائيًا فور الموافقة (قد تحتاج للعودة إلى التطبيق يدويًا).',
+              _traktMethod == 'direct'
+                  ? (english
+                      ? 'Complete the approval in the Trakt browser tab — Trakt bounces you straight back into Noor the moment you approve (no website involved).'
+                      : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيعيدك Trakt إلى التطبيق فور الموافقة مباشرة (بدون أي موقع وسيط).')
+                  : (english
+                      ? 'Complete the approval in the Trakt browser tab — Noor finishes the link automatically the moment Trakt approves (you may need to switch back to the app).'
+                      : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيُكمل التطبيق الربط تلقائيًا فور الموافقة (قد تحتاج للعودة إلى التطبيق يدويًا).'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
@@ -531,6 +597,44 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            Text(
+              english
+                  ? 'Browser stuck or showing an auth code? Paste it here:'
+                  : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _traktCodeCtrl,
+                    textAlign: TextAlign.start,
+                    textDirection: TextDirection.ltr,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: english ? 'Authorization code' : 'رمز التفويض',
+                      border: const OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => unawaited(_submitTraktCode()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _submittingCode ? null : _submitTraktCode,
+                  child: _submittingCode
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(english ? 'Finish' : 'إكمال'),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Align(
               alignment: AlignmentDirectional.centerStart,
@@ -541,9 +645,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             ),
             const SizedBox(height: 4),
             Text(
-              english
-                  ? 'No setup needed — Trakt returns the approval to Noor through the Noor companion site automatically.'
-                  : 'لا حاجة لأي إعداد — يعيد Trakt الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب.',
+              _traktMethod == 'direct'
+                  ? (english
+                      ? 'If Trakt shows an error after approving, add noor://callback to the Redirect URIs on trakt.tv/oauth/applications (one time) — or switch the method above to “Via website”.'
+                      : 'إن ظهرت رسالة خطأ من Trakt بعد الموافقة، أضف noor://callback إلى قائمة Redirect URIs في لوحة Trakt (مرة واحدة) — أو بدّل الطريقة إلى «عبر الموقع».')
+                  : (english
+                      ? 'No setup needed — Trakt returns the approval to Noor through the Noor companion site automatically.'
+                      : 'لا حاجة لأي إعداد — يعيد Trakt الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب.'),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: HorseTheme.muted,
                   ),
@@ -624,12 +732,39 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ),
             ),
-            if (widget.service == 'trakt') ...[
+            if (widget.service == 'trakt' &&
+                linked == null &&
+                _flow?['status'] == null && _traktMethodLoaded) ...[
+              const SizedBox(height: 6),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: 'direct',
+                    icon: const Icon(Icons.phone_iphone_rounded, size: 17),
+                    label: Text(
+                      english ? 'Direct to app' : 'مباشر للتطبيق',
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 'relay',
+                    icon: const Icon(Icons.language_rounded, size: 17),
+                    label: Text(english ? 'Via website' : 'عبر الموقع'),
+                  ),
+                ],
+                selected: {_traktMethod},
+                onSelectionChanged: (selection) =>
+                    unawaited(_pickTraktMethod(selection.first)),
+                showSelectedIcon: false,
+              ),
               const SizedBox(height: 6),
               Text(
-                english
-                    ? 'Opens the browser — the approval returns to Noor automatically through the Noor companion site. No dashboard setup required.'
-                    : 'يفتح المتصفح — تعود الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب. لا حاجة لأي إعداد في لوحة Trakt.',
+                _traktMethod == 'direct'
+                    ? (english
+                        ? 'Approve in Trakt and the browser hands you straight back to Noor — no website in between. One-time setup: add noor://callback to the Redirect URIs on trakt.tv/oauth/applications.'
+                        : 'وافق في Trakt ويعيدك المتصفح إلى التطبيق مباشرة — بدون أي موقع وسيط. إعداد لمرة واحدة: أضف noor://callback إلى قائمة Redirect URIs في لوحة مطوّر Trakt (trakt.tv/oauth/applications).')
+                    : (english
+                        ? 'Opens the browser — the approval returns to Noor automatically through the Noor companion site. No dashboard setup required.'
+                        : 'يفتح المتصفح — تعود الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب. لا حاجة لأي إعداد في لوحة Trakt.'),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: HorseTheme.muted,
                     ),
