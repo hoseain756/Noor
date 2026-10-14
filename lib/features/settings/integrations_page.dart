@@ -274,12 +274,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   // Paste fallback shared by every browser-OAuth service (Trakt/AniList/MAL).
   final TextEditingController _codeCtrl = TextEditingController();
   bool _submittingCode = false;
-  // AniList credential editor — only the Client ID (the implicit grant has
-  // no secret); the editor lets the owner swap the embedded ID without a
-  // rebuild.
-  bool _showCredEditor = false;
-  final TextEditingController _credIdCtrl = TextEditingController();
-  bool _savingCred = false;
 
   @override
   void initState() {
@@ -304,21 +298,12 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         }
       });
     }
-    if (widget.service == 'anilist') {
-      // Pre-fill the editor with the effective client ID (override or the
-      // embedded owner default).
-      context.read<AppState>().api.aniListClientId().then((id) {
-        if (!mounted) return;
-        setState(() => _credIdCtrl.text = id);
-      });
-    }
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
     _codeCtrl.dispose();
-    _credIdCtrl.dispose();
     super.dispose();
   }
 
@@ -372,8 +357,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   String _oauthFailureText(bool english, String? reason) {
     if (reason == 'invalid_client') {
       return english
-          ? 'The provider rejected the app credentials — update them under the card and retry.'
-          : 'رفض الموقع بيانات التطبيق — حدّثها من أسفل البطاقة وأعد المحاولة.';
+          ? 'The provider rejected the app credentials — update Noor to the latest build and retry.'
+          : 'رفض الموقع بيانات التطبيق — حدّث Noor إلى أحدث نسخة وأعد المحاولة.';
     }
     if (reason == 'invalid_token') {
       return english
@@ -388,185 +373,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     return english
         ? 'Could not complete with this code — check it or restart the link.'
         : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.';
-  }
-
-  /// Persists the AniList client-ID override (the implicit grant needs no
-  /// secret); empty text restores the embedded default.
-  Future<void> _saveCredentials() async {
-    if (_savingCred) return;
-    final app = context.read<AppState>();
-    setState(() => _savingCred = true);
-    await app.api.saveAniListClientId(_credIdCtrl.text.trim());
-    if (!mounted) return;
-    setState(() {
-      _savingCred = false;
-      _showCredEditor = false;
-    });
-    NoorToast.show(
-      context,
-      app.english
-          ? 'AniList Client ID saved.'
-          : 'تم حفظ معرّف AniList.',
-    );
-  }
-
-  /// The always-available AniList credentials section: the toggle, the
-  /// developer-dashboard walkthrough (implicit grant — no secret involved)
-  /// and the Client ID editor itself.
-  List<Widget> _anilistCredentialsSection(bool english) {
-    return [
-      const SizedBox(height: 6),
-      Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: TextButton.icon(
-          onPressed: () => setState(() => _showCredEditor = !_showCredEditor),
-          icon: const Icon(Icons.key_rounded, size: 17),
-          label: Text(
-            english
-                ? (_showCredEditor
-                    ? 'Hide app credentials'
-                    : 'App credentials')
-                : (_showCredEditor
-                    ? 'إخفاء بيانات التطبيق'
-                    : 'بيانات التطبيق'),
-          ),
-        ),
-      ),
-      if (_showCredEditor) ...[
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: HorseTheme.surface.withValues(alpha: .55),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: HorseTheme.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                english
-                    ? 'One-time setup — point Noor at your AniList app:'
-                    : 'إعداد لمرة واحدة — اربط Noor بتطبيقك على AniList:',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-              const SizedBox(height: 6),
-              _credStep(
-                english,
-                '1',
-                english
-                    ? 'Open anilist.co/settings/developer and press “Create New App”. (Skip if your “Noor” app already exists.)'
-                    : 'افتح anilist.co/settings/developer واضغط «Create New App». (تجاوز الخطوة إذا كان تطبيقك “Noor” موجودًا).',
-              ),
-              _credStep(
-                english,
-                '2',
-                english
-                    ? 'Name it anything (e.g. Noor) and set its Redirect URL to app.noor.mobile://callback'
-                    : 'سمّه ما شئت (مثل Noor) وضع في حقل Redirect URL القيمة app.noor.mobile://callback',
-              ),
-              _credStep(
-                english,
-                '3',
-                english
-                    ? 'Copy the Client ID, paste it below, save, then press Connect.'
-                    : 'انسخ معرّف العميل، الصقه أدناه واحفظ، ثم اضغط «ربط».',
-              ),
-              const SizedBox(height: 8),
-              Text(
-                english
-                    ? 'No client secret needed — Noor uses AniList’s official Implicit Grant for mobile apps: after you approve, AniList returns the access token straight to the app.'
-                    : 'لا حاجة لسر العميل — يستخدم Noor منح AniList الضمني الرسمي لتطبيقات الجوال: بعد الموافقة يعيد AniList رمز الوصول إلى التطبيق مباشرة.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: HorseTheme.muted,
-                    ),
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  onPressed: () => launchUrl(
-                    Uri.parse('https://anilist.co/settings/developer'),
-                    mode: LaunchMode.externalApplication,
-                  ),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                  label: Text(
-                    english
-                        ? 'Open the AniList developer settings'
-                        : 'فتح إعدادات مطوّر AniList',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _credIdCtrl,
-          autocorrect: false,
-          enableSuggestions: false,
-          textDirection: TextDirection.ltr,
-          style: Theme.of(context).textTheme.bodySmall,
-          decoration: InputDecoration(
-            isDense: true,
-            labelText: english ? 'Client ID' : 'معرّف العميل',
-            border: const OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: FilledButton.tonalIcon(
-            onPressed: _savingCred ? null : _saveCredentials,
-            icon: _savingCred
-                ? const SizedBox.square(
-                    dimension: 15,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.verified_user_outlined, size: 18),
-            label: Text(english ? 'Save credentials' : 'حفظ البيانات'),
-          ),
-        ),
-      ],
-    ];
-  }
-
-  Widget _credStep(bool english, String number, String text) {
-    return Padding(
-      padding: const EdgeInsetsDirectional.only(top: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 17,
-            height: 17,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: HorseTheme.gold,
-            ),
-            child: Text(
-              number,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w700,
-                    height: 1,
-                  ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: Theme.of(context).textTheme.bodySmall,
-              textDirection: english ? TextDirection.ltr : TextDirection.rtl,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _start() async {
@@ -971,14 +777,12 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             const SizedBox(height: 4),
             Text(
               english
-                  ? 'One-time setup: register app.noor.mobile://callback as the app Redirect URI in the ${widget.title} developer settings.'
-                  : 'إعداد لمرة واحدة: سجّل app.noor.mobile://callback كـ Redirect URI للتطبيق في إعدادات مطوّر ${widget.title}.',
+                  ? 'No setup needed — Noor ships with its own ${widget.title} app credentials.'
+                  : 'لا حاجة لأي إعداد — يأتي Noor ببيانات تطبيق ${widget.title} مدمجةً.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: HorseTheme.muted,
                   ),
             ),
-            if (widget.service == 'anilist')
-              ..._anilistCredentialsSection(english),
           ] else if (waiting && _flow?['kind'] == 'pkce') ...[
             Text(
               _traktMethod == 'direct'
@@ -1143,8 +947,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ),
             ),
-            if (widget.service == 'anilist')
-              ..._anilistCredentialsSection(english),
             if (widget.service == 'trakt' &&
                 linked == null &&
                 _flow?['status'] == null && _traktMethodLoaded) ...[

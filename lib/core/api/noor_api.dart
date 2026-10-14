@@ -105,12 +105,14 @@ class NoorApi {
   // pendings and push paths; both may be linked simultaneously.
   // --------------------------------------------------------------------------
 
-  /// AniList OAuth client ID for the owner's “Noor” application, used with
-  /// the official IMPLICIT grant (docs.anilist.co/guide/auth/implicit-grant)
-  /// — the documented secret-less flow for mobile clients. No client secret
-  /// exists anywhere in this integration, by design and by owner directive.
-  static const String defaultAniListClientId =
-      'b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef';
+  /// AniList OAuth client ID for the owner's “Noor” application (developer
+  /// dashboard: client “noor”, ID 53823), used with the official IMPLICIT
+  /// grant (docs.anilist.co/guide/auth/implicit-grant) — the documented
+  /// secret-less flow for mobile clients. The dashboard also issues a client
+  /// secret but the implicit grant never uses it, and it is deliberately NOT
+  /// embedded (owner directive). Credentials are hidden from users: no
+  /// editor UI exists and legacy overrides are purged on startup.
+  static const String defaultAniListClientId = '53823';
 
   /// MyAnimeList API client ID (myanimelist.net/settings/apiconfig). MAL is
   /// a public OAuth client: PKCE (plain) replaces any secret.
@@ -238,6 +240,13 @@ class NoorApi {
         _serviceTokens[service] = token;
       }
     }
+
+    // Legacy AniList credential overrides must never leak into the flow:
+    // older builds let the owner paste values by hand and the 40-character
+    // SECRET ended up saved in the client-ID slot (the exact bug that broke
+    // linking). The credentials are embedded and hidden now — purge both.
+    await _secure.delete(key: _anilistClientIdKey);
+    await _secure.delete(key: _anilistClientSecretKey);
 
     final traktExpiry = int.tryParse(
       await _secure.read(key: _traktExpiryKey) ?? '',
@@ -1300,29 +1309,16 @@ class NoorApi {
   // Anime trackers — AniList / MyAnimeList. Browser OAuth over the
   // app.noor.mobile://callback scheme (OAuthRedirect), then GraphQL (AniList)
   // / REST (MAL) list sync. Independent per service; both can be linked.
-  // AniList: Authorization Code Grant, token lives ~1 year, no refresh, no
-  // revocation endpoint. MAL: public client, PKCE plain REQUIRED, refresh
-  // token supported, no revocation endpoint.
+  // AniList: IMPLICIT grant (client_id + response_type=token), token lives
+  // ~1 year, no refresh, no revocation endpoint. MAL: public client, PKCE
+  // plain REQUIRED, refresh token supported, no revocation endpoint.
   // --------------------------------------------------------------------------
 
-  /// Effective AniList client ID. The secure-storage override (set from the
-  /// integrations card) wins over the embedded default.
-  Future<String> aniListClientId() async {
-    final id = (await _secure.read(key: _anilistClientIdKey))?.trim();
-    return (id == null || id.isEmpty) ? defaultAniListClientId : id;
-  }
-
-  /// Persists the AniList client-ID override (empty clears it) and drops any
-  /// legacy secret override — the implicit grant carries no secret.
-  Future<void> saveAniListClientId(String clientId) async {
-    await _secure.delete(key: _anilistClientSecretKey);
-    final trimmed = clientId.trim();
-    if (trimmed.isEmpty) {
-      await _secure.delete(key: _anilistClientIdKey);
-    } else {
-      await _secure.write(key: _anilistClientIdKey, value: trimmed);
-    }
-  }
+  /// Effective AniList client ID — always the embedded owner credential
+  /// (dashboard client “noor”, ID 53823). Hidden from users by owner
+  /// directive: there is no override editor, and legacy overrides saved by
+  /// older builds are purged on startup ([initialize]).
+  Future<String> aniListClientId() async => defaultAniListClientId;
 
   /// Starts the AniList browser flow using the official IMPLICIT grant
   /// (docs.anilist.co/guide/auth/implicit-grant): the authorize URL carries
