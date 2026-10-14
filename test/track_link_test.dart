@@ -263,4 +263,27 @@ void main() {
       );
     });
   });
+
+  group('isValidAniListClientId', () {
+    test('accepts the numeric IDs AniList dashboards issue', () {
+      expect(isValidAniListClientId('2789'), isTrue);
+      expect(isValidAniListClientId(' 12345 '), isTrue);
+      expect(isValidAniListClientId('1'), isTrue);
+    });
+
+    test('rejects secret-shaped strings, empty values and non-numbers', () {
+      // The placeholder shipped with the build is a 40-char secret — it
+      // must never reach the authorize URL.
+      expect(
+        isValidAniListClientId('b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef'),
+        isFalse,
+      );
+      expect(isValidAniListClientId(''), isFalse);
+      expect(isValidAniListClientId('   '), isFalse);
+      expect(isValidAniListClientId('12ab'), isFalse);
+      expect(isValidAniListClientId('2789x'), isFalse);
+      expect(isValidAniListClientId('-5'), isFalse);
+      expect(isValidAniListClientId('12345678901'), isFalse); // > 10 digits
+    });
+  });
 }

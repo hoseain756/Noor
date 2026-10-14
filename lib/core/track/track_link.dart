@@ -156,6 +156,18 @@ double score10FromAniList(num? raw, AniListScoreFormat format) {
 double score10FromMal(num? raw) =>
     raw == null ? 0 : raw.toDouble().clamp(0, 10).toDouble();
 
+/// AniList developer dashboards expose the Client ID as a small integer
+/// (e.g. 12345) next to a separate 40-character Client Secret. Anything
+/// non-numeric — notably a secret pasted into the ID slot — makes the
+/// authorize page fail with an unknown-client error before the consent
+/// screen is ever shown, so the flow must be stopped early.
+bool isValidAniListClientId(String id) {
+  final trimmed = id.trim();
+  if (trimmed.isEmpty) return false;
+  final parsed = int.tryParse(trimmed);
+  return parsed != null && parsed > 0 && trimmed.length <= 10;
+}
+
 /// Builds the AniList authorize URL (Authorization Code Grant).
 /// `redirectUri` must byte-match the developer-dashboard registration.
 String aniListAuthorizeUrl({

@@ -105,12 +105,12 @@ class NoorApi {
   // pendings and push paths; both may be linked simultaneously.
   // --------------------------------------------------------------------------
 
-  /// AniList OAuth application credential configured for this build.
-  /// NOTE: AniList developer dashboards show the Client ID as a small
-  /// integer and the Client Secret as a 40-character string. If the value
-  /// below is rejected (invalid_client) the integrations card exposes a
-  /// secure override for the Client ID — and, for confidential apps, the
-  /// Client Secret — so the flow works without rebuilding.
+  /// PLACEHOLDER AniList credential shipped with this build. AniList Client
+  /// IDs are small integers from anilist.co/settings/developer — this
+  /// secret-shaped value is rejected by the authorize page, so
+  /// [startAniListLink] refuses to open the browser until the real numeric
+  /// Client ID (and, for confidential apps, the Client Secret) is saved via
+  /// [saveAniListCredentials] from the integrations card.
   static const String defaultAniListClientId =
       'b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef';
 
@@ -1342,9 +1342,18 @@ class NoorApi {
   /// Starts the AniList browser flow: authorize URL + pending marker
   /// (bare epoch stamp). AniList does not echo a state parameter, so the
   /// pending is matched by presence — one flow at a time, 15-minute TTL.
+  ///
+  /// Guard: when the effective Client ID is not a numeric AniList ID (e.g.
+  /// the placeholder build default, or a secret pasted into the ID slot)
+  /// the browser is NOT opened — opening it would land the user on an
+  /// unknown-client error page. The caller is told via `status:
+  /// invalid_client_id` so it can surface the credentials editor instead.
   Future<Map<String, dynamic>?> startAniListLink() async {
     try {
       final (clientId, _) = await aniListCredentials();
+      if (!isValidAniListClientId(clientId)) {
+        return <String, dynamic>{'status': 'invalid_client_id'};
+      }
       await _secure.write(
         key: _anilistPendingKey,
         value: DateTime.now().millisecondsSinceEpoch.toString(),
