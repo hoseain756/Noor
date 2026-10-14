@@ -11,6 +11,7 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/data/content_classifier.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/glass_navigation.dart';
+import 'top10_rail.dart';
 import '../media/media_detail_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -357,12 +358,11 @@ class _AsyncMediaSection extends StatelessWidget {
             padding: EdgeInsetsDirectional.only(
               bottom: MediaRail.sectionSpacing(context),
             ),
-            child: MediaRail(
-              title: title,
-              items: items,
-              numbered: numbered,
-              onTap: onTap,
-            ),
+            // The Top 10 row uses the ranked sticker layout; every other
+            // section keeps the standard poster rail.
+            child: numbered
+                ? Top10Rail(title: title, items: items, onTap: onTap)
+                : MediaRail(title: title, items: items, onTap: onTap),
           );
         },
       );
