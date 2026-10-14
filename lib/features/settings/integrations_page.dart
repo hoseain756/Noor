@@ -59,6 +59,24 @@ class IntegrationsPage extends StatelessWidget {
                 icon: Icons.sync_rounded,
               ),
               const SizedBox(height: 12),
+              _LinkedServiceCard(
+                service: 'anilist',
+                title: 'AniList',
+                subtitle: english
+                    ? 'Track anime lists, progress and scores; sync your library.'
+                    : 'تتبّع قوائم الأنمي وتقدمك وتقييماتك ومزامنة مكتبتك.',
+                icon: Icons.auto_stories_outlined,
+              ),
+              const SizedBox(height: 12),
+              _LinkedServiceCard(
+                service: 'mal',
+                title: 'MyAnimeList',
+                subtitle: english
+                    ? 'Track anime lists, progress and scores; sync your library.'
+                    : 'تتبّع قوائم الأنمي وتقدمك وتقييماتك ومزامنة مكتبتك.',
+                icon: Icons.menu_book_outlined,
+              ),
+              const SizedBox(height: 12),
               const _TmdbKeyCard(),
               const SizedBox(height: 12),
               const _DebridCard(),
@@ -253,8 +271,15 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   // the app, no website) or 'relay' (the registered HTTPS companion).
   String _traktMethod = 'direct';
   bool _traktMethodLoaded = false;
-  final TextEditingController _traktCodeCtrl = TextEditingController();
+  // Paste fallback shared by every browser-OAuth service (Trakt/AniList/MAL).
+  final TextEditingController _codeCtrl = TextEditingController();
   bool _submittingCode = false;
+  // AniList credential override editor (the embedded Client ID may be wrong
+  // or the app may be confidential and need its secret).
+  bool _showCredEditor = false;
+  final TextEditingController _credIdCtrl = TextEditingController();
+  final TextEditingController _credSecretCtrl = TextEditingController();
+  bool _savingCred = false;
 
   @override
   void initState() {
@@ -269,12 +294,24 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         }
       });
     }
+    if (widget.service == 'anilist' || widget.service == 'mal') {
+      // Live profile (username / avatar / anime stats) for the linked card.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final app = context.read<AppState>();
+        if (app.linkedServices[widget.service]?['linked'] == true) {
+          unawaited(app.refreshTrackerProfile(widget.service));
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _traktCodeCtrl.dispose();
+    _codeCtrl.dispose();
+    _credIdCtrl.dispose();
+    _credSecretCtrl.dispose();
     super.dispose();
   }
 
@@ -290,28 +327,78 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     });
   }
 
-  Future<void> _submitTraktCode() async {
-    final code = _traktCodeCtrl.text.trim();
+  Future<void> _submitCode() async {
+    final code = _codeCtrl.text.trim();
     if (code.isEmpty || _submittingCode) return;
     setState(() => _submittingCode = true);
     final app = context.read<AppState>();
-    final result = await app.completeTraktWithCode(code);
+    final Map<String, dynamic> result;
+    switch (widget.service) {
+      case 'trakt':
+        result = await app.completeTraktWithCode(code);
+      case 'anilist':
+        result = await app.completeAniListWithCode(code);
+      case 'mal':
+        result = await app.completeMalWithCode(code);
+      default:
+        result = <String, dynamic>{'status': 'error', 'reason': 'unsupported'};
+    }
     if (!mounted) return;
     setState(() => _submittingCode = false);
     final english = app.english;
     if (result['status']?.toString() == 'success') {
-      _traktCodeCtrl.clear();
+      _codeCtrl.clear();
       setState(() => _flow = null);
-      NoorToast.show(context, english ? 'Trakt linked.' : 'تم ربط Trakt.');
+      if (widget.service == 'anilist' || widget.service == 'mal') {
+        unawaited(app.refreshTrackerProfile(widget.service));
+      }
+      NoorToast.show(context, english ? 'Account connected.' : 'تم ربط الحساب.');
     } else {
       NoorToast.show(
         context,
-        english
-            ? 'Could not complete with this code — check it or restart the link.'
-            : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.',
+        _oauthFailureText(app.english, result['reason']?.toString()),
         error: true,
       );
     }
+  }
+
+  String _oauthFailureText(bool english, String? reason) {
+    if (reason == 'invalid_client') {
+      return english
+          ? 'The provider rejected the app credentials — update them under the card and retry.'
+          : 'رفض الموقع بيانات التطبيق — حدّثها من أسفل البطاقة وأعد المحاولة.';
+    }
+    if (reason == 'state_mismatch' || reason == 'flow_expired' || reason == 'no_pending_flow') {
+      return english
+          ? 'This code has expired — start a new link and paste the fresh code.'
+          : 'انتهت صلاحية هذا الرمز — ابدأ ربطًا جديدًا والصق الرمز الحديث.';
+    }
+    return english
+        ? 'Could not complete with this code — check it or restart the link.'
+        : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.';
+  }
+
+  /// Persists the AniList credential override in secure storage (empty id
+  /// clears the override and returns to the embedded default).
+  Future<void> _saveCredentials() async {
+    if (_savingCred) return;
+    final app = context.read<AppState>();
+    setState(() => _savingCred = true);
+    await app.api.saveAniListCredentials(
+      clientId: _credIdCtrl.text.trim(),
+      clientSecret: _credSecretCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingCred = false;
+      _showCredEditor = false;
+    });
+    NoorToast.show(
+      context,
+      app.english
+          ? 'AniList credentials saved securely.'
+          : 'تم حفظ بيانات AniList بأمان.',
+    );
   }
 
   Future<void> _start() async {
@@ -322,6 +409,27 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       _flow = null;
     });
     try {
+      if (widget.service == 'anilist' || widget.service == 'mal') {
+        // Browser OAuth over app.noor.mobile://callback (RFC 8252): approve
+        // on the provider and the OS bounces straight back into Noor; the
+        // paste field below is the fallback when the bounce never fires.
+        final result = widget.service == 'anilist'
+            ? await app.api.startAniListLink()
+            : await app.api.startMalLink();
+        final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
+        if (authorizeUrl.isEmpty) {
+          throw const FormatException('تعذر بدء الربط.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _flow = {'status': 'waiting', 'kind': 'browser'};
+        });
+        await launchUrl(
+          Uri.parse(authorizeUrl),
+          mode: LaunchMode.externalApplication,
+        );
+        return;
+      }
       if (widget.service == 'trakt') {
         // Browser PKCE (RFC 7636/8252): the user's Trakt app is PKCE-only —
         // Trakt issues NO client secret for it and its device grant rejects
@@ -486,9 +594,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   void _cancelFlow() {
     _pollTimer?.cancel();
-    if (widget.service == 'trakt') {
-      // Drop the stored PKCE pair so a stale verifier can't complete later.
-      context.read<AppState>().api.cancelTraktLink();
+    switch (widget.service) {
+      case 'trakt':
+        // Drop the stored PKCE pair so a stale verifier can't complete later.
+        context.read<AppState>().api.cancelTraktLink();
+      case 'anilist':
+        context.read<AppState>().api.cancelAniListLink();
+      case 'mal':
+        context.read<AppState>().api.cancelMalLink();
     }
     setState(() => _flow = null);
   }
@@ -531,21 +644,65 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           ),
           const SizedBox(height: 14),
           if (linked != null) ...[
-            Text(
-              '${english ? 'Connected as' : 'متصل باسم'}  ${linked['username'] ?? widget.title}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            if (linked['lastSyncedAt'] is num)
-              Padding(
-                padding: const EdgeInsetsDirectional.only(top: 3),
-                child: Text(
-                  '${english ? 'Last synced' : 'آخر مزامنة'} · ${_formatSyncTime(linked['lastSyncedAt'] as num)}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: HorseTheme.muted),
+            Row(
+              children: [
+                if ((linked['avatar']?.toString() ?? '').isNotEmpty) ...[
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundImage:
+                        NetworkImage(linked['avatar'].toString()),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${english ? 'Connected as' : 'متصل باسم'}  ${linked['username'] ?? widget.title}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      if (linked['lastSyncedAt'] is num)
+                        Padding(
+                          padding:
+                              const EdgeInsetsDirectional.only(top: 3),
+                          child: Text(
+                            '${english ? 'Last synced' : 'آخر مزامنة'} · ${_formatSyncTime(linked['lastSyncedAt'] as num)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: HorseTheme.muted),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
+              ],
+            ),
+            if (widget.service == 'anilist' || widget.service == 'mal') ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  if (linked['animeCount'] is num)
+                    _ProfileStat(
+                      english ? 'Anime' : 'أعمال',
+                      '${(linked['animeCount'] as num).toInt()}',
+                    ),
+                  if (linked['episodesWatched'] is num)
+                    _ProfileStat(
+                      english ? 'Episodes' : 'حلقات',
+                      '${(linked['episodesWatched'] as num).toInt()}',
+                    ),
+                  if (linked['meanScore'] is num)
+                    _ProfileStat(
+                      english ? 'Mean score' : 'متوسط التقييم',
+                      (linked['meanScore'] as num).toStringAsFixed(1),
+                    ),
+                ],
               ),
+            ],
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -568,6 +725,153 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 ),
               ],
             ),
+          ] else if (waiting && _flow?['kind'] == 'browser') ...[
+            Text(
+              english
+                  ? 'Approve the link in the ${widget.title} browser tab — the browser returns straight into Noor the moment you approve (Redirect URI app.noor.mobile://callback).'
+                  : 'وافق على الربط في تبويب ${widget.title} بالمتصفح — سيعيدك المتصفح إلى التطبيق فور الموافقة (Redirect URI ‏app.noor.mobile://callback).',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    english ? 'Waiting for approval…' : 'بانتظار الموافقة…',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: HorseTheme.muted,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              english
+                  ? 'Browser stuck or showing an auth code? Paste it here:'
+                  : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _codeCtrl,
+                    textAlign: TextAlign.start,
+                    textDirection: TextDirection.ltr,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: english ? 'Authorization code' : 'رمز التفويض',
+                      border: const OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => unawaited(_submitCode()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _submittingCode ? null : _submitCode,
+                  child: _submittingCode
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(english ? 'Finish' : 'إكمال'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                onPressed: _cancelFlow,
+                child: Text(english ? 'Cancel' : 'إلغاء'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              english
+                  ? 'One-time setup: register app.noor.mobile://callback as the app Redirect URI in the ${widget.title} developer settings.'
+                  : 'إعداد لمرة واحدة: سجّل app.noor.mobile://callback كـ Redirect URI للتطبيق في إعدادات مطوّر ${widget.title}.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: HorseTheme.muted,
+                  ),
+            ),
+            if (widget.service == 'anilist') ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _showCredEditor = !_showCredEditor),
+                  icon: const Icon(Icons.key_rounded, size: 17),
+                  label: Text(
+                    english
+                        ? (_showCredEditor
+                            ? 'Hide app credentials'
+                            : 'App credentials')
+                        : (_showCredEditor
+                            ? 'إخفاء بيانات التطبيق'
+                            : 'بيانات التطبيق'),
+                  ),
+                ),
+              ),
+              if (_showCredEditor) ...[
+                TextField(
+                  controller: _credIdCtrl,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textDirection: TextDirection.ltr,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: english ? 'Client ID' : 'معرّف العميل',
+                    hintText: english
+                        ? 'The numeric ID from anilist.co/settings/developer'
+                        : 'المعرّف الرقمي من إعدادات مطوّر AniList',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _credSecretCtrl,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  obscureText: true,
+                  textDirection: TextDirection.ltr,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: english
+                        ? 'Client secret (confidential apps only)'
+                        : 'سر العميل (للتطبيقات السرية فقط)',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _savingCred ? null : _saveCredentials,
+                    icon: _savingCred
+                        ? const SizedBox.square(
+                            dimension: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.verified_user_outlined, size: 18),
+                    label: Text(english ? 'Save credentials' : 'حفظ البيانات'),
+                  ),
+                ),
+              ],
+            ],
           ] else if (waiting && _flow?['kind'] == 'pkce') ...[
             Text(
               _traktMethod == 'direct'
@@ -609,7 +913,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _traktCodeCtrl,
+                    controller: _codeCtrl,
                     textAlign: TextAlign.start,
                     textDirection: TextDirection.ltr,
                     autocorrect: false,
@@ -620,12 +924,12 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                       hintText: english ? 'Authorization code' : 'رمز التفويض',
                       border: const OutlineInputBorder(),
                     ),
-                    onSubmitted: (_) => unawaited(_submitTraktCode()),
+                    onSubmitted: (_) => unawaited(_submitCode()),
                   ),
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  onPressed: _submittingCode ? null : _submitTraktCode,
+                  onPressed: _submittingCode ? null : _submitCode,
                   child: _submittingCode
                       ? const SizedBox.square(
                           dimension: 15,
@@ -796,6 +1100,41 @@ String _formatSyncTime(num timestamp) {
       DateTime.fromMillisecondsSinceEpoch(timestamp.toInt()).toLocal();
   String two(int part) => part.toString().padLeft(2, '0');
   return '${value.year}-${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
+}
+
+/// Tiny stat chip for tracker profile rows (anime count / episodes / mean).
+class _ProfileStat extends StatelessWidget {
+  const _ProfileStat(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: HorseTheme.gold.withValues(alpha: .09),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: HorseTheme.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: HorseTheme.gold,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
 }
 
 class _DebridCard extends StatefulWidget {

@@ -7,6 +7,7 @@ import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/glass_navigation.dart';
 import '../media/media_detail_page.dart';
+import 'anime_search_sheet.dart';
 
 class AnimePage extends StatefulWidget {
   const AnimePage({super.key});
@@ -47,9 +48,22 @@ class _AnimePageState extends State<AnimePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      english ? 'Anime, your way' : 'الأنمي على طريقتك',
-                      style: Theme.of(context).textTheme.headlineSmall,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            english ? 'Anime, your way' : 'الأنمي على طريقتك',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ),
+                        IconButton.filledTonal(
+                          tooltip: english
+                              ? 'Search anime on AniList'
+                              : 'ابحث عن الأنمي في AniList',
+                          onPressed: () => showAnimeSearchSheet(context),
+                          icon: const Icon(Icons.search_rounded),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     Text(
@@ -172,7 +186,14 @@ class _AnimePageState extends State<AnimePage> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => MediaDetailPage(item: resolved),
+          // Carry the AniList/MAL identity onto the playable item so
+          // library toggles and playback mirror to the linked trackers.
+          builder: (_) => MediaDetailPage(
+            item: resolved.withAnimeIds(
+              anilistId: item.anilistId,
+              idMal: item.idMal,
+            ),
+          ),
         ),
       );
     } finally {

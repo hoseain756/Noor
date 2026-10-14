@@ -17,6 +17,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $isAdult: Boolean) {
   Page(page: $page, perPage: $perPage) {
     media(sort: $sort, type: ANIME, isAdult: $isAdult) {
       id
+      idMal
       title { romaji english native }
       coverImage { extraLarge large }
       description(asHtml: false)
@@ -40,6 +41,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
       episode
       media {
         id
+        idMal
         title { romaji english native }
         coverImage { extraLarge large }
         description(asHtml: false)
@@ -470,6 +472,8 @@ query ($weekStart: Int!, $weekEnd: Int!) {
                 ? null
                 : (score / 10).toStringAsFixed(1),
             genres: genres,
+            anilistId: (value['id'] as num?)?.toInt(),
+            idMal: (value['idMal'] as num?)?.toInt(),
           );
         })
         .whereType<MediaItem>()

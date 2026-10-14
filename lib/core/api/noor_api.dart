@@ -4,8 +4,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../oauth/oauth_redirect.dart';
 import '../trakt/trakt_pkce.dart';
 import '../trakt/trakt_tokens.dart';
+import '../track/track_link.dart';
 
 /// Website-free API layer for Noor.
 ///
@@ -97,6 +99,42 @@ class NoorApi {
   static const String traktRedirectUri = '$traktHttpsRedirectBase/';
 
   // --------------------------------------------------------------------------
+  // Anime trackers (AniList / MyAnimeList) — browser OAuth over the
+  // app.noor.mobile://callback scheme (see OAuthRedirect), then GraphQL/REST
+  // list sync. Each integration is fully independent: separate tokens,
+  // pendings and push paths; both may be linked simultaneously.
+  // --------------------------------------------------------------------------
+
+  /// AniList OAuth application credential configured for this build.
+  /// NOTE: AniList developer dashboards show the Client ID as a small
+  /// integer and the Client Secret as a 40-character string. If the value
+  /// below is rejected (invalid_client) the integrations card exposes a
+  /// secure override for the Client ID — and, for confidential apps, the
+  /// Client Secret — so the flow works without rebuilding.
+  static const String defaultAniListClientId =
+      'b5a2wwLwux7QbOnf8koDJJenPh6e2LjbRiMmR5ef';
+
+  /// MyAnimeList API client ID (myanimelist.net/settings/apiconfig). MAL is
+  /// a public OAuth client: PKCE (plain) replaces any secret.
+  static const String defaultMalClientId = '107f144fd4d8942d9247aa0b77d33dee';
+
+  static const String anilistAuthorizeEndpoint =
+      'https://anilist.co/api/v2/oauth/authorize';
+  static const String anilistTokenEndpoint =
+      'https://anilist.co/api/v2/oauth/token';
+  static const String malAuthorizeEndpoint =
+      'https://myanimelist.net/v1/oauth2/authorize';
+  static const String malTokenEndpoint = 'https://myanimelist.net/v1/oauth2/token';
+  static const String malApiBase = 'https://api.myanimelist.net/v2';
+
+  /// App-identifier redirect URI both trackers return to (registered as
+  /// `app.noor.mobile://callback` in each provider's dashboard).
+  static const String animeRedirectUri = OAuthRedirect.redirectUri;
+
+  /// A pending tracker handshake dies after this window (codes are short).
+  static const Duration _trackFlowTtl = Duration(minutes: 15);
+
+  // --------------------------------------------------------------------------
   // Endpoints & timings
   // --------------------------------------------------------------------------
 
@@ -133,6 +171,15 @@ class NoorApi {
   static const String _traktLinkMethodKey = 'noor.trakt.link.method';
   static const String _traktRefreshKey = 'noor.trakt.refresh';
   static const String _traktExpiryKey = 'noor.trakt.expires';
+  static const String _anilistPendingKey = 'noor.anilist.pending';
+  static const String _anilistExpiresKey = 'noor.anilist.expires';
+  static const String _anilistClientIdKey = 'noor.anilist.client';
+  static const String _anilistClientSecretKey = 'noor.anilist.secret';
+  static const String _malPendingKey = 'noor.mal.pending';
+  static const String _malPkceStateKey = 'noor.mal.pkce.state';
+  static const String _malPkceVerifierKey = 'noor.mal.pkce.verifier';
+  static const String _malRefreshKey = 'noor.mal.refresh';
+  static const String _malExpiresKey = 'noor.mal.expires';
   static const String _debridServiceKey = 'noor.debrid.service';
   static const String _debridSecretPrefix = 'noor.debrid.';
   static const String _iptvPlaylistsKey = 'noor.iptv.playlists';
@@ -156,6 +203,14 @@ class NoorApi {
   /// Access-token expiry for Trakt (null = legacy token stored before
   /// expiry tracking existed — used as-is until it 401s).
   DateTime? _traktExpiresAt;
+
+  /// Access-token expiries for the anime trackers. AniList tokens live one
+  /// year with no refresh; MyAnimeList refreshes transparently via
+  /// [_validMalAccessToken].
+  DateTime? _anilistExpiresAt;
+  DateTime? _malExpiresAt;
+  Future<String?>? _malRefreshInFlight;
+  AniListScoreFormat? _aniListScoreFormat;
 
   TraktTokenRefresher? _traktRefresherInstance;
 
@@ -181,7 +236,7 @@ class NoorApi {
       _tmdbUserToken = await _secure.read(key: _legacyTmdbUserTokenKey);
     }
 
-    for (final service in const <String>['trakt', 'simkl']) {
+    for (final service in const <String>['trakt', 'simkl', 'anilist', 'mal']) {
       final token = await _secure.read(key: _serviceTokenKey(service));
       if (token != null && token.isNotEmpty) {
         _serviceTokens[service] = token;
@@ -194,6 +249,20 @@ class NoorApi {
     _traktExpiresAt = traktExpiry == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(traktExpiry);
+
+    final anilistExpiry = int.tryParse(
+      await _secure.read(key: _anilistExpiresKey) ?? '',
+    );
+    _anilistExpiresAt = anilistExpiry == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(anilistExpiry);
+
+    final malExpiry = int.tryParse(
+      await _secure.read(key: _malExpiresKey) ?? '',
+    );
+    _malExpiresAt = malExpiry == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(malExpiry);
 
     _debridService = _preferences!.getString(_debridServiceKey);
     if (_debridService != null) {
@@ -1232,6 +1301,1064 @@ class NoorApi {
   }
 
   // --------------------------------------------------------------------------
+  // Anime trackers — AniList / MyAnimeList. Browser OAuth over the
+  // app.noor.mobile://callback scheme (OAuthRedirect), then GraphQL (AniList)
+  // / REST (MAL) list sync. Independent per service; both can be linked.
+  // AniList: Authorization Code Grant, token lives ~1 year, no refresh, no
+  // revocation endpoint. MAL: public client, PKCE plain REQUIRED, refresh
+  // token supported, no revocation endpoint.
+  // --------------------------------------------------------------------------
+
+  /// Effective AniList OAuth credentials. The secure-storage override (set
+  /// from the integrations card) wins over the embedded default.
+  Future<(String, String)> aniListCredentials() async {
+    final id = (await _secure.read(key: _anilistClientIdKey))?.trim();
+    final secret = (await _secure.read(key: _anilistClientSecretKey))?.trim();
+    return (
+      (id == null || id.isEmpty) ? defaultAniListClientId : id,
+      secret ?? '',
+    );
+  }
+
+  /// Persists the AniList credential override (empty secret = public client).
+  Future<void> saveAniListCredentials({
+    required String clientId,
+    String clientSecret = '',
+  }) async {
+    final trimmedId = clientId.trim();
+    if (trimmedId.isEmpty) {
+      await _secure.delete(key: _anilistClientIdKey);
+    } else {
+      await _secure.write(key: _anilistClientIdKey, value: trimmedId);
+    }
+    final trimmedSecret = clientSecret.trim();
+    if (trimmedSecret.isEmpty) {
+      await _secure.delete(key: _anilistClientSecretKey);
+    } else {
+      await _secure.write(key: _anilistClientSecretKey, value: trimmedSecret);
+    }
+  }
+
+  /// Starts the AniList browser flow: authorize URL + pending marker
+  /// (bare epoch stamp). AniList does not echo a state parameter, so the
+  /// pending is matched by presence — one flow at a time, 15-minute TTL.
+  Future<Map<String, dynamic>?> startAniListLink() async {
+    try {
+      final (clientId, _) = await aniListCredentials();
+      await _secure.write(
+        key: _anilistPendingKey,
+        value: DateTime.now().millisecondsSinceEpoch.toString(),
+      );
+      return <String, dynamic>{
+        'authorizeUrl': aniListAuthorizeUrl(
+          clientId: clientId,
+          redirectUri: animeRedirectUri,
+        ),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Starts the MyAnimeList browser flow: PLAIN PKCE pair + state persisted
+  /// for the completion leg (the exchange must repeat the verifier).
+  Future<Map<String, dynamic>?> startMalLink() async {
+    try {
+      final verifier = TrackLink.malVerifier();
+      final state = TrackLink.newState();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await _secure.write(key: _malPendingKey, value: now.toString());
+      await _secure.write(key: _malPkceStateKey, value: state);
+      await _secure.write(key: _malPkceVerifierKey, value: verifier);
+      return <String, dynamic>{
+        'authorizeUrl': malAuthorizeUrl(
+          clientId: defaultMalClientId,
+          redirectUri: animeRedirectUri,
+          codeVerifier: verifier,
+          state: state,
+        ),
+        'state': state,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Which pending tracker (if any) the OAuth callback belongs to. Enforces
+  /// the MAL state equality and the flow TTL on both services.
+  Future<String?> pendingOAuthService({String? state}) async {
+    final anilistAlive = await _pendingAlive(_anilistPendingKey);
+    final malAlive = await _pendingAlive(_malPendingKey);
+    if (!anilistAlive && !malAlive) return null;
+    final savedMalState = await _secure.read(key: _malPkceStateKey);
+    return TrackLink.resolvePendingService(
+      anilistPending: anilistAlive,
+      malPending: malAlive,
+      malStateMatches:
+          savedMalState != null && savedMalState.isNotEmpty && savedMalState == state,
+      callbackHasState: state != null && state.isNotEmpty,
+    );
+  }
+
+  Future<void> cancelAniListLink() async {
+    await _secure.delete(key: _anilistPendingKey);
+  }
+
+  Future<void> cancelMalLink() => _clearMalPending();
+
+  /// Manual completion with a code pasted from the browser (fallback when
+  /// the custom-scheme bounce never fires). AniList needs no extra state;
+  /// MAL requires its pending verifier to exist.
+  Future<Map<String, dynamic>> submitAniListCode(String code) =>
+      completeAniListLink(code);
+
+  Future<Map<String, dynamic>> submitMalCode(String code) =>
+      completeMalLink(code);
+
+  /// Completes the AniList round-trip: swaps the authorization code for a
+  /// token, stores it (+ expiry) and clears the pending marker.
+  Future<Map<String, dynamic>> completeAniListLink(String code) async {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
+    }
+    final (clientId, clientSecret) = await aniListCredentials();
+    try {
+      final response = await _client.post<dynamic>(
+        anilistTokenEndpoint,
+        data: <String, dynamic>{
+          'grant_type': 'authorization_code',
+          'client_id': clientId,
+          if (clientSecret.isNotEmpty) 'client_secret': clientSecret,
+          'redirect_uri': animeRedirectUri,
+          'code': trimmed,
+        },
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      final token = payload?['access_token']?.toString() ?? '';
+      if (token.isEmpty) {
+        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+      }
+      await _storeServiceToken('anilist', token);
+      await _secure.delete(key: _anilistPendingKey);
+      final expiresIn = (payload?['expires_in'] as num?)?.toInt();
+      if (expiresIn != null && expiresIn > 0) {
+        _anilistExpiresAt = DateTime.now().add(Duration(seconds: expiresIn));
+        await _secure.write(
+          key: _anilistExpiresKey,
+          value: _anilistExpiresAt!.millisecondsSinceEpoch.toString(),
+        );
+      }
+      final viewer = await aniListViewer();
+      return <String, dynamic>{
+        'status': 'success',
+        if (viewer?['name'] != null) 'username': viewer!['name'],
+      };
+    } on DioException catch (error) {
+      return _trackOAuthError(error);
+    } catch (_) {
+      return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+    }
+  }
+
+  /// Completes the MyAnimeList round-trip: validates the pending PKCE
+  /// (state equality + TTL), swaps code+verifier for tokens and stores the
+  /// access/refresh pair.
+  Future<Map<String, dynamic>> completeMalLink(
+    String code, {
+    String? state,
+  }) async {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'missing_code'};
+    }
+    final savedState = await _secure.read(key: _malPkceStateKey);
+    final verifier = await _secure.read(key: _malPkceVerifierKey);
+    if (savedState == null ||
+        savedState.isEmpty ||
+        verifier == null ||
+        verifier.isEmpty) {
+      return <String, dynamic>{'status': 'error', 'reason': 'no_pending_flow'};
+    }
+    if (state != null && state.isNotEmpty && state != savedState) {
+      return <String, dynamic>{'status': 'error', 'reason': 'state_mismatch'};
+    }
+    if (!await _pendingAlive(_malPendingKey)) {
+      return <String, dynamic>{'status': 'error', 'reason': 'flow_expired'};
+    }
+    try {
+      final response = await _client.post<dynamic>(
+        malTokenEndpoint,
+        // MAL documents a form-urlencoded token endpoint.
+        data: Uri(
+          queryParameters: <String, String>{
+            'client_id': defaultMalClientId,
+            'grant_type': 'authorization_code',
+            'code': trimmed,
+            'code_verifier': verifier,
+            'redirect_uri': animeRedirectUri,
+          },
+        ).query,
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      final token = payload?['access_token']?.toString() ?? '';
+      if (token.isEmpty) {
+        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+      }
+      await _storeServiceToken('mal', token);
+      final refresh = payload?['refresh_token']?.toString();
+      if (refresh != null && refresh.isNotEmpty) {
+        await _secure.write(key: _malRefreshKey, value: refresh);
+      }
+      final expiresIn = (payload?['expires_in'] as num?)?.toInt();
+      if (expiresIn != null && expiresIn > 0) {
+        _malExpiresAt = DateTime.now().add(Duration(seconds: expiresIn));
+        await _secure.write(
+          key: _malExpiresKey,
+          value: _malExpiresAt!.millisecondsSinceEpoch.toString(),
+        );
+      }
+      await _clearMalPending();
+      final profile = await malProfile();
+      return <String, dynamic>{
+        'status': 'success',
+        if (profile?['name'] != null) 'username': profile!['name'],
+      };
+    } on DioException catch (error) {
+      return _trackOAuthError(error);
+    } catch (_) {
+      return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+    }
+  }
+
+  Future<bool> _pendingAlive(String key) async {
+    final raw = await _secure.read(key: key);
+    final created = int.tryParse(raw ?? '') ?? 0;
+    if (created <= 0) return false;
+    return DateTime.now().millisecondsSinceEpoch - created <=
+        _trackFlowTtl.inMilliseconds;
+  }
+
+  Future<void> _clearMalPending() async {
+    await _secure.delete(key: _malPendingKey);
+    await _secure.delete(key: _malPkceStateKey);
+    await _secure.delete(key: _malPkceVerifierKey);
+  }
+
+  Future<void> _clearAniListSession() async {
+    _serviceTokens.remove('anilist');
+    _anilistExpiresAt = null;
+    await _secure.delete(key: _serviceTokenKey('anilist'));
+    await _secure.delete(key: _anilistExpiresKey);
+    await _secure.delete(key: _anilistPendingKey);
+  }
+
+  Future<void> _clearMalSession() async {
+    _serviceTokens.remove('mal');
+    _malExpiresAt = null;
+    await _secure.delete(key: _serviceTokenKey('mal'));
+    await _secure.delete(key: _malRefreshKey);
+    await _secure.delete(key: _malExpiresKey);
+    await _clearMalPending();
+  }
+
+  /// Maps token-endpoint failures onto stable reasons for the UI.
+  Map<String, dynamic> _trackOAuthError(DioException error) {
+    final status = error.response?.statusCode;
+    final body = _asMap(error.response?.data);
+    final code = body?['error']?.toString() ?? '';
+    if (status == 401 ||
+        code == 'invalid_client' ||
+        code == 'unauthorized_client') {
+      return <String, dynamic>{'status': 'error', 'reason': 'invalid_client'};
+    }
+    if (status == 400 ||
+        code == 'invalid_grant' ||
+        code == 'invalid_request') {
+      return <String, dynamic>{'status': 'error', 'reason': 'invalid_grant'};
+    }
+    return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+  }
+
+  // ---- AniList GraphQL -----------------------------------------------------
+
+  /// Runs a GraphQL document against AniList with the linked token when one
+  /// exists. Embedded 401 errors (AniList signals dead tokens inside the
+  /// body) clear the local session.
+  Future<Map<String, dynamic>?> _aniListQuery(
+    String query,
+    Map<String, dynamic> variables, {
+    bool auth = true,
+  }) async {
+    try {
+      final response = await _client.post<dynamic>(
+        anilistUrl,
+        data: <String, dynamic>{'query': query, 'variables': variables},
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            if (auth && (_serviceTokens['anilist']?.isNotEmpty ?? false))
+              'Authorization': 'Bearer ${_serviceTokens['anilist']}',
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      final errors = payload?['errors'];
+      if (errors is List && errors.isNotEmpty) {
+        // AniList signals dead tokens with an embedded error — verified live:
+        // HTTP 400 + {"message":"Invalid token","status":400} for a stale
+        // bearer (sometimes the embedded status is 401 instead).
+        final first = _asMap(errors.first);
+        final inner = (first?['status'] as num?)?.toInt();
+        final message = first?['message']?.toString().toLowerCase() ?? '';
+        if (inner == 401 ||
+            message.contains('invalid token') ||
+            message.contains('unauthorized')) {
+          await _clearAniListSession();
+        }
+        return null;
+      }
+      final data = payload?['data'];
+      return data is Map ? Map<String, dynamic>.from(data) : null;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) await _clearAniListSession();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static const String _aniListViewerQuery = r'''
+query {
+  Viewer {
+    id
+    name
+    avatar { large medium }
+    mediaListOptions { scoreFormat }
+    statistics { anime { count episodesWatched meanScore } }
+  }
+}''';
+
+  /// Authenticated viewer profile; also caches the user's score format.
+  Future<Map<String, dynamic>?> aniListViewer() async {
+    final data = await _aniListQuery(_aniListViewerQuery, const {});
+    final viewer = data?['Viewer'];
+    if (viewer is! Map) return null;
+    final options = _asMap(_asMap(viewer)?['mediaListOptions']);
+    _aniListScoreFormat = aniListScoreFormatFromName(
+      options?['scoreFormat']?.toString(),
+    );
+    return Map<String, dynamic>.from(viewer);
+  }
+
+  /// Public anime search (no token needed) — raw AniList `Page.media` rows.
+  Future<List<dynamic>> aniListSearch(String query, {int perPage = 24}) async {
+    if (query.trim().isEmpty) return const <dynamic>[];
+    final data = await _aniListQuery(
+      _aniListSearchQuery,
+      <String, dynamic>{'search': query.trim(), 'perPage': perPage},
+      auth: false,
+    );
+    final page = _asMap(data?['Page']);
+    final media = page?['media'];
+    return media is List ? media : const <dynamic>[];
+  }
+
+  static const String _aniListSearchQuery = r'''
+query ($search: String, $perPage: Int) {
+  Page(page: 1, perPage: $perPage) {
+    media(search: $search, type: ANIME, sort: SEARCH_MATCH, isAdult: false) {
+      id
+      idMal
+      title { romaji english native }
+      coverImage { large }
+      format
+      seasonYear
+      averageScore
+      episodes
+    }
+  }
+}''';
+
+  static const String _aniListEntryQuery = r'''
+query ($mediaId: Int) {
+  Media(id: $mediaId) {
+    mediaListEntry {
+      id
+      status
+      progress
+      score
+    }
+  }
+}''';
+
+  /// The linked user's list entry for an AniList media id (null when none).
+  Future<Map<String, dynamic>?> aniListEntry(int mediaId) async {
+    final data = await _aniListQuery(_aniListEntryQuery, {
+      'mediaId': mediaId,
+    });
+    final media = _asMap(data?['Media']);
+    final entry = media?['mediaListEntry'];
+    return entry is Map ? Map<String, dynamic>.from(entry) : null;
+  }
+
+  static const String _aniListSaveMutation = r'''
+mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Int) {
+  SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, score: $score) {
+    id
+    status
+    progress
+    score
+  }
+}''';
+
+  Future<bool> _aniListSaveEntry({
+    required int mediaId,
+    AnimeTrackStatus? status,
+    int? progress,
+    double? score10,
+  }) async {
+    final variables = <String, dynamic>{'mediaId': mediaId};
+    if (status != null) variables['status'] = kAniListStatus[status];
+    if (progress != null) variables['progress'] = progress;
+    if (score10 != null) {
+      final format = _aniListScoreFormat ?? AniListScoreFormat.point100;
+      variables['score'] = aniListScoreForFormat(score10, format).toInt();
+    }
+    final data = await _aniListQuery(_aniListSaveMutation, variables);
+    return data?['SaveMediaListEntry'] != null;
+  }
+
+  static const String _aniListDeleteMutation = r'''
+mutation ($id: Int) {
+  DeleteMediaListEntry(id: $id) {
+    deleted
+  }
+}''';
+
+  Future<bool> _aniListDeleteEntry(int entryId) async {
+    final data = await _aniListQuery(_aniListDeleteMutation, {
+      'id': entryId,
+    });
+    final result = _asMap(data?['DeleteMediaListEntry']);
+    return result?['deleted'] == true;
+  }
+
+  // ---- MyAnimeList REST ----------------------------------------------------
+
+  Future<Map<String, String>> _malBearer(String token) async =>
+      <String, String>{
+        'Authorization': 'Bearer $token',
+      };
+
+  /// Transparently refreshes an expiring MyAnimeList token (single-flight).
+  Future<String?> _validMalAccessToken() async {
+    final token = _serviceTokens['mal'];
+    final expiresAt = _malExpiresAt;
+    final expiring = expiresAt != null &&
+        DateTime.now().isAfter(expiresAt.subtract(const Duration(hours: 12)));
+    if (token != null && token.isNotEmpty && !expiring) return token;
+    return _refreshMalToken();
+  }
+
+  Future<String?> _refreshMalToken() {
+    return _malRefreshInFlight ??= _doRefreshMalToken().whenComplete(() {
+      _malRefreshInFlight = null;
+    });
+  }
+
+  Future<String?> _doRefreshMalToken() async {
+    final token = _serviceTokens['mal'];
+    if (token == null || token.isEmpty) return null;
+    final refresh = await _secure.read(key: _malRefreshKey);
+    if (refresh == null || refresh.isEmpty) return token; // use until it 401s
+    try {
+      final response = await _client.post<dynamic>(
+        malTokenEndpoint,
+        data: Uri(
+          queryParameters: <String, String>{
+            'client_id': defaultMalClientId,
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh,
+          },
+        ).query,
+        options: Options(
+          headers: <String, String>{
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        ),
+      );
+      final payload = _asMap(response.data);
+      final access = payload?['access_token']?.toString() ?? '';
+      if (access.isEmpty) return token;
+      await _storeServiceToken('mal', access);
+      final newRefresh = payload?['refresh_token']?.toString();
+      if (newRefresh != null && newRefresh.isNotEmpty) {
+        await _secure.write(key: _malRefreshKey, value: newRefresh);
+      }
+      final expiresIn = (payload?['expires_in'] as num?)?.toInt();
+      if (expiresIn != null && expiresIn > 0) {
+        _malExpiresAt = DateTime.now().add(Duration(seconds: expiresIn));
+        await _secure.write(
+          key: _malExpiresKey,
+          value: _malExpiresAt!.millisecondsSinceEpoch.toString(),
+        );
+      }
+      return access;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      if (status == 400 || status == 401) {
+        // Refresh grant dead (single-use token consumed elsewhere /
+        // revoked) — drop the session so the card returns to "connect".
+        await _clearMalSession();
+      }
+      return null;
+    } catch (_) {
+      return token; // transient hiccup — keep the current token
+    }
+  }
+
+  /// MyAnimeList profile (public id + name + anime statistics).
+  Future<Map<String, dynamic>?> malProfile() async {
+    final token = await _validMalAccessToken();
+    if (token == null) return null;
+    try {
+      final response = await _client.get<dynamic>(
+        '$malApiBase/users/@me',
+        queryParameters: <String, String>{
+          'fields': 'anime_statistics{num_list_items,num_episodes,mean_score}',
+        },
+        options: Options(
+          headers: await _malBearer(token),
+        ),
+      );
+      return _asMap(response.data);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) await _clearMalSession();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Public MAL anime search, normalized to AniList's `Page.media` row shape
+  /// so one parser renders both providers' results.
+  Future<List<dynamic>> malSearch(String query, {int limit = 24}) async {
+    if (query.trim().isEmpty) return const <dynamic>[];
+    try {
+      final response = await _client.get<dynamic>(
+        '$malApiBase/anime',
+        queryParameters: <String, String>{
+          'q': query.trim(),
+          'limit': '$limit',
+          'fields':
+              'id,title,main_picture{large},start_season{year},media_type,num_episodes,mean',
+        },
+        options: Options(
+          headers: <String, String>{'X-MAL-CLIENT-ID': defaultMalClientId},
+        ),
+      );
+      final data = _asMap(response.data);
+      final rows = data?['data'] is List ? data!['data'] as List : const [];
+      return rows
+          .map(_normalizeMalSearchRow)
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+    } catch (_) {
+      return const <dynamic>[];
+    }
+  }
+
+  Map<String, dynamic>? _normalizeMalSearchRow(Object? raw) {
+    final node = _asMap(_asMap(raw)?['node']);
+    if (node == null) return null;
+    final id = (node['id'] as num?)?.toInt();
+    final title = node['title']?.toString();
+    if (id == null || title == null || title.isEmpty) return null;
+    final mediaType = node['media_type']?.toString().toUpperCase();
+    final format = mediaType == 'TV'
+        ? 'TV'
+        : mediaType == 'MOVIE'
+            ? 'MOVIE'
+            : (mediaType == 'OVA' || mediaType == 'ONA' || mediaType == 'SPECIAL'
+                ? mediaType
+                : null);
+    if (format == null) return null; // music videos and unknown formats
+    final picture = _asMap(node['main_picture']);
+    return <String, dynamic>{
+      'id': id,
+      'idMal': id,
+      'title': {'english': title},
+      'coverImage': {
+        if (picture?['large'] != null) 'large': picture!['large'],
+      },
+      'format': format,
+      'seasonYear': _asMap(node['start_season'])?['year'],
+      'averageScore': node['mean'],
+      'episodes': node['num_episodes'],
+    };
+  }
+
+  Future<Map<String, dynamic>?> _malMyListStatus(
+    String token,
+    int malId,
+  ) async {
+    try {
+      final response = await _client.get<dynamic>(
+        '$malApiBase/anime/$malId',
+        queryParameters: <String, String>{
+          'fields': 'my_list_status{status,score,num_episodes_watched}',
+        },
+        options: Options(headers: await _malBearer(token)),
+      );
+      final data = _asMap(response.data);
+      final status = data?['my_list_status'];
+      return status is Map ? Map<String, dynamic>.from(status) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _malPutListStatus(
+    String token,
+    int malId,
+    Map<String, String> fields,
+  ) async {
+    try {
+      final response = await _client.put<dynamic>(
+        '$malApiBase/anime/$malId/my_list_status',
+        data: Uri(queryParameters: fields).query,
+        options: Options(
+          headers: {
+            ...await _malBearer(token),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        ),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ---- Tracker pushes (best-effort mirrors of local changes) ---------------
+
+  /// Watchlist toggle: add = PLANNING; remove deletes the entry ONLY while
+  /// it is still a pure planning row (progress 0) so real watch progress is
+  /// never destroyed by an un-save.
+  Future<bool> pushAniListWatchlist({
+    required int mediaId,
+    required bool add,
+  }) async {
+    if (!isLinked('anilist')) return false;
+    try {
+      if (add) {
+        return await _aniListSaveEntry(
+          mediaId: mediaId,
+          status: AnimeTrackStatus.planning,
+        );
+      }
+      final entry = await aniListEntry(mediaId);
+      if (entry == null) return true;
+      final status = animeStatusFromProvider(
+        'anilist',
+        entry['status']?.toString(),
+      );
+      final progress = (entry['progress'] as num?)?.toInt() ?? 0;
+      if ((status != null && status != AnimeTrackStatus.planning) ||
+          progress > 0) {
+        return true; // keep the provider's real progress untouched
+      }
+      final entryId = (entry['id'] as num?)?.toInt();
+      if (entryId == null) return true;
+      return await _aniListDeleteEntry(entryId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Episode progress (+ status policy): COMPLETED when [completed];
+  /// otherwise CURRENT unless the entry already finished (never downgrade).
+  Future<bool> pushAniListProgress({
+    required int mediaId,
+    required int progress,
+    bool completed = false,
+  }) async {
+    if (!isLinked('anilist') || progress < 0) return false;
+    try {
+      var status = AnimeTrackStatus.watching;
+      if (completed) {
+        status = AnimeTrackStatus.completed;
+      } else {
+        final entry = await aniListEntry(mediaId);
+        final existing = animeStatusFromProvider(
+          'anilist',
+          entry?['status']?.toString(),
+        );
+        if (existing != null &&
+            (existing == AnimeTrackStatus.completed ||
+                existing == AnimeTrackStatus.rewatching)) {
+          status = existing;
+        }
+      }
+      return await _aniListSaveEntry(
+        mediaId: mediaId,
+        status: status,
+        progress: progress,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Score push (0–10 → the user's AniList scoring format). Creates the
+  /// entry as CURRENT when none exists yet.
+  Future<bool> pushAniListScore({
+    required int mediaId,
+    required double score10,
+  }) async {
+    if (!isLinked('anilist')) return false;
+    try {
+      final entry = await aniListEntry(mediaId);
+      final status = entry == null ? AnimeTrackStatus.watching : null;
+      return await _aniListSaveEntry(
+        mediaId: mediaId,
+        status: status,
+        score10: score10.clamp(0, 10),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Explicit status save from the tracker sheet (status + optional
+  /// progress in one call). AniList variant.
+  Future<bool> pushAniListEntryStatus({
+    required int mediaId,
+    required AnimeTrackStatus status,
+    int? progress,
+  }) async {
+    if (!isLinked('anilist')) return false;
+    try {
+      return await _aniListSaveEntry(
+        mediaId: mediaId,
+        status: status,
+        progress: progress,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Explicit status save from the tracker sheet (status + optional
+  /// progress in one call). MyAnimeList variant — rewatching maps to
+  /// watching + is_rewatching=1.
+  Future<bool> pushMalEntryStatus({
+    required int malId,
+    required AnimeTrackStatus status,
+    int? progress,
+  }) async {
+    if (!isLinked('mal')) return false;
+    final token = await _validMalAccessToken();
+    if (token == null) return false;
+    try {
+      final fields = <String, String>{
+        'status': kMalStatus[status]!,
+      };
+      if (status == AnimeTrackStatus.rewatching) {
+        fields['is_rewatching'] = '1';
+      }
+      if (progress != null) fields['num_watched_episodes'] = '$progress';
+      return await _malPutListStatus(token, malId, fields);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> pushMalWatchlist({required int malId, required bool add}) async {
+    if (!isLinked('mal')) return false;
+    final token = await _validMalAccessToken();
+    if (token == null) return false;
+    try {
+      if (add) {
+        return await _malPutListStatus(token, malId, {
+          'status': kMalStatus[AnimeTrackStatus.planning]!,
+        });
+      }
+      final current = await _malMyListStatus(token, malId);
+      final status = animeStatusFromProvider(
+        'mal',
+        current?['status']?.toString(),
+      );
+      final progress =
+          (current?['num_episodes_watched'] as num?)?.toInt() ?? 0;
+      if ((status != null && status != AnimeTrackStatus.planning) ||
+          progress > 0) {
+        return true; // protect real progress
+      }
+      final response = await _client.delete<dynamic>(
+        '$malApiBase/anime/$malId/my_list_status',
+        options: Options(headers: await _malBearer(token)),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> pushMalProgress({
+    required int malId,
+    required int episodes,
+    bool completed = false,
+  }) async {
+    if (!isLinked('mal') || episodes < 0) return false;
+    final token = await _validMalAccessToken();
+    if (token == null) return false;
+    try {
+      var status = kMalStatus[AnimeTrackStatus.watching]!;
+      if (completed) {
+        status = kMalStatus[AnimeTrackStatus.completed]!;
+      } else {
+        final current = await _malMyListStatus(token, malId);
+        final existing = animeStatusFromProvider(
+          'mal',
+          current?['status']?.toString(),
+        );
+        if (existing == AnimeTrackStatus.completed) {
+          status = kMalStatus[AnimeTrackStatus.completed]!;
+        }
+      }
+      return await _malPutListStatus(token, malId, {
+        'num_watched_episodes': '$episodes',
+        'status': status,
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> pushMalScore({required int malId, required double score10}) async {
+    if (!isLinked('mal')) return false;
+    final token = await _validMalAccessToken();
+    if (token == null) return false;
+    try {
+      final current = await _malMyListStatus(token, malId);
+      final fields = <String, String>{
+        'score': '${score10.clamp(0, 10).round()}',
+      };
+      if (current == null) {
+        fields['status'] = kMalStatus[AnimeTrackStatus.watching]!;
+      }
+      return await _malPutListStatus(token, malId, fields);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Current list state for both trackers — the tracker sheet's preload.
+  Future<Map<String, dynamic>> animeTrackerPreview({
+    int? anilistId,
+    int? malId,
+  }) async {
+    final out = <String, dynamic>{};
+    if (anilistId != null && isLinked('anilist')) {
+      final entry = await aniListEntry(anilistId);
+      if (entry != null) {
+        out['anilist'] = <String, dynamic>{
+          'status': animeStatusFromProvider(
+            'anilist',
+            entry['status']?.toString(),
+          )?.name,
+          'progress': (entry['progress'] as num?)?.toInt() ?? 0,
+          'score10': score10FromAniList(
+            entry['score'] as num?,
+            _aniListScoreFormat ?? AniListScoreFormat.point100,
+          ),
+        };
+      }
+    }
+    if (malId != null && isLinked('mal')) {
+      final token = await _validMalAccessToken();
+      if (token != null) {
+        final status = await _malMyListStatus(token, malId);
+        if (status != null) {
+          out['mal'] = <String, dynamic>{
+            'status': animeStatusFromProvider(
+              'mal',
+              status['status']?.toString(),
+            )?.name,
+            'progress':
+                (status['num_episodes_watched'] as num?)?.toInt() ?? 0,
+            'score10': score10FromMal(status['score'] as num?),
+          };
+        }
+      }
+    }
+    return out;
+  }
+
+  // ---- Tracker import (Sync library) ---------------------------------------
+
+  static const String _aniListCollectionQuery = r'''
+query ($userId: Int) {
+  MediaListCollection(userId: $userId, type: ANIME) {
+    lists {
+      status
+      entries {
+        id
+        status
+        progress
+        updatedAt
+        media {
+          id
+          idMal
+          title { romaji english native }
+          format
+          seasonYear
+        }
+      }
+    }
+  }
+}''';
+
+  Future<List<dynamic>> _syncAniList({required String kind}) async {
+    if (!isLinked('anilist')) return const <dynamic>[];
+    final viewer = await aniListViewer();
+    final userId = (viewer?['id'] as num?)?.toInt();
+    if (userId == null) return const <dynamic>[];
+    final data = await _aniListQuery(_aniListCollectionQuery, {
+      'userId': userId,
+    });
+    final collection = _asMap(data?['MediaListCollection']);
+    final lists = collection?['lists'];
+    if (lists is! List) return const <dynamic>[];
+    final rows = <Map<String, dynamic>>[];
+    for (final list in lists.whereType<Map>()) {
+      for (final raw in (list['entries'] as List? ?? const [])) {
+        final row = _mapAniListRow(raw, kind);
+        if (row != null) rows.add(row);
+      }
+    }
+    return rows;
+  }
+
+  Map<String, dynamic>? _mapAniListRow(Object? raw, String kind) {
+    final entry = _asMap(raw);
+    if (entry == null) return null;
+    final media = _asMap(entry['media']);
+    final mediaId = (media?['id'] as num?)?.toInt();
+    final title = _asMap(media?['title']);
+    final name =
+        (title?['english'] ?? title?['romaji'] ?? title?['native'])?.toString();
+    if (mediaId == null || name == null || name.isEmpty) return null;
+    final status = animeStatusFromProvider(
+      'anilist',
+      entry['status']?.toString(),
+    );
+    final progress = (entry['progress'] as num?)?.toInt() ?? 0;
+    final isMovie = media?['format']?.toString().toUpperCase() == 'MOVIE';
+    final idMal = (media?['idMal'] as num?)?.toInt();
+    final base = <String, dynamic>{
+      'type': isMovie ? 'movie' : 'series',
+      'id': 'anilist:$mediaId',
+      'title': name,
+      'year': (media?['seasonYear'] as num?)?.toInt(),
+      'anilist': mediaId,
+      if (idMal != null) 'mal': idMal,
+    };
+    if (kind == 'watchlist') {
+      return status == AnimeTrackStatus.planning ? base : null;
+    }
+    // history: anything the user is actively watching or has finished.
+    if (status == null ||
+        status == AnimeTrackStatus.planning ||
+        (progress <= 0 && status != AnimeTrackStatus.completed)) {
+      return null;
+    }
+    final updatedAt = _epochMillis(entry['updatedAt']);
+    return <String, dynamic>{
+      ...base,
+      if (updatedAt != null) 'watchedAt': updatedAt,
+    };
+  }
+
+  Future<List<dynamic>> _syncMal({required String kind}) async {
+    final token = await _validMalAccessToken();
+    if (token == null) return const <dynamic>[];
+    try {
+      final response = await _client.get<dynamic>(
+        '$malApiBase/users/@me/animelist',
+        queryParameters: <String, String>{
+          'limit': '500',
+          'nsfw': 'true',
+          'fields':
+              'id,title,main_picture{large},start_season{year},media_type,'
+                  'list_status{status,score,num_episodes_watched,updated_at}',
+        },
+        options: Options(headers: await _malBearer(token)),
+      );
+      final data = _asMap(response.data);
+      final rows = data?['data'] is List ? data!['data'] as List : const [];
+      return rows
+          .map((row) => _mapMalListRow(row, kind))
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) await _clearMalSession();
+      return const <dynamic>[];
+    } catch (_) {
+      return const <dynamic>[];
+    }
+  }
+
+  Map<String, dynamic>? _mapMalListRow(Object? raw, String kind) {
+    final node = _asMap(raw);
+    final list = _asMap(node?['list_status']);
+    final malId = (node?['id'] as num?)?.toInt();
+    final title = node?['title']?.toString();
+    if (malId == null || title == null || title.isEmpty) return null;
+    final status = animeStatusFromProvider(
+      'mal',
+      list?['status']?.toString(),
+    );
+    final progress =
+        (list?['num_episodes_watched'] as num?)?.toInt() ?? 0;
+    final isMovie = node?['media_type']?.toString().toLowerCase() == 'movie';
+    final base = <String, dynamic>{
+      'type': isMovie ? 'movie' : 'series',
+      'id': 'mal:$malId',
+      'title': title,
+      'year': _asMap(node?['start_season'])?['year'],
+      'mal': malId,
+    };
+    if (kind == 'watchlist') {
+      return status == AnimeTrackStatus.planning ? base : null;
+    }
+    if (status == null ||
+        status == AnimeTrackStatus.planning ||
+        (progress <= 0 && status != AnimeTrackStatus.completed)) {
+      return null;
+    }
+    final updatedAt = _epochMillis(list?['updated_at']);
+    return <String, dynamic>{
+      ...base,
+      if (updatedAt != null) 'watchedAt': updatedAt,
+    };
+  }
+
+  // --------------------------------------------------------------------------
   // Trakt browser PKCE (RFC 7636) — the user's Trakt registration is
   // PKCE-only: the current official docs deprecate client_secret for user
   // sign-in (and Trakt's device grant rejects secret-less exchanges, verified
@@ -1669,6 +2796,17 @@ class NoorApi {
       await _clearTraktPkce();
       return;
     }
+    if (service == 'anilist') {
+      // AniList exposes no token revocation endpoint — dropping the local
+      // session is all that is needed (a stray token expires unused).
+      await _clearAniListSession();
+      return;
+    }
+    if (service == 'mal') {
+      // MyAnimeList exposes no revocation endpoint either.
+      await _clearMalSession();
+      return;
+    }
     _serviceTokens.remove(service);
     await _secure.delete(key: _serviceTokenKey(service));
   }
@@ -1725,6 +2863,10 @@ class NoorApi {
           final token = _serviceTokens[service];
           if (token == null || token.isEmpty) return const <dynamic>[];
           return await _syncSimkl(token: token, kind: kind);
+        case 'anilist':
+          return await _syncAniList(kind: kind);
+        case 'mal':
+          return await _syncMal(kind: kind);
         default:
           return const <dynamic>[];
       }

@@ -13,6 +13,8 @@ class MediaItem {
     this.originCountry,
     this.genres = const [],
     this.videos = const [],
+    this.anilistId,
+    this.idMal,
   });
 
   final String id;
@@ -28,6 +30,16 @@ class MediaItem {
   final String? originCountry;
   final List<String> genres;
   final List<Map<String, dynamic>> videos;
+
+  /// AniList media id (anime items) — the tracking identity for the AniList
+  /// integration; `anilist:<id>` item ids parse back to this.
+  final int? anilistId;
+
+  /// MyAnimeList media id (anime items) — the tracking identity for the MAL
+  /// integration.
+  final int? idMal;
+
+  bool get hasAnimeIds => anilistId != null || idMal != null;
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
     return MediaItem(
@@ -53,7 +65,17 @@ class MediaItem {
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList(),
+      anilistId: (json['anilistId'] as num?)?.toInt() ??
+          _idFromPrefixed(json['id'], 'anilist:'),
+      idMal: (json['idMal'] as num?)?.toInt(),
     );
+  }
+
+  /// Parses `anilist:12345`-style ids back to the bare provider id.
+  static int? _idFromPrefixed(Object? value, String prefix) {
+    final text = value?.toString() ?? '';
+    if (!text.toLowerCase().startsWith(prefix)) return null;
+    return int.tryParse(text.substring(prefix.length));
   }
 
   Map<String, dynamic> toJson() => {
@@ -70,7 +92,29 @@ class MediaItem {
         if (originCountry != null) 'originCountry': originCountry,
         'genres': genres,
         'videos': videos,
+        if (anilistId != null) 'anilistId': anilistId,
+        if (idMal != null) 'idMal': idMal,
       };
+
+  /// Copy with the anime tracking identities attached (used when a resolved
+  /// playable item must keep the AniList/MAL identity of its source).
+  MediaItem withAnimeIds({int? anilistId, int? idMal}) => MediaItem(
+        id: id,
+        type: type,
+        name: name,
+        logo: logo,
+        poster: poster,
+        background: background,
+        description: description,
+        releaseInfo: releaseInfo,
+        rating: rating,
+        certification: certification,
+        originCountry: originCountry,
+        genres: genres,
+        videos: videos,
+        anilistId: anilistId ?? this.anilistId,
+        idMal: idMal ?? this.idMal,
+      );
 
   static String? _string(dynamic value) =>
       value is String && value.isNotEmpty ? value : null;

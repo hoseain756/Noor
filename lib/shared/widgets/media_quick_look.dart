@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../features/anime/anime_tracker_sheet.dart';
 import 'noor_toast.dart';
 
 /// Long-press "quick look" for any media card (movie / series / anime).
@@ -121,6 +122,13 @@ class _QuickLookPageState extends State<_QuickLookPage>
     Navigator.of(context).pop();
   }
 
+  /// Opens the anime tracking sheet (status / progress / score) for items
+  /// carrying a provider id while any tracker is linked.
+  Future<void> _trackAnime() async {
+    Navigator.of(context).pop();
+    await showAnimeTrackerSheet(context, widget.item);
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -129,6 +137,9 @@ class _QuickLookPageState extends State<_QuickLookPage>
     final item = widget.item;
     final inLibrary = app.contains(item);
     final watched = app.history.any((h) => h.item.id == item.id);
+    final canTrack = item.hasAnimeIds &&
+        (app.linkedServices['anilist']?['linked'] == true ||
+            app.linkedServices['mal']?['linked'] == true);
     // Reference sheet: poster ≈ 58% of the screen width, 2:3, radius 20.
     final posterWidth = (size.width * .58).clamp(180.0, 260.0).toDouble();
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -154,6 +165,7 @@ class _QuickLookPageState extends State<_QuickLookPage>
                       english: english,
                       inLibrary: inLibrary,
                       watched: watched,
+                      canTrack: canTrack,
                       posterWidth: posterWidth,
                     )
                   : ScaleTransition(
@@ -163,6 +175,7 @@ class _QuickLookPageState extends State<_QuickLookPage>
                         english: english,
                         inLibrary: inLibrary,
                         watched: watched,
+                        canTrack: canTrack,
                         posterWidth: posterWidth,
                       ),
                     ),
@@ -178,6 +191,7 @@ class _QuickLookPageState extends State<_QuickLookPage>
     required bool english,
     required bool inLibrary,
     required bool watched,
+    required bool canTrack,
     required double posterWidth,
   }) {
     final item = widget.item;
@@ -280,6 +294,14 @@ class _QuickLookPageState extends State<_QuickLookPage>
                     : (english ? 'Mark as watched' : 'تحديد كمشاهد'),
                 onTap: () => _markWatched(watched),
               ),
+              if (canTrack)
+                _QuickMenuRow(
+                  icon: Icons.playlist_add_check_rounded,
+                  label: english
+                      ? 'Track on AniList / MAL'
+                      : 'تتبّع في AniList / MAL',
+                  onTap: _trackAnime,
+                ),
             ],
           ),
         ),

@@ -41,6 +41,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
   StreamSubscription<Object?>? _sub;
 
   int _seenTraktLinkEventAt = 0;
+  int _seenOAuthLinkEventAt = 0;
 
   @override
   void initState() {
@@ -78,32 +79,45 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
   }
 
   /// Receives an AniList / MyAnimeList OAuth return
-  /// (`app.noor.mobile://callback?code=…&state=…`): stores the pending code
-  /// in [AppState.oauthCallback] for the matching linking flow to consume
-  /// and confirms arrival with a toast.
+  /// (`app.noor.mobile://callback?code=…&state=…`): AppState dispatches it
+  /// to the pending tracker handshake; the completion surfaces through
+  /// [AppState.oauthLinkEvent] (watched in build) as a toast.
   Future<void> _receiveOAuthCallback(String link) async {
     final callback = OAuthRedirect.parse(link);
     if (callback == null) return; // foreign app.noor.mobile:// link
-    final app = context.read<AppState>();
-    app.announceOAuthCallback(callback);
-    if (!mounted) return;
-    final english = app.english;
-    if (callback.isDenied) {
-      NoorToast.show(
-        context,
-        english
-            ? 'Authorization was denied — restart linking to retry.'
-            : 'تم رفض الموافقة — ابدأ الربط من جديد للمحاولة.',
-        error: true,
-      );
-      return;
+    context.read<AppState>().announceOAuthCallback(callback);
+  }
+
+  String _oauthReasonText(bool english, String? reason, String? service) {
+    final who = service == 'anilist'
+        ? 'AniList'
+        : service == 'mal'
+            ? 'MyAnimeList'
+            : (english ? 'the tracker' : 'الموقع');
+    switch (reason) {
+      case 'invalid_client':
+        return english
+            ? '$who rejected the app credentials — update them and retry.'
+            : 'رفض $who بيانات التطبيق — حدّثها وأعد المحاولة.';
+      case 'invalid_grant':
+        return english
+            ? '$who rejected the authorization code — start a new link.'
+            : 'رفض $who رمز التفويض — ابدأ الربط من جديد.';
+      case 'state_mismatch':
+      case 'flow_expired':
+      case 'no_pending_flow':
+        return english
+            ? 'The link request expired — start again from Integrations.'
+            : 'انتهت مهلة طلب الربط — ابدأ من صفحة التكاملات.';
+      case 'access_denied':
+        return english
+            ? 'Approval was denied.'
+            : 'تم رفض الموافقة.';
+      default:
+        return english
+            ? 'Could not finish linking $who.'
+            : 'تعذر إكمال الربط مع $who.';
     }
-    NoorToast.show(
-      context,
-      english
-          ? 'Authorization code received — finish linking in Integrations.'
-          : 'وصل رمز التفويض — أكمل الربط من صفحة التكاملات.',
-    );
   }
 
   /// Finishes the Trakt PKCE round-trip and announces it. Runs regardless of
@@ -198,6 +212,41 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
             NoorToast.show(
               context,
               app.english ? _englishReason(reason) : _arabicReason(reason),
+              error: true,
+            );
+          }
+        });
+      }
+    }
+    // Tracker (AniList / MyAnimeList) link completions — the OAuth return
+    // was dispatched by AppState; announce the outcome once.
+    final oauthEvent = app.oauthLinkEvent;
+    if (oauthEvent != null) {
+      final at = (oauthEvent['at'] as num?)?.toInt() ?? 0;
+      if (at > _seenOAuthLinkEventAt && at > app.seenOAuthLinkEventAt) {
+        _seenOAuthLinkEventAt = at;
+        app.seenOAuthLinkEventAt = at;
+        final ok = oauthEvent['ok'] == true;
+        final reason = oauthEvent['reason']?.toString();
+        final service = oauthEvent['service']?.toString();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (ok) {
+            final who = service == 'anilist'
+                ? 'AniList'
+                : service == 'mal'
+                    ? 'MyAnimeList'
+                    : '';
+            NoorToast.show(
+              context,
+              app.english
+                  ? '$who account connected.'
+                  : 'تم ربط حساب $who.',
+            );
+          } else {
+            NoorToast.show(
+              context,
+              _oauthReasonText(app.english, reason, service),
               error: true,
             );
           }

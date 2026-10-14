@@ -12,6 +12,7 @@ import '../models/custom_list.dart';
 import '../models/media_item.dart';
 import '../oauth/oauth_redirect.dart';
 import '../sync/noor_sync.dart';
+import '../track/track_link.dart';
 
 class AppState extends ChangeNotifier {
   AppState(this.api, this.catalogs);
@@ -346,6 +347,8 @@ class AppState extends ChangeNotifier {
               'type': entry['type'],
               'name': (entry['title'] ?? entry['name'] ?? '').toString(),
               if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+              if (entry['anilist'] != null) 'anilistId': entry['anilist'],
+              if (entry['mal'] != null) 'idMal': entry['mal'],
             }),
           )
           .where((item) => item.id.isNotEmpty)
@@ -359,6 +362,8 @@ class AppState extends ChangeNotifier {
               'type': entry['type'],
               'name': (entry['title'] ?? entry['name'] ?? '').toString(),
               if (entry['year'] != null) 'releaseInfo': entry['year'].toString(),
+              if (entry['anilist'] != null) 'anilistId': entry['anilist'],
+              if (entry['mal'] != null) 'idMal': entry['mal'],
             });
             final watchedAt = entry['watchedAt'];
             return WatchHistoryEntry(
@@ -462,6 +467,19 @@ class AppState extends ChangeNotifier {
       unawaited(
         api.pushTraktWatchlist(type: item.type, imdb: item.id, add: adding),
       );
+    }
+    // Independent anime-tracker mirrors: AniList PLANNING / MAL plan_to_watch
+    // for anything carrying a provider id. Each integration pushes on its
+    // own; removal only ever deletes pure planning rows provider-side.
+    final anilistId = item.anilistId;
+    if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
+      unawaited(
+        api.pushAniListWatchlist(mediaId: anilistId, add: adding),
+      );
+    }
+    final malId = item.idMal;
+    if (malId != null && linkedServices['mal']?['linked'] == true) {
+      unawaited(api.pushMalWatchlist(malId: malId, add: adding));
     }
   }
 
@@ -639,6 +657,43 @@ class AppState extends ChangeNotifier {
       NoorSyncService.bucketHistory,
       NoorSyncService.bucketLibrary,
     });
+    _mirrorAnimeProgress(item, positionMs, durationMs, episode);
+  }
+
+  /// Mirrors anime watch progress to the linked trackers: an episode number
+  /// becomes AniList progress / MAL num_watched_episodes; a finished anime
+  /// MOVIE becomes COMPLETED. Best-effort and independent per service.
+  void _mirrorAnimeProgress(
+    MediaItem item,
+    int positionMs,
+    int durationMs,
+    int? episode,
+  ) {
+    if (item.anilistId == null && item.idMal == null) return;
+    final finished = durationMs > 0 && positionMs >= durationMs - 120000;
+    final isMovie = item.type == 'movie';
+    if (!isMovie && episode == null) return;
+    if (isMovie && !finished) return;
+    final anilistId = item.anilistId;
+    if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
+      unawaited(
+        api.pushAniListProgress(
+          mediaId: anilistId,
+          progress: isMovie ? 1 : episode!,
+          completed: isMovie && finished,
+        ),
+      );
+    }
+    final malId = item.idMal;
+    if (malId != null && linkedServices['mal']?['linked'] == true) {
+      unawaited(
+        api.pushMalProgress(
+          malId: malId,
+          episodes: isMovie ? 1 : episode!,
+          completed: isMovie && finished,
+        ),
+      );
+    }
   }
 
   Future<void> clearHistory() async {
@@ -1124,21 +1179,30 @@ class AppState extends ChangeNotifier {
   }
 
   // --------------------------------------------------------------------------
-  // Generic OAuth return leg (AniList / MyAnimeList style)
+  // Generic OAuth return leg (AniList / MyAnimeList trackers)
   // --------------------------------------------------------------------------
 
   Map<String, dynamic>? _oauthCallback;
+  Map<String, dynamic>? _oauthLinkEvent;
+
+  /// Timestamp of the last tracker link event already surfaced as a toast
+  /// (guards against double-toasting one event).
+  int seenOAuthLinkEventAt = 0;
 
   /// Last OAuth return received over the app-identifier scheme
-  /// (`app.noor.mobile://callback?…`):
-  /// `{at, code, state, error?}` — an AniList / MyAnimeList linking flow
-  /// reads the pending `code` from here to finish its token exchange.
+  /// (`app.noor.mobile://callback?…`): `{at, code, state, error?}`.
   /// In-memory only: authorization codes live minutes.
   Map<String, dynamic>? get oauthCallback => _oauthCallback;
 
-  /// Stores a freshly parsed OAuth return and announces it (the link
-  /// listener toasts once per arrival; future linking flows consume the
-  /// code from [oauthCallback]).
+  /// Last finished tracker link round
+  /// (`{at, ok, service, reason?}`) — surfaced as a toast by the link
+  /// listener wherever the user happens to be.
+  Map<String, dynamic>? get oauthLinkEvent => _oauthLinkEvent;
+
+  /// Stores a freshly parsed OAuth return and dispatches it to whichever
+  /// tracker handshake is pending (AniList presence-match or MyAnimeList
+  /// state-match). Completion updates [linkedServices] and emits
+  /// [oauthLinkEvent] for the toast.
   void announceOAuthCallback(OAuthCallback callback) {
     _oauthCallback = <String, dynamic>{
       'at': DateTime.now().millisecondsSinceEpoch,
@@ -1147,5 +1211,187 @@ class AppState extends ChangeNotifier {
       if (callback.isDenied) 'error': callback.error,
     };
     notifyListeners();
+    if (callback.isDenied) {
+      _oauthLinkEvent = <String, dynamic>{
+        'at': DateTime.now().millisecondsSinceEpoch,
+        'ok': false,
+        'service': null,
+        'reason': callback.error,
+      };
+      notifyListeners();
+      return;
+    }
+    unawaited(_dispatchOAuthCallback(callback));
+  }
+
+  Future<void> _dispatchOAuthCallback(OAuthCallback callback) async {
+    String? service;
+    Map<String, dynamic> result;
+    try {
+      service = await api.pendingOAuthService(state: callback.state);
+      switch (service) {
+        case 'anilist':
+          result = await api.completeAniListLink(callback.code);
+        case 'mal':
+          result = await api.completeMalLink(
+            callback.code,
+            state: callback.state,
+          );
+        default:
+          // No pending flow (stale/duplicate callback) — stay silent unless
+          // the service never linked.
+          return;
+      }
+    } catch (_) {
+      result = <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+    }
+    final ok = result['status']?.toString() == 'success';
+    if (ok && service != null) {
+      await saveLinkedService(service, <String, dynamic>{
+        'linked': true,
+        'linkedAt': DateTime.now().millisecondsSinceEpoch,
+        if (result['username'] != null) 'username': result['username'],
+      });
+    }
+    _oauthLinkEvent = <String, dynamic>{
+      'at': DateTime.now().millisecondsSinceEpoch,
+      'ok': ok,
+      'service': service,
+      'reason': ok ? null : result['reason']?.toString(),
+    };
+    notifyListeners();
+  }
+
+  /// Refreshes the linked tracker's profile (username, avatar, anime
+  /// stats) into [linkedServices] so the integrations card shows live data.
+  Future<void> refreshTrackerProfile(String service) async {
+    if (linkedServices[service]?['linked'] != true) return;
+    try {
+      if (service == 'anilist') {
+        final viewer = await api.aniListViewer();
+        if (viewer == null) return;
+        final stats = _asMapMap(viewer['statistics'])?['anime'];
+        final current = Map<String, dynamic>.from(linkedServices['anilist'] ?? {});
+        current['username'] = viewer['name']?.toString() ?? current['username'];
+        final avatar = _asMapMap(viewer['avatar']);
+        if (avatar?['large'] != null) {
+          current['avatar'] = avatar!['large']?.toString();
+        }
+        if (stats != null) {
+          current['animeCount'] = stats['count'];
+          current['episodesWatched'] = stats['episodesWatched'];
+          current['meanScore'] = stats['meanScore'];
+        }
+        linkedServices = {...linkedServices, 'anilist': current};
+        await _preferences?.setString(
+          'horse.mobile.linked-services',
+          _encode(linkedServices),
+        );
+        notifyListeners();
+      } else if (service == 'mal') {
+        final profile = await api.malProfile();
+        if (profile == null) return;
+        final current = Map<String, dynamic>.from(linkedServices['mal'] ?? {});
+        current['username'] = profile['name']?.toString() ?? current['username'];
+        if (profile['picture'] != null) {
+          current['avatar'] = profile['picture']?.toString();
+        }
+        final stats = _asMapMap(profile['anime_statistics']);
+        if (stats != null) {
+          current['animeCount'] = stats['num_list_items'];
+          current['episodesWatched'] = stats['num_episodes'];
+          current['meanScore'] = stats['mean_score'];
+        }
+        linkedServices = {...linkedServices, 'mal': current};
+        await _preferences?.setString(
+          'horse.mobile.linked-services',
+          _encode(linkedServices),
+        );
+        notifyListeners();
+      }
+    } catch (_) {
+      // Profile enrichment is cosmetic — never disturb the link state.
+    }
+  }
+
+  static Map<String, dynamic>? _asMapMap(Object? value) =>
+      value is Map ? Map<String, dynamic>.from(value) : null;
+
+  /// Manual completion from the integrations card's paste field.
+  Future<Map<String, dynamic>> completeAniListWithCode(String code) async {
+    final result = await api.submitAniListCode(code);
+    if (result['status']?.toString() == 'success') {
+      await saveLinkedService('anilist', <String, dynamic>{
+        'linked': true,
+        'linkedAt': DateTime.now().millisecondsSinceEpoch,
+        if (result['username'] != null) 'username': result['username'],
+      });
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> completeMalWithCode(String code) async {
+    final result = await api.submitMalCode(code);
+    if (result['status']?.toString() == 'success') {
+      await saveLinkedService('mal', <String, dynamic>{
+        'linked': true,
+        'linkedAt': DateTime.now().millisecondsSinceEpoch,
+        if (result['username'] != null) 'username': result['username'],
+      });
+    }
+    return result;
+  }
+
+  /// Saves the tracker-sheet form (status / progress / score) to EVERY
+  /// linked tracker the item can reach. Returns per-service outcomes for
+  /// the sheet's confirmation toasts.
+  Future<Map<String, bool>> saveAnimeEntry({
+    required MediaItem item,
+    AnimeTrackStatus? status,
+    int? progress,
+    double? score10,
+  }) async {
+    final outcomes = <String, bool>{};
+    final anilistId = item.anilistId;
+    if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
+      var ok = true;
+      if (status != null) {
+        ok = await api.pushAniListEntryStatus(
+          mediaId: anilistId,
+          status: status,
+          progress: progress,
+        );
+      } else if (progress != null) {
+        ok = await api.pushAniListProgress(
+          mediaId: anilistId,
+          progress: progress,
+        );
+      }
+      if (ok && score10 != null) {
+        ok = await api.pushAniListScore(
+          mediaId: anilistId,
+          score10: score10,
+        );
+      }
+      outcomes['anilist'] = ok;
+    }
+    final malId = item.idMal;
+    if (malId != null && linkedServices['mal']?['linked'] == true) {
+      var ok = true;
+      if (status != null) {
+        ok = await api.pushMalEntryStatus(
+          malId: malId,
+          status: status,
+          progress: progress,
+        );
+      } else if (progress != null) {
+        ok = await api.pushMalProgress(malId: malId, episodes: progress);
+      }
+      if (ok && score10 != null) {
+        ok = await api.pushMalScore(malId: malId, score10: score10);
+      }
+      outcomes['mal'] = ok;
+    }
+    return outcomes;
   }
 }
