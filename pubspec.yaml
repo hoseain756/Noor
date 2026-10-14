@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.18+21
+version: 1.2.19+22
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -58,6 +58,7 @@ dependencies:
 
   # Direct Postgres (Supabase pooler) for accountless device sync.
   postgres: ^3.5.6
+  share_plus: ^13.3.1
 
 dependency_overrides:
   # Sandbox/user builds have no NDK: pin the last pre-jnigen path_provider_android

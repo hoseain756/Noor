@@ -482,7 +482,15 @@ class _HomePageState extends State<HomePage> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => MediaDetailPage(item: resolved),
+          // Carry the AniList/MAL identity onto the playable item so
+          // library toggles and playback mirror to the linked trackers
+          // (mirrors anime_page.dart).
+          builder: (_) => MediaDetailPage(
+            item: resolved.withAnimeIds(
+              anilistId: item.anilistId,
+              idMal: item.idMal,
+            ),
+          ),
         ),
       );
     } finally {

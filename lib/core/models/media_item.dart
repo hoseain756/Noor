@@ -9,9 +9,12 @@ class MediaItem {
     this.description,
     this.releaseInfo,
     this.rating,
+    this.runtime,
     this.certification,
     this.originCountry,
     this.genres = const [],
+    this.cast = const [],
+    this.director = const [],
     this.videos = const [],
     this.anilistId,
     this.idMal,
@@ -26,9 +29,20 @@ class MediaItem {
   final String? description;
   final String? releaseInfo;
   final String? rating;
+
+  /// Addon runtime string exactly as delivered ("58 min", "1h 52m") — kept
+  /// latin and shown inside an LTR wrapper (the web detail meta row does the
+  /// same so RTL can never reorder it to "min 58").
+  final String? runtime;
   final String? certification;
   final String? originCountry;
   final List<String> genres;
+
+  /// Top-billed cast (Cinemeta keeps ~15; capped at 10 for the detail page).
+  final List<String> cast;
+
+  /// Director names (capped at 5 — the web detail page shows 2).
+  final List<String> director;
   final List<Map<String, dynamic>> videos;
 
   /// AniList media id (anime items) — the tracking identity for the AniList
@@ -52,6 +66,9 @@ class MediaItem {
       description: _string(json['description']),
       releaseInfo: _string(json['releaseInfo']),
       rating: _string(json['imdbRating']),
+      runtime: _string(json['runtime']),
+      cast: _stringList(json['cast'], 10),
+      director: _stringList(json['director'], 5),
       certification: _firstString([
         json['certification'],
         json['contentRating'],
@@ -88,9 +105,12 @@ class MediaItem {
         if (description != null) 'description': description,
         if (releaseInfo != null) 'releaseInfo': releaseInfo,
         if (rating != null) 'imdbRating': rating,
+        if (runtime != null) 'runtime': runtime,
         if (certification != null) 'certification': certification,
         if (originCountry != null) 'originCountry': originCountry,
         'genres': genres,
+        if (cast.isNotEmpty) 'cast': cast,
+        if (director.isNotEmpty) 'director': director,
         'videos': videos,
         if (anilistId != null) 'anilistId': anilistId,
         if (idMal != null) 'idMal': idMal,
@@ -108,9 +128,12 @@ class MediaItem {
         description: description,
         releaseInfo: releaseInfo,
         rating: rating,
+        runtime: runtime,
         certification: certification,
         originCountry: originCountry,
         genres: genres,
+        cast: cast,
+        director: director,
         videos: videos,
         anilistId: anilistId ?? this.anilistId,
         idMal: idMal ?? this.idMal,
@@ -128,9 +151,12 @@ class MediaItem {
         description: description,
         releaseInfo: releaseInfo,
         rating: rating,
+        runtime: runtime,
         certification: certification,
         originCountry: originCountry,
         genres: genres,
+        cast: cast,
+        director: director,
         videos: videos,
         anilistId: anilistId,
         idMal: idMal,
@@ -138,6 +164,26 @@ class MediaItem {
 
   static String? _string(dynamic value) =>
       value is String && value.isNotEmpty ? value : null;
+
+  /// Defensive people-list parser: Cinemeta delivers `cast`/`director` as
+  /// `List<String>`, but some addons send a comma-separated string or a list
+  /// of `{name}` maps. Trimmed, de-emptied, capped at [cap] entries.
+  static List<String> _stringList(dynamic value, int cap) {
+    final List<String> names;
+    if (value is List) {
+      names = value
+          .map((entry) => entry is Map
+              ? (entry['name'] ?? entry).toString().trim()
+              : entry.toString().trim())
+          .toList();
+    } else if (value is String) {
+      names = value.split(',').map((entry) => entry.trim()).toList();
+    } else {
+      return const [];
+    }
+    final cleaned = names.where((name) => name.isNotEmpty).toList();
+    return cleaned.length > cap ? cleaned.sublist(0, cap) : cleaned;
+  }
 
   static String? _firstString(List<dynamic> values) {
     for (final value in values) {

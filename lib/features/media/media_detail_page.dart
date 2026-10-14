@@ -1,19 +1,38 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/models/featured_artwork.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/media_rail.dart';
+import '../../shared/widgets/noor_toast.dart';
+import '../anime/anime_tracker_sheet.dart';
 import '../library/custom_list_picker.dart';
-import 'episode_views.dart';
 import '../player/video_player_page.dart';
+import '../shell/noor_dock_tabs.dart' show glassDockContentClearance;
+import 'detail_hero.dart';
+import 'episode_data.dart';
+import 'episode_views.dart';
 
+/// Cinematic detail page — the Flutter replica of the Harbor web DetailView:
+/// fixed glass back pill over a full-bleed hero (phone card variant < 700px /
+/// wide band ≥ 700px), start-aligned content column (single-line meta row,
+/// provider ratings, synopsis, CTA + expandable glass menu + lists circle,
+/// cast & crew), the rebuilt episodes system, the similar rail and the
+/// TMDB-enriched artwork — all fail-soft and RTL-mirrored.
+///
+/// The playback machinery (streams → rank → instant-play/source sheet →
+/// debrid/torrent resolve → player) is byte-for-byte the previous contract;
+/// only the presentation around it changed.
 class MediaDetailPage extends StatefulWidget {
   const MediaDetailPage({
     super.key,
@@ -22,6 +41,9 @@ class MediaDetailPage extends StatefulWidget {
     this.resumePositionMs,
   });
   final MediaItem item;
+
+  /// Continue-watching handoff: the video to resume (series episode id, or
+  /// the movie's own id) and the playback position in milliseconds.
   final String? resumeVideoId;
   final int? resumePositionMs;
 
@@ -31,7 +53,7 @@ class MediaDetailPage extends StatefulWidget {
 
 class _MediaDetailPageState extends State<MediaDetailPage> {
   late Future<MediaItem?> _detail;
-  Map<String, dynamic>? _selectedVideo;
+  FeaturedArtwork? _art;
   bool _loadingStreams = false;
 
   @override
@@ -39,149 +61,82 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     super.initState();
     final app = context.read<AppState>();
     _detail = app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+    _loadFeaturedArtwork(app);
+  }
+
+  /// TMDB textless backdrop + transparent logo (in-memory cached inside the
+  /// repository). Fails soft with a timeout: the page renders instantly from
+  /// the item's own fields and enriches when the art arrives.
+  Future<void> _loadFeaturedArtwork(AppState app) async {
+    final item = widget.item;
+    if (!RegExp(r'^tt\d+$').hasMatch(item.id)) return;
+    try {
+      final artwork = await app.catalogs
+          .featuredArtwork(
+            item,
+            language: app.webSettings['tmdbLanguage']?.toString() ?? 'en-US',
+            region: app.webSettings['region']?.toString() ?? 'US',
+            uiLanguage: app.english ? 'en' : 'ar',
+          )
+          .timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      setState(() => _art = artwork);
+    } catch (_) {
+      // Featured art is a bonus — the hero keeps the addon artwork.
+    }
+  }
+
+  void _reloadDetail() {
+    final app = context.read<AppState>();
+    setState(() {
+      _detail = app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final english = app.english;
-    final wide = MediaQuery.sizeOf(context).width >= 700;
-    final savedEpisodeView =
-        app.webSettings['episodesView']?.toString() ?? 'auto';
-    final episodeCards =
-        savedEpisodeView == 'grid' || (savedEpisodeView == 'auto' && wide);
-    final watchedEpisodeIds = app.history
-        .where((entry) =>
-            entry.item.id == widget.item.id &&
-            entry.videoId != null &&
-            entry.durationMs > 0 &&
-            entry.positionMs >= entry.durationMs - 120000)
-        .map((entry) => entry.videoId!)
-        .toSet();
-    void toggleEpisodeView() {
-      unawaited(app.setSetting('episodesView', episodeCards ? 'list' : 'grid'));
-    }
-
+    final media = MediaQuery.of(context);
+    final isWide = media.size.width >= 700;
     return Scaffold(
       body: FutureBuilder<MediaItem?>(
         future: _detail,
         builder: (context, snapshot) {
-          final item = snapshot.data ?? widget.item;
-          final videos = item.videos;
-          final resumeMatches = videos.where(
-            (video) => video['id'] == widget.resumeVideoId,
-          );
-          _selectedVideo ??= resumeMatches.isNotEmpty
-              ? resumeMatches.first
-              : _defaultVideo(videos);
-          return CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                pinned: true,
-                backgroundColor: HorseTheme.canvas,
-                title: Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                actions: [
-                  IconButton(
-                    tooltip: english ? 'Add to collection' : 'أضف إلى قائمة',
-                    onPressed: () => showCustomListPicker(context, item),
-                    icon: const Icon(Icons.playlist_add_rounded),
+          final done = snapshot.connectionState != ConnectionState.waiting;
+          final failed = done && (snapshot.hasError || !snapshot.hasData);
+          // The warm item renders instantly; the skeleton only exists for
+          // degenerate hand-offs with no title at all (the web always shows
+          // a skeleton because it never has a warm item).
+          final showSkeleton = !failed && widget.item.name.isEmpty;
+          return Stack(
+            children: [
+              if (showSkeleton)
+                const Positioned.fill(child: DetailLoadingSkeleton())
+              else if (failed)
+                Positioned.fill(
+                  child: _ErrorView(
+                    english: english,
+                    message: snapshot.error?.toString() ??
+                        (english
+                            ? 'Title not found. It may not be in Cinemeta or your addons.'
+                            : 'لم يتم العثور على العنوان. قد لا يكون موجوداً في Cinemeta أو في إضافاتك.'),
+                    onRetry: _reloadDetail,
                   ),
-                  IconButton(
-                    tooltip: english ? 'My list' : 'قائمتي',
-                    onPressed: () => app.toggleWatchlist(item),
-                    icon: Icon(
-                      app.contains(item)
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_border_rounded,
-                      color: app.contains(item) ? HorseTheme.gold : null,
-                    ),
+                )
+              else
+                Positioned.fill(
+                  child: _buildContent(
+                    context,
+                    app,
+                    item: snapshot.data ?? widget.item,
+                    english: english,
+                    isWide: isWide,
+                    viewportSize: media.size,
                   ),
-                ],
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    wide ? 34 : 20,
-                    8,
-                    wide ? 34 : 20,
-                    30,
-                  ),
-                  child: wide
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _Poster(item: item, width: 250),
-                            const SizedBox(width: 30),
-                            Expanded(
-                              child: _Description(
-                                item: item,
-                                videos: videos,
-                                selectedVideo: _selectedVideo,
-                                episodeCards: episodeCards,
-                                watchedEpisodeIds: watchedEpisodeIds,
-                                blurUnwatchedEpisodes:
-                                    app.webSettings['blurEpisodeThumbnails'] ==
-                                        true,
-                                onToggleEpisodeView: toggleEpisodeView,
-                                onSelectVideo: (v) =>
-                                    setState(() => _selectedVideo = v),
-                                loading: _loadingStreams,
-                                onPlay: () => _play(item),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _Poster(item: item, width: 128),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: _CompactInfo(
-                                    item: item,
-                                    english: english,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 20),
-                            _Description(
-                              item: item,
-                              videos: videos,
-                              selectedVideo: _selectedVideo,
-                              episodeCards: episodeCards,
-                              watchedEpisodeIds: watchedEpisodeIds,
-                              blurUnwatchedEpisodes:
-                                  app.webSettings['blurEpisodeThumbnails'] ==
-                                      true,
-                              onToggleEpisodeView: toggleEpisodeView,
-                              onSelectVideo: (v) =>
-                                  setState(() => _selectedVideo = v),
-                              loading: _loadingStreams,
-                              onPlay: () => _play(item),
-                              compact: true,
-                            ),
-                          ],
-                        ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Column(
-                  children: [
-                    _ProviderRatings(item: item),
-                    _SimilarTitles(item: item),
-                    const SizedBox(height: 108),
-                  ],
-                ),
-              ),
+              // Fixed chrome — visible in every state, over everything.
+              DetailBackPill(english: english),
             ],
           );
         },
@@ -189,18 +144,303 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     );
   }
 
-  Map<String, dynamic>? _defaultVideo(List<Map<String, dynamic>> videos) {
-    if (videos.isEmpty) return null;
-    for (final video in videos) {
-      final season = (video['season'] as num?)?.toInt() ?? 0;
-      if (season > 0) return video;
-    }
-    return videos.first;
+  // -------------------------------------------------------------------------
+  // Page content
+  // -------------------------------------------------------------------------
+
+  Widget _buildContent(
+    BuildContext context,
+    AppState app, {
+    required MediaItem item,
+    required bool english,
+    required bool isWide,
+    required Size viewportSize,
+  }) {
+    final videos = sortEpisodes(item.videos);
+    final resume = _resolveResume(app, item, videos);
+    final defaultVideo = _defaultVideo(videos);
+    final backdrop = _art?.landscape ?? item.background;
+    final logo = _art?.logo ?? item.logo;
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: _buildHeroAndColumn(
+            context,
+            app,
+            item: item,
+            english: english,
+            isWide: isWide,
+            viewportSize: viewportSize,
+            backdrop: backdrop,
+            logo: logo,
+            resume: resume,
+            defaultVideo: defaultVideo,
+          ),
+        ),
+        if (item.type == 'series' && item.videos.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
+              child: EpisodesSection(
+                item: item,
+                english: english,
+                entries: app.history
+                    .where((entry) => entry.item.id == item.id)
+                    .toList(growable: false),
+                blurUnwatched: app.webSettings['blurEpisodeThumbnails'] == true,
+                ratingsEnabled: app.webSettings['ratingsEnabled'] != false,
+                savedView: app.webSettings['episodesView']?.toString() ?? 'auto',
+                onViewChange: (view) =>
+                    unawaited(app.setSetting('episodesView', view)),
+                onPlay: (video) => _play(item, video: video),
+              ),
+            ),
+          ),
+        SliverToBoxAdapter(child: _SimilarTitles(item: item)),
+        if (item.type == 'movie' &&
+            item.genres.isEmpty &&
+            (item.description == null || item.description!.isEmpty))
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
+              child: Align(
+                alignment:
+                    isWide ? AlignmentDirectional.centerStart : AlignmentDirectional.topCenter,
+                child: Text(
+                  english
+                      ? 'Press Watch Now to fetch playback sources…'
+                      : 'اضغط مشاهدة لجلب مصادر التشغيل…',
+                  style: const TextStyle(fontSize: 12, color: HorseTheme.muted),
+                ),
+              ),
+            ),
+          ),
+        // Dock clearance (was a flat SizedBox(height: 108) — bug fix).
+        SliverToBoxAdapter(
+          child: SizedBox(height: glassDockContentClearance(context)),
+        ),
+      ],
+    );
   }
 
-  Future<void> _play(MediaItem item) async {
+  /// Hero + overlapping content column. The column is laid out in normal
+  /// flow with a top offset of `heroHeight − overlap`; the hero paints
+  /// behind it as a positioned child of the same Stack.
+  Widget _buildHeroAndColumn(
+    BuildContext context,
+    AppState app, {
+    required MediaItem item,
+    required bool english,
+    required bool isWide,
+    required Size viewportSize,
+    required String? backdrop,
+    required String? logo,
+    required _ResumePlan resume,
+    required Map<String, dynamic>? defaultVideo,
+  }) {
+    final vh = viewportSize.height;
+    final vw = viewportSize.width;
+    final heroHeight = isWide
+        ? (vh * 0.52).clamp(360.0, 680.0)
+        : (vw - 32) * 11 / 16 + 72;
+    final overlap = isWide ? (vh * 0.14).clamp(96.0, 168.0) : 0.0;
+
+    Widget column = Column(
+      crossAxisAlignment:
+          isWide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+      children: [
+        if (isWide) ...[
+          DetailColumnTitle(
+            logoUrl: logo,
+            title: item.name,
+            isWide: true,
+            viewportWidth: vw,
+          ),
+          const SizedBox(height: 8),
+        ] else
+          const SizedBox(height: 16),
+        DetailMetaRow(item: item, isWide: isWide),
+        const SizedBox(height: 8),
+        _ProviderRatings(item: item, startAligned: isWide),
+        if (item.description != null && item.description!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          DetailSynopsis(
+            description: item.description!,
+            isWide: isWide,
+            viewportWidth: vw,
+          ),
+        ],
+        const SizedBox(height: 24),
+        DetailActionRow(
+          english: english,
+          isWide: isWide,
+          inList: app.contains(item),
+          showTrackAnime: item.hasAnimeIds &&
+              (app.linkedServices['anilist']?['linked'] == true ||
+                  app.linkedServices['mal']?['linked'] == true),
+          primaryLabel: resume.isResume
+              ? (item.type == 'series'
+                  ? (english
+                      ? 'Resume S${resume.season}:E${resume.episode}'
+                      : 'متابعة S${resume.season}:E${resume.episode}')
+                  : (english ? 'Resume' : 'متابعة'))
+              : (english ? 'Watch Now' : 'مشاهدة'),
+          primaryIsResume: resume.isResume,
+          loading: _loadingStreams,
+          onPrimaryPressed: () => _play(
+            item,
+            video: resume.video ?? defaultVideo,
+            resumePositionMs: resume.positionMs,
+          ),
+          onToggleWatchlist: () => unawaited(app.toggleWatchlist(item)),
+          onOpenStreams: () => _play(
+            item,
+            video: resume.video ?? defaultVideo,
+            forceSourceSheet: true,
+          ),
+          onTrackAnime: () => unawaited(showAnimeTrackerSheet(context, item)),
+          onShare: () => unawaited(_share(item, english)),
+          onAddToList: () => unawaited(showCustomListPicker(context, item)),
+        ),
+        if (item.director.isNotEmpty || item.cast.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          DetailCastCrew(item: item, english: english, centered: !isWide),
+        ],
+      ],
+    );
+    column = SizedBox(width: double.infinity, child: column);
+    if (isWide) {
+      column = vw >= 840
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: column,
+            )
+          : FractionallySizedBox(
+              widthFactor: 0.7,
+              alignment: AlignmentDirectional.centerStart,
+              child: column,
+            );
+    }
+    column = Padding(
+      padding: EdgeInsets.symmetric(horizontal: isWide ? 34 : 20),
+      child: column,
+    );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          height: heroHeight,
+          child: DetailHero(
+            item: item,
+            backdropUrl: backdrop,
+            logoUrl: logo,
+            isWide: isWide,
+            viewportHeight: vh,
+            viewportWidth: vw,
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.only(top: heroHeight - overlap),
+          child: column,
+        ),
+      ],
+    );
+  }
+
+  /// Resolves the primary CTA's resume target from the constructor hand-off
+  /// (continue-watching) and this title's newest history entry.
+  _ResumePlan _resolveResume(
+    AppState app,
+    MediaItem item,
+    List<Map<String, dynamic>> videos,
+  ) {
+    final entry = app.history.where((h) => h.item.id == item.id).firstOrNull;
+    final progress =
+        entry != null && entry.durationMs > 0 ? entry.positionMs / entry.durationMs : 0.0;
+
+    if (item.type == 'series') {
+      Map<String, dynamic>? video;
+      int? position;
+      if (widget.resumeVideoId != null) {
+        video = videos
+            .where((v) => v['id']?.toString() == widget.resumeVideoId)
+            .firstOrNull;
+        if (video != null) position = widget.resumePositionMs;
+      }
+      if (video == null &&
+          entry != null &&
+          entry.season != null &&
+          entry.episode != null &&
+          progress < 0.92) {
+        video = videos
+            .where((v) =>
+                (v['season'] as num?)?.toInt() == entry.season &&
+                (v['episode'] as num?)?.toInt() == entry.episode)
+            .firstOrNull;
+        if (video != null && entry.positionMs > 0) position = entry.positionMs;
+      }
+      if (video == null) return const _ResumePlan();
+      final season = (video['season'] as num?)?.toInt() ?? entry?.season ?? 1;
+      final episode = (video['episode'] as num?)?.toInt() ?? entry?.episode ?? 1;
+      return _ResumePlan(video: video, positionMs: position, isResume: true, season: season, episode: episode);
+    }
+
+    // Movie: the CW hand-off or an in-progress history entry resumes.
+    final cwResume =
+        widget.resumeVideoId != null && (widget.resumePositionMs ?? 0) > 0;
+    final historyResume =
+        entry != null && entry.positionMs > 0 && progress < 0.92;
+    if (cwResume || historyResume) {
+      final position = widget.resumePositionMs ?? entry?.positionMs ?? 0;
+      return _ResumePlan(positionMs: position > 0 ? position : null, isResume: true);
+    }
+    return const _ResumePlan();
+  }
+
+  Map<String, dynamic>? _defaultVideo(List<Map<String, dynamic>> videos) {
+    for (final video in videos) {
+      if (((video['season'] as num?)?.toInt() ?? 0) > 0) return video;
+    }
+    return videos.firstOrNull;
+  }
+
+  Future<void> _share(MediaItem item, bool english) async {
+    try {
+      await SharePlus.instance.share(ShareParams(text: item.name));
+    } catch (_) {
+      // No share sheet on this platform — fall back to the clipboard.
+      try {
+        await Clipboard.setData(ClipboardData(text: item.name));
+        if (mounted) {
+          NoorToast.show(
+            context,
+            english ? 'Link copied to clipboard' : 'تم نسخ الرابط',
+          );
+        }
+      } catch (_) {
+        // Clipboard unavailable too — nothing else to do.
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Playback machinery (unchanged contract — moved, not rewritten)
+  // -------------------------------------------------------------------------
+
+  Future<void> _play(
+    MediaItem item, {
+    Map<String, dynamic>? video,
+    bool forceSourceSheet = false,
+    int? resumePositionMs,
+  }) async {
     final app = context.read<AppState>();
-    final episode = _selectedVideo;
+    final english = app.english;
+    final episode = video;
     final id = (episode?['id'] as String?) ?? item.id;
     setState(() => _loadingStreams = true);
     List<Map<String, dynamic>> streams;
@@ -212,7 +452,6 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     if (!mounted) return;
     setState(() => _loadingStreams = false);
     if (streams.isEmpty) {
-      final english = app.english;
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -252,9 +491,10 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       streams = streams.where((stream) => stream['url'] is String).toList();
     }
     streams = _rankStreams(streams, app.webSettings);
-    final english = app.english;
     Map<String, dynamic>? selected;
-    if (app.webSettings['instantPlay'] == true) {
+    // "Available streams" in the menu always forces the source sheet —
+    // instant-play never auto-picks from that entry (web contract).
+    if (!forceSourceSheet && app.webSettings['instantPlay'] == true) {
       selected = streams.where(_isPlayableStream).firstOrNull;
     }
     selected ??= await showModalBottomSheet<Map<String, dynamic>>(
@@ -386,9 +626,10 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             season: (episode?['season'] as num?)?.toInt(),
             episode: (episode?['episode'] as num?)?.toInt(),
             nextEpisode: _nextEpisode(item.videos, episode),
-            initialPositionMs: widget.resumeVideoId == episode?['id']
-                ? widget.resumePositionMs
-                : null,
+            initialPositionMs: resumePositionMs ??
+                (widget.resumeVideoId == episode?['id']
+                    ? widget.resumePositionMs
+                    : null),
           ),
           fullscreenDialog: true,
         ),
@@ -564,240 +805,100 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     return ranked;
   }
 
+  /// Next episode in canonical (season, episode) order — the sorted list
+  /// fixes the old bug where addon order leaked into Up-Next.
   Map<String, dynamic>? _nextEpisode(
     List<Map<String, dynamic>> videos,
     Map<String, dynamic>? current,
   ) {
-    final index = videos.indexWhere((video) => video['id'] == current?['id']);
-    return index >= 0 && index + 1 < videos.length ? videos[index + 1] : null;
+    final sorted = sortEpisodes(videos);
+    final index = sorted.indexWhere((video) => video['id'] == current?['id']);
+    return index >= 0 && index + 1 < sorted.length ? sorted[index + 1] : null;
   }
 }
 
-class _Description extends StatelessWidget {
-  const _Description({
-    required this.item,
-    required this.videos,
-    required this.selectedVideo,
-    required this.episodeCards,
-    required this.watchedEpisodeIds,
-    required this.blurUnwatchedEpisodes,
-    required this.onToggleEpisodeView,
-    required this.onSelectVideo,
-    required this.loading,
-    required this.onPlay,
-    this.compact = false,
+/// The primary CTA's resolved target: which video to play, the resume
+/// position, and whether the label reads "Resume" (with S:E for series).
+class _ResumePlan {
+  const _ResumePlan({
+    this.video,
+    this.positionMs,
+    this.isResume = false,
+    this.season = 1,
+    this.episode = 1,
   });
-  final MediaItem item;
-  final List<Map<String, dynamic>> videos;
-  final Map<String, dynamic>? selectedVideo;
-  final bool episodeCards;
-  final Set<String> watchedEpisodeIds;
-  final bool blurUnwatchedEpisodes;
-  final VoidCallback onToggleEpisodeView;
-  final ValueChanged<Map<String, dynamic>> onSelectVideo;
-  final bool loading;
-  final VoidCallback onPlay;
-  final bool compact;
+
+  final Map<String, dynamic>? video;
+  final int? positionMs;
+  final bool isResume;
+  final int season;
+  final int episode;
+}
+
+/// Centered danger card with retry — shown when the detail fetch fails or
+/// comes back empty (web `titleNotFound` state). The back pill stays.
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({
+    required this.english,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final bool english;
+  final String message;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (!compact) ...[
-          _CompactInfo(item: item, english: english),
-          const SizedBox(height: 18),
-        ],
-        if (item.description != null && item.description!.isNotEmpty)
-          Text(
-            item.description!,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(color: Colors.white70, height: 1.6),
-          ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 7,
-          runSpacing: 7,
-          children: [
-            for (final genre in item.genres.take(6))
-              Chip(
-                label: Text(genre),
-                visualDensity: VisualDensity.compact,
-                side: const BorderSide(color: HorseTheme.line),
-                backgroundColor: HorseTheme.surface,
-              ),
-          ],
-        ),
-        if (videos.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  english ? 'Episodes' : 'الحلقات',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              IconButton(
-                tooltip: episodeCards
-                    ? (english ? 'Switch to list view' : 'عرض الحلقات كقائمة')
-                    : (english ? 'Switch to card view' : 'عرض الحلقات كبطاقات'),
-                onPressed: onToggleEpisodeView,
-                icon: Icon(
-                  episodeCards
-                      ? Icons.view_list_rounded
-                      : Icons.grid_view_rounded,
-                  color: HorseTheme.gold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 9),
-          if (episodeCards)
-            EpisodeGrid(
-              episodes: videos.take(60).toList(),
-              selectedId: selectedVideo?['id']?.toString(),
-              english: english,
-              watchedEpisodeIds: watchedEpisodeIds,
-              blurUnwatched: blurUnwatchedEpisodes,
-              onSelected: onSelectVideo,
-            )
-          else
-            EpisodeList(
-              episodes: videos.take(60).toList(),
-              selectedId: selectedVideo?['id']?.toString(),
-              english: english,
-              watchedEpisodeIds: watchedEpisodeIds,
-              blurUnwatched: blurUnwatchedEpisodes,
-              onSelected: onSelectVideo,
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        MediaQuery.paddingOf(context).top + 88,
+        20,
+        24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxWidth: 576),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: scheme.error.withValues(alpha: .40)),
+              color: scheme.error.withValues(alpha: .10),
             ),
-        ],
-        const SizedBox(height: 22),
-        SizedBox(
-          width: compact ? double.infinity : 260,
-          child: FilledButton.icon(
-            onPressed: loading ? null : onPlay,
-            icon: loading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow_rounded),
-            label: Text(
-              loading
-                  ? (english ? 'Finding streams…' : 'جارٍ البحث عن مصادر…')
-                  : (english ? 'Find a stream' : 'ابحث عن مصدر تشغيل'),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: scheme.error, height: 1.5),
             ),
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          english
-              ? 'Playback uses your selected add-on source.'
-              : 'يعتمد التشغيل على مصدر الإضافة التي تختارها.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(english ? 'Retry' : 'إعادة المحاولة'),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _CompactInfo extends StatelessWidget {
-  const _CompactInfo({required this.item, required this.english});
-  final MediaItem item;
-  final bool english;
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            item.name,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 7),
-          Wrap(
-            spacing: 8,
-            runSpacing: 5,
-            children: [
-              if (item.releaseInfo != null) _MetaBadge(item.releaseInfo!),
-              _MetaBadge(
-                item.type == 'series'
-                    ? (english ? 'Series' : 'مسلسل')
-                    : (english ? 'Movie' : 'فيلم'),
-              ),
-              if (item.rating != null)
-                _MetaBadge('★ ${item.rating}', color: HorseTheme.gold),
-            ],
-          ),
-        ],
-      );
-}
-
-class _MetaBadge extends StatelessWidget {
-  const _MetaBadge(this.text, {this.color = HorseTheme.muted});
-  final String text;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(
-          color: HorseTheme.surface,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: HorseTheme.line),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-              fontSize: 11, color: color, fontWeight: FontWeight.w600),
-        ),
-      );
-}
-
-class _Poster extends StatelessWidget {
-  const _Poster({required this.item, required this.width});
-  final MediaItem item;
-  final double width;
-  @override
-  Widget build(BuildContext context) => ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: width,
-          child: AspectRatio(
-            aspectRatio: .68,
-            child: item.poster == null
-                ? const ColoredBox(
-                    color: HorseTheme.raised,
-                    child: Icon(
-                      Icons.movie_outlined,
-                      size: 38,
-                      color: HorseTheme.gold,
-                    ),
-                  )
-                : Image.network(
-                    item.poster!,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                      color: HorseTheme.raised,
-                      child: Icon(
-                        Icons.movie_outlined,
-                        size: 38,
-                        color: HorseTheme.gold,
-                      ),
-                    ),
-                  ),
-          ),
-        ),
-      );
-}
+// -------------------------------------------------------------------------
+// Provider ratings (engine unchanged — chips restyled to the web recipe)
+// -------------------------------------------------------------------------
 
 class _ProviderRatings extends StatefulWidget {
-  const _ProviderRatings({required this.item});
+  const _ProviderRatings({required this.item, required this.startAligned});
+
   final MediaItem item;
+
+  /// Wide layouts align the chips to the column start; phones center them.
+  final bool startAligned;
 
   @override
   State<_ProviderRatings> createState() => _ProviderRatingsState();
@@ -854,17 +955,18 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(20, 2, 20, 16),
+            padding: const EdgeInsetsDirectional.fromSTEB(0, 2, 0, 0),
             child: Wrap(
               spacing: 7,
+              runSpacing: 7,
               children: [
                 for (var i = 0; i < 3; i++)
                   Container(
                     width: 76,
-                    height: 28,
+                    height: 26,
                     decoration: BoxDecoration(
-                        color: HorseTheme.raised,
-                        borderRadius: BorderRadius.circular(24)),
+                        color: Colors.black.withValues(alpha: .30),
+                        borderRadius: BorderRadius.circular(999)),
                   ),
               ],
             ),
@@ -882,10 +984,12 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
           return (aOrder < 0 ? 999 : aOrder)
               .compareTo(bOrder < 0 ? 999 : bOrder);
         });
-        return Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 20),
-          child: Align(
-            alignment: AlignmentDirectional.centerStart,
+        return Align(
+          alignment: widget.startAligned
+              ? AlignmentDirectional.centerStart
+              : AlignmentDirectional.topCenter,
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(0, 0, 0, 0),
             child: Wrap(
               spacing: 7,
               runSpacing: 7,
@@ -938,43 +1042,53 @@ class _RatingChip extends StatelessWidget {
       button: url?.hasScheme == true,
       label: '$label $display $scale',
       child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(999),
         onTap: url?.hasScheme == true ? () => unawaited(launchUrl(url!)) : null,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: .32),
-            border: Border.all(color: HorseTheme.line),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                    color: color, borderRadius: BorderRadius.circular(12)),
-                child: Text(label,
-                    style: TextStyle(
-                        color: provider == 'imdb' ? Colors.black : Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: .30),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: .08)),
+                borderRadius: BorderRadius.circular(999),
               ),
-              const SizedBox(width: 6),
-              Text(display,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w700)),
-              if (scale != '/10')
-                Text(scale == '%' ? '' : scale,
-                    style:
-                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
-              if (votes > 0) ...[
-                const SizedBox(width: 4),
-                Text(_compactVotes(votes),
-                    style:
-                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
-              ],
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: color, borderRadius: BorderRadius.circular(999)),
+                    child: Text(label,
+                        style: TextStyle(
+                            color: provider == 'imdb'
+                                ? Colors.black
+                                : Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900)),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(display,
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w600)),
+                  if (scale != '/10')
+                    Text(scale == '%' ? '' : scale,
+                        style: const TextStyle(
+                            fontSize: 10, color: HorseTheme.muted)),
+                  if (votes > 0) ...[
+                    const SizedBox(width: 4),
+                    Text(_compactVotes(votes),
+                        style: const TextStyle(
+                            fontSize: 10, color: HorseTheme.muted)),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1044,7 +1158,7 @@ class _SimilarTitlesState extends State<_SimilarTitles> {
             .toList();
         if (items.isEmpty) return const SizedBox.shrink();
         return Padding(
-          padding: const EdgeInsetsDirectional.only(bottom: 22),
+          padding: const EdgeInsetsDirectional.only(top: 32, bottom: 22),
           child: MediaRail(
             title: app.english
                 ? (_genre == null
