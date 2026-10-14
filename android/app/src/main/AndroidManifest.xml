@@ -42,6 +42,20 @@
                     android:scheme="noor"
                     android:host="callback"/>
             </intent-filter>
+            <!-- AniList / MyAnimeList OAuth return (RFC 8252 §7.1): the
+                 app-identifier private-use scheme app.noor.mobile://callback
+                 carries the authorization code back into the app after the
+                 user approves in the browser. Register exactly
+                 `app.noor.mobile://callback` as the Redirect URI in the
+                 AniList developer settings and the MyAnimeList API panel. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="app.noor.mobile"
+                    android:host="callback"/>
+            </intent-filter>
             <!-- Trakt OAuth HTTPS return (documented primary path): the
                  browser bounces to the registered redirect URI after
                  approval. autoVerify makes it an Android App Link once

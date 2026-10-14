@@ -43,6 +43,12 @@ private const val LINK_CHANNEL = "noor/links"
 private const val TRAKT_LINK_HOST =
     "preview-chat-607a5306-ab5d-4ec1-9d61-23b1874d8c08.space-z.ai"
 
+/**
+ * App-identifier private-use scheme (RFC 8252) used as the OAuth return for
+ * AniList / MyAnimeList: `app.noor.mobile://callback?code=…&state=…`.
+ */
+private const val OAUTH_SCHEME = "app.noor.mobile"
+
 /** Hard limit for magnet metadata fetches (matches the Dart-side contract). */
 private const val RESOLVE_TIMEOUT_SECONDS = 30
 
@@ -183,10 +189,11 @@ class MainActivity :
         captureLink(intent)
     }
 
-    /** Emits a magnet / noor:// / Trakt HTTPS ACTION_VIEW link to Dart, or parks it. */
+    /** Emits a magnet / noor:// / app.noor.mobile:// / Trakt HTTPS ACTION_VIEW link to Dart, or parks it. */
     private fun captureLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
         // magnet: → torrent flow; noor://callback → legacy Trakt OAuth return;
+        // app.noor.mobile://callback?code=… → AniList / MyAnimeList OAuth return;
         // https://<registered redirect host>/?code=… → primary Trakt return
         // (Android App Links / browser redirect).
         val isTraktHttpsReturn = link.startsWith("https://", ignoreCase = true) &&
@@ -195,6 +202,7 @@ class MainActivity :
             }.getOrDefault(false)
         if (!link.startsWith("magnet:", ignoreCase = true) &&
             !link.startsWith("noor:", ignoreCase = true) &&
+            !link.startsWith("$OAUTH_SCHEME:", ignoreCase = true) &&
             !isTraktHttpsReturn
         ) {
             return

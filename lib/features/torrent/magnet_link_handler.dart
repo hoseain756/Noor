@@ -5,17 +5,22 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api/noor_api.dart';
+import '../../core/oauth/oauth_redirect.dart';
 import '../../core/state/app_state.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'magnet_opener.dart';
 
 /// Listens for VIEW intents forwarded by the Android side over the
-/// `noor/links` EventChannel and routes them by scheme:
+/// `noor/links` EventChannel (and the identical iOS forwarding added in
+/// SceneDelegate) and routes them by scheme:
 ///
 ///  - `magnet:…`  → opens the torrent flow automatically.
 ///  - `noor://callback?code=…&state=…` → legacy Trakt PKCE return.
 ///  - `https://<registered redirect host>/?code=…&state=…` → primary Trakt
 ///    PKCE return (Android App Links) — see NoorApi.completeTraktLink.
+///  - `app.noor.mobile://callback?code=…` → generic OAuth return for
+///    AniList / MyAnimeList (OAuthRedirect) — stored in AppState so the
+///    matching linking flow can consume it.
 ///
 /// All Trakt returns finish through the same handshake anywhere in the app;
 /// relay-based completions (the app polling the web companion) are surfaced
@@ -63,9 +68,42 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
       unawaited(_completeTrakt(data));
       return;
     }
+    if (lower.startsWith('${OAuthRedirect.scheme}:')) {
+      unawaited(_receiveOAuthCallback(data));
+      return;
+    }
     if (lower.startsWith('https://') && NoorApi.isTraktHttpsReturn(data)) {
       unawaited(_completeTrakt(data));
     }
+  }
+
+  /// Receives an AniList / MyAnimeList OAuth return
+  /// (`app.noor.mobile://callback?code=…&state=…`): stores the pending code
+  /// in [AppState.oauthCallback] for the matching linking flow to consume
+  /// and confirms arrival with a toast.
+  Future<void> _receiveOAuthCallback(String link) async {
+    final callback = OAuthRedirect.parse(link);
+    if (callback == null) return; // foreign app.noor.mobile:// link
+    final app = context.read<AppState>();
+    app.announceOAuthCallback(callback);
+    if (!mounted) return;
+    final english = app.english;
+    if (callback.isDenied) {
+      NoorToast.show(
+        context,
+        english
+            ? 'Authorization was denied — restart linking to retry.'
+            : 'تم رفض الموافقة — ابدأ الربط من جديد للمحاولة.',
+        error: true,
+      );
+      return;
+    }
+    NoorToast.show(
+      context,
+      english
+          ? 'Authorization code received — finish linking in Integrations.'
+          : 'وصل رمز التفويض — أكمل الربط من صفحة التكاملات.',
+    );
   }
 
   /// Finishes the Trakt PKCE round-trip and announces it. Runs regardless of

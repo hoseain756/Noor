@@ -10,6 +10,7 @@ import '../data/catalog_repository.dart';
 import '../models/addon.dart';
 import '../models/custom_list.dart';
 import '../models/media_item.dart';
+import '../oauth/oauth_redirect.dart';
 import '../sync/noor_sync.dart';
 
 class AppState extends ChangeNotifier {
@@ -1119,6 +1120,32 @@ class AppState extends ChangeNotifier {
         'reason': result['reason']?.toString(),
       };
     }
+    notifyListeners();
+  }
+
+  // --------------------------------------------------------------------------
+  // Generic OAuth return leg (AniList / MyAnimeList style)
+  // --------------------------------------------------------------------------
+
+  Map<String, dynamic>? _oauthCallback;
+
+  /// Last OAuth return received over the app-identifier scheme
+  /// (`app.noor.mobile://callback?…`):
+  /// `{at, code, state, error?}` — an AniList / MyAnimeList linking flow
+  /// reads the pending `code` from here to finish its token exchange.
+  /// In-memory only: authorization codes live minutes.
+  Map<String, dynamic>? get oauthCallback => _oauthCallback;
+
+  /// Stores a freshly parsed OAuth return and announces it (the link
+  /// listener toasts once per arrival; future linking flows consume the
+  /// code from [oauthCallback]).
+  void announceOAuthCallback(OAuthCallback callback) {
+    _oauthCallback = <String, dynamic>{
+      'at': DateTime.now().millisecondsSinceEpoch,
+      'code': callback.code,
+      'state': callback.state,
+      if (callback.isDenied) 'error': callback.error,
+    };
     notifyListeners();
   }
 }
