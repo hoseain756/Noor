@@ -271,6 +271,17 @@ class _HomePageState extends State<HomePage> {
                 onOpen: _open,
               ),
             ),
+          )
+        else if (app.linkedServices.isNotEmpty && app.linkedContentLoading)
+          // First fetch in flight (rows arrive after the link completes) —
+          // geometry-matched placeholder instead of a silent pop-in.
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsetsDirectional.only(
+                bottom: MediaRail.sectionSpacing(context),
+              ),
+              child: _LinkedContinueSkeleton(english: english),
+            ),
           ),
         SliverToBoxAdapter(
           child: _AsyncMediaSection(
@@ -1385,6 +1396,72 @@ class _LinkedContinueRail extends StatelessWidget {
         'anilist' => 'AniList',
         _ => 'MyAnimeList',
       },
+    );
+  }
+}
+
+/// First-load placeholder for the linked continue-watching row: mirrors the
+/// real rail's geometry (web card spec, same widths) so the layout doesn't
+/// jump when the rows arrive. Rendered only while a linked refresh is in
+/// flight and no rows exist yet.
+class _LinkedContinueSkeleton extends StatelessWidget {
+  const _LinkedContinueSkeleton({required this.english});
+
+  final bool english;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 700;
+    final cardWidth = math.min(MediaQuery.sizeOf(context).width * .66, 300.0);
+    final cardHeight = cardWidth * 9 / 16;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 20),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 19,
+                decoration: BoxDecoration(
+                  color: HorseTheme.gold,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  english
+                      ? 'Continue Watching · Linked accounts'
+                      : 'متابعة المشاهدة · الحسابات المرتبطة',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: cardHeight,
+          child: ListView.separated(
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 20),
+            scrollDirection: Axis.horizontal,
+            itemCount: 3,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) => Container(
+              width: cardWidth,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .06),
+                borderRadius: BorderRadius.circular(16),
+                border:
+                    Border.all(color: Colors.white.withValues(alpha: .08)),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

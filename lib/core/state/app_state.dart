@@ -356,6 +356,14 @@ class AppState extends ChangeNotifier {
   bool _linkedContentLoading = false;
   int _linkedContentGeneration = 0;
 
+  /// Set when a `force` request arrives while a refresh is already in
+  /// flight — honored with a trailing re-run instead of being swallowed.
+  bool _linkedContentForceQueued = false;
+
+  /// Whether the linked-service rows are being (re)fetched right now —
+  /// the home page shows a skeleton rail for first-time loads.
+  bool get linkedContentLoading => _linkedContentLoading;
+
   /// Signature of the linked-services map — the home page includes it in its
   /// reload signature so linking/unlinking a service refreshes the rails.
   String get linkedServicesSignature =>
@@ -366,7 +374,13 @@ class AppState extends ChangeNotifier {
   /// Fail-soft by design: a provider hiccup keeps the previous rows and
   /// never disturbs local history or the sync machinery.
   Future<void> refreshLinkedContent({bool force = false}) async {
-    if (_linkedContentLoading) return;
+    if (_linkedContentLoading) {
+      // A link change while a refresh is in flight must not be swallowed
+      // (saveLinkedService → force racing a home-page TTL tick) — queue a
+      // trailing force so the new rows land right after the current pass.
+      if (force) _linkedContentForceQueued = true;
+      return;
+    }
     if (!force &&
         _linkedContentAt != null &&
         DateTime.now().difference(_linkedContentAt!) < _linkedContentTtl) {
@@ -383,6 +397,9 @@ class AppState extends ChangeNotifier {
       return;
     }
     _linkedContentLoading = true;
+    // Surface the loading wave so first-time rows render a skeleton
+    // instead of silently popping in.
+    notifyListeners();
     final generation = ++_linkedContentGeneration;
     try {
       final jobs = <String, Future<List<dynamic>>>{
@@ -452,6 +469,10 @@ class AppState extends ChangeNotifier {
     } finally {
       if (generation == _linkedContentGeneration) {
         _linkedContentLoading = false;
+        if (_linkedContentForceQueued) {
+          _linkedContentForceQueued = false;
+          unawaited(refreshLinkedContent(force: true));
+        }
       }
     }
   }
@@ -472,6 +493,20 @@ class AppState extends ChangeNotifier {
       if (items.isNotEmpty) rails['simkl'] = items;
     }
     if (anilistEntries != null && anilistEntries.isNotEmpty) {
+      // 'anilist-watching' feeds the Anime tab's personal rail: every
+      // CURRENT entry, including ones with no continueable progress yet
+      // (the home CW row keeps the isContinueable filter).
+      final watching = <MediaItem>[];
+      final seenWatching = <String>{};
+      for (final row in anilistEntries) {
+        final entry =
+            IntegrationCwEntry.fromAniListRow(row, statusFilter: 'CURRENT');
+        if (entry == null) continue;
+        if (!seenWatching.add(entry.item.id)) continue;
+        watching.add(entry.item);
+        if (watching.length >= 24) break;
+      }
+      if (watching.isNotEmpty) rails['anilist-watching'] = watching;
       final items = <MediaItem>[];
       final seen = <String>{};
       for (final row in anilistEntries) {
@@ -600,6 +635,16 @@ class AppState extends ChangeNotifier {
       imported = freshWatchlist.length;
       await _persist();
       _schedulePush('history');
+      // Stamp the success so the integrations card's "last synced" line
+      // (previously dead UI — nothing ever wrote this field) comes alive.
+      final current = Map<String, dynamic>.from(linkedServices[service] ?? {});
+      current['lastSyncedAt'] = DateTime.now().millisecondsSinceEpoch;
+      linkedServices = {...linkedServices, service: current};
+      await _preferences?.setString(
+        'horse.mobile.linked-services',
+        _encode(linkedServices),
+      );
+      notifyListeners();
     } catch (_) {
       return (0, 0);
     }
@@ -1516,6 +1561,9 @@ class AppState extends ChangeNotifier {
         'linkedAt': DateTime.now().millisecondsSinceEpoch,
         if (result['username'] != null) 'username': result['username'],
       });
+      // Profile enrichment (avatar + anime stats) right after the link —
+      // previously the card stayed username-only until it was reopened.
+      unawaited(refreshTrackerProfile(service));
     }
     _oauthLinkEvent = <String, dynamic>{
       'at': DateTime.now().millisecondsSinceEpoch,

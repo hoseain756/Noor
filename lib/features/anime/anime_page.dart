@@ -5,6 +5,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/media_rail.dart';
+import '../settings/integrations_page.dart';
 import '../shell/noor_dock_tabs.dart';
 import '../media/media_detail_page.dart';
 import 'anime_search_sheet.dart';
@@ -34,6 +35,14 @@ class _AnimePageState extends State<AnimePage> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final english = app.english;
+    // Personal lists from the LINKED AniList account — CURRENT becomes the
+    // "watching" rail, PLANNING the "plan to watch" rail (the same rows the
+    // home page uses, scoped here so the tab is self-sufficient).
+    final watching =
+        app.linkedCatalogItems['anilist-watching'] ?? const <MediaItem>[];
+    final planning =
+        app.linkedCatalogItems['anilist'] ?? const <MediaItem>[];
+    final anilistLinked = app.linkedServices['anilist']?['linked'] == true;
     return FutureBuilder<List<MediaItem>>(
       future: _items,
       builder: (context, snapshot) {
@@ -79,10 +88,49 @@ class _AnimePageState extends State<AnimePage> {
                 ),
               ),
             ),
+            // Personal AniList rails — rendered above the public catalogs
+            // so the linked account's own lists lead the tab. `anilist:`
+            // identities resolve through _open like every other card.
+            if (anilistLinked && watching.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    bottom: MediaRail.sectionSpacing(context),
+                  ),
+                  child: MediaRail(
+                    title: english
+                        ? 'Watching · AniList'
+                        : 'أتابعها الآن · AniList',
+                    items: watching,
+                    onTap: _open,
+                  ),
+                ),
+              ),
+            if (anilistLinked && planning.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    bottom: MediaRail.sectionSpacing(context),
+                  ),
+                  child: MediaRail(
+                    title: english
+                        ? 'Plan to watch · AniList'
+                        : 'أخطط لمشاهدتها · AniList',
+                    items: planning,
+                    onTap: _open,
+                  ),
+                ),
+              ),
+            if (!anilistLinked)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsetsDirectional.fromSTEB(20, 0, 20, 18),
+                  child: _AniListLinkPrompt(),
+                ),
+              ),
             if (snapshot.connectionState == ConnectionState.waiting &&
                 items.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
+              SliverToBoxAdapter(
                 child: _CatalogState(
                   icon: Icons.auto_awesome_outlined,
                   message: english ? 'Loading anime…' : 'جارٍ تحميل الأنمي…',
@@ -90,8 +138,7 @@ class _AnimePageState extends State<AnimePage> {
                 ),
               )
             else if (snapshot.hasError)
-              SliverFillRemaining(
-                hasScrollBody: false,
+              SliverToBoxAdapter(
                 child: _CatalogState(
                   icon: Icons.cloud_off_outlined,
                   message: english
@@ -102,8 +149,7 @@ class _AnimePageState extends State<AnimePage> {
                 ),
               )
             else if (items.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
+              SliverToBoxAdapter(
                 child: _CatalogState(
                   icon: Icons.search_off_rounded,
                   message: english
@@ -220,7 +266,10 @@ class _CatalogState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(28, 24, 28, 144),
+          // Compact (not viewport-filling): the tab now always carries a
+          // personal section above (rails or the link prompt), so a full-
+          // screen state would push the public rails out of reach.
+          padding: const EdgeInsetsDirectional.fromSTEB(28, 8, 28, 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -245,4 +294,79 @@ class _CatalogState extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Invitation shown on the Anime tab while no AniList account is linked:
+/// one tap jumps straight into the integrations page — after linking, the
+/// card is replaced by the personal watching/planning rails above.
+class _AniListLinkPrompt extends StatelessWidget {
+  const _AniListLinkPrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    final english = context.watch<AppState>().english;
+    return Container(
+      padding: const EdgeInsetsDirectional.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: .08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: HorseTheme.gold.withValues(alpha: .14),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 22,
+                  color: HorseTheme.gold,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  english ? 'Link your AniList account' : 'اربط حساب AniList',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            english
+                ? 'Your Watching and Plan-to-watch lists appear here right after linking.'
+                : 'قوائم «أتابعها الآن» و«أخطط لمشاهدتها» من حسابك تظهر هنا بعد الربط مباشرةً.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: HorseTheme.muted),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: FilledButton.tonal(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const IntegrationsPage(),
+                ),
+              ),
+              child: Text(english ? 'Link account' : 'ربط الحساب'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
