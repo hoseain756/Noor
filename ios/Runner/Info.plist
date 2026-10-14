@@ -79,6 +79,15 @@
         <string>LaunchScreen</string>
         <key>UIMainStoryboardFile</key>
         <string>Main</string>
+        <!-- Edge-to-edge launch (Tasks 115/117): over the white launch
+             storyboard the system clock/battery/signal stay DARK and readable
+             until Flutter boots and applies noorSystemBarOverlayStyle (light
+             icons on the dark canvas). UIStatusBarHidden stays NO so the
+             status bar itself is always preserved. -->
+        <key>UIStatusBarStyle</key>
+        <string>UIStatusBarStyleDarkContent</string>
+        <key>UIStatusBarHidden</key>
+        <false/>
         <key>UISupportedInterfaceOrientations</key>
         <array>
                 <string>UIInterfaceOrientationPortrait</string>

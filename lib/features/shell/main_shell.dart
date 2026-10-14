@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../core/theme/system_bars.dart';
 import '../../shared/widgets/glass_navigation.dart';
 import '../anime/anime_page.dart';
 import '../calendar/calendar_page.dart';
@@ -134,14 +135,10 @@ class _MainShellState extends State<MainShell> {
       // Re-assert the transparent system bars whenever the shell is visible
       // — the player's immersive mode rewrites the global overlay style, and
       // this restores the edge-to-edge glass look on return (main.dart only
-      // runs once per launch).
-      value: SystemUiOverlayStyle.light.copyWith(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarIconBrightness: Brightness.light,
-        systemNavigationBarDividerColor: Colors.transparent,
-        systemNavigationBarContrastEnforced: false,
-      ),
+      // runs once per launch). Icon brightness derives from the LIVE theme
+      // brightness, so the clock/battery/signal stay readable if a light
+      // theme ever ships (dark canvas today → light icons).
+      value: noorSystemBarOverlayStyle(Theme.of(context).brightness),
       child: Scaffold(
         body: SafeArea(
           bottom: false,
