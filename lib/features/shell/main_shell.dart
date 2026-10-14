@@ -111,11 +111,10 @@ class _MainShellState extends State<MainShell> {
     // is untouched.
     final tabletLayout = size.width >= 840;
     final dockTabs = noorDockTabsFor(
-      // `hideContent.anime` is a real Noor setting → drop the Anime tab,
-      // mirroring the web dock's hide-anime filter. `kidsMode` is a dormant
-      // web-sync flag with no mobile behavior, so the kids tab filter and
-      // kidsZoom are intentionally not wired (defaults below).
-      hideAnime: (app.webSettings['hideContent'] as Map?)?['anime'] == true,
+      // The Anime tab is PERMANENT (user mandate, Task 111): no filter drops
+      // it. `hideContent.anime` only filters anime content rows on pages.
+      // `kidsMode` is a dormant web-sync flag with no mobile behavior, so the
+      // kids tab filter and kidsZoom are intentionally not wired.
       rtl: !app.english,
     );
     final dockActiveId = noorDockTabIdForIndex(_selected);

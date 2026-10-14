@@ -660,6 +660,51 @@ class AppState extends ChangeNotifier {
     _mirrorAnimeProgress(item, positionMs, durationMs, episode);
   }
 
+  /// Harbor-web "Remove from Continue Watching" (home CW long-press menu):
+  /// the app derives continue-watching from [history], so removing the item's
+  /// history entry is the record deletion. The entry disappears from the CW
+  /// rail everywhere (local + synced devices).
+  Future<void> removeContinueWatchingEntry(String itemId) async {
+    final before = history.length;
+    history = history.where((h) => h.item.id != itemId).toList();
+    if (history.length == before && !_continueWatching.containsKey(itemId)) {
+      return;
+    }
+    _continueWatching.remove(itemId);
+    await _persistAndSync(const {
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    });
+  }
+
+  /// Harbor-web "Mark as watched" (home CW long-press menu): the entry's
+  /// position jumps to its full duration so it drops out of continue
+  /// watching (and counts as finished for hidden-watched filters), exactly
+  /// like the web's pushHistory(position = duration) + removeCw pair.
+  Future<void> markContinueWatchingWatched(String itemId) async {
+    final index = history.indexWhere((h) => h.item.id == itemId);
+    if (index < 0) return;
+    final entry = history[index];
+    final finished = WatchHistoryEntry(
+      item: entry.item,
+      watchedAt: DateTime.now().millisecondsSinceEpoch,
+      positionMs: entry.durationMs > 0 ? entry.durationMs : entry.positionMs,
+      durationMs: entry.durationMs,
+      videoId: entry.videoId,
+      season: entry.season,
+      episode: entry.episode,
+    );
+    history = [
+      finished,
+      ...history.where((h) => h.item.id != itemId),
+    ];
+    _continueWatching.remove(itemId);
+    await _persistAndSync(const {
+      NoorSyncService.bucketHistory,
+      NoorSyncService.bucketLibrary,
+    });
+  }
+
   /// Mirrors anime watch progress to the linked trackers: an episode number
   /// becomes AniList progress / MAL num_watched_episodes; a finished anime
   /// MOVIE becomes COMPLETED. Best-effort and independent per service.

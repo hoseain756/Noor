@@ -10,9 +10,9 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/data/content_classifier.dart';
 import '../../shared/widgets/media_rail.dart';
-import '../../shared/widgets/media_quick_look.dart';
 import '../../shared/widgets/noor_toast.dart';
 import '../shell/noor_dock_tabs.dart';
+import 'cw_upcoming.dart';
 import 'top10_rail.dart';
 import '../anime/anime_page.dart';
 import '../catalog/catalog_browser_page.dart';
@@ -618,17 +618,87 @@ class _RailMessage extends StatelessWidget {
 /// Continue watching, rebuilt to the Harbor web round-21 mobile spec:
 /// 16:9 rectangular cards (min(66vw, 300px) wide), the S/E tag + title +
 /// episode/remaining subtitle painted INSIDE the card over a bottom scrim,
-/// hairline white border, and the signature red track-less progress bar.
+/// hairline white border, the signature red track-less progress bar, the
+/// "upcoming episode" badge + amber fresh dot (bounded metadata enrichment,
+/// Task 111) and the Harbor long-press menu (details / mark watched / remove).
 /// Rows are ordered most-recently-watched first, exactly like the site.
-class _ContinueRail extends StatelessWidget {
+class _ContinueRail extends StatefulWidget {
   const _ContinueRail({required this.entries, required this.english});
   final List<WatchHistoryEntry> entries;
   final bool english;
 
   @override
+  State<_ContinueRail> createState() => _ContinueRailState();
+}
+
+class _ContinueRailState extends State<_ContinueRail> {
+  final Map<String, CwEnrichment?> _enrichment = {};
+  late final CwEnrichmentCache _cache = CwEnrichmentCache(_loadDetail);
+  String? _enrichSignature;
+
+  Future<MediaItem?> _loadDetail(MediaItem item) {
+    final app = context.read<AppState>();
+    return app.catalogs
+        .detail(item.type, item.id, app.addons)
+        .timeout(const Duration(seconds: 10), onTimeout: () => null);
+  }
+
+  /// Finished episode ids from history — the web `episodeWatchedSet()` that
+  /// drives the fresh-dot decision.
+  Set<String> _watchedVideoIds(AppState app) => app.history
+      .where(
+        (h) =>
+            h.durationMs > 0 &&
+            h.positionMs >= h.durationMs - 120000 &&
+            h.videoId != null,
+      )
+      .map((h) => h.videoId!)
+      .toSet();
+
+  /// Web parity: only the first six visible series cards trigger metadata
+  /// lookups (`enrich: i < 6`); results land via setState, fail soft.
+  void _ensureEnrichment() {
+    final app = context.read<AppState>();
+    final signature = widget.entries
+        .map((e) => '${e.item.id}:${e.watchedAt}')
+        .join('|');
+    if (signature == _enrichSignature) return;
+    _enrichSignature = signature;
+    final watched = _watchedVideoIds(app);
+    final now = DateTime.now();
+    var launched = 0;
+    for (final entry in widget.entries) {
+      if (launched >= CwEnrichmentCache.maxEnrichedCards) break;
+      if (entry.item.type != 'series') continue;
+      if (entry.season == null || entry.episode == null) continue;
+      if (_enrichment.containsKey(entry.item.id)) continue;
+      launched++;
+      final itemId = entry.item.id;
+      unawaited(
+        _cache.enrichmentFor(entry.item, entry, watched, now).then((value) {
+          if (!mounted) return;
+          setState(() => _enrichment[itemId] = value);
+        }),
+      );
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ensureEnrichment();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContinueRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _ensureEnrichment();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Most recently watched first — same ordering as the Harbor web row.
-    final sorted = [...entries]
+    final sorted = [...widget.entries]
       ..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
     final wide = MediaQuery.sizeOf(context).width >= 700;
     // Web tokens: --cw-card-w = min(66vw, 300px) with aspect-ratio 16 / 9.
@@ -652,7 +722,8 @@ class _ContinueRail extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  english ? 'Continue watching' : 'تابع المشاهدة',
+                  // Exact site strings (web homeT "continueWatching").
+                  widget.english ? 'Continue Watching' : 'متابعة المشاهدة',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
@@ -669,9 +740,10 @@ class _ContinueRail extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, index) => _ContinueCard(
               entry: sorted[index],
-              english: english,
+              english: widget.english,
               width: cardWidth,
               height: cardHeight,
+              enrichment: _enrichment[sorted[index].item.id],
             ),
           ),
         ),
@@ -686,6 +758,7 @@ class _ContinueCard extends StatelessWidget {
     required this.english,
     required this.width,
     required this.height,
+    this.enrichment,
   });
 
   final WatchHistoryEntry entry;
@@ -693,8 +766,16 @@ class _ContinueCard extends StatelessWidget {
   final double width;
   final double height;
 
+  /// Bounded metadata enrichment for series cards (Task 111): the saved
+  /// episode's name, the "upcoming episode" air badge and the amber fresh
+  /// dot. Null while the lookup is in flight or unavailable — the card then
+  /// renders exactly like the pre-enrichment site fallback.
+  final CwEnrichment? enrichment;
+
   // Web token: --cw-progress: #e53935.
   static const _progressRed = Color(0xFFE53935);
+  // Web token: --cw-fresh-dot: #f5b301.
+  static const _freshDot = Color(0xFFF5B301);
 
   String? _remainingLabel() {
     final remaining = entry.durationMs - entry.positionMs;
@@ -720,15 +801,21 @@ class _ContinueCard extends StatelessWidget {
         item.type == 'series' && entry.season != null && entry.episode != null;
     // Web seasonEpisodeTag: "S1 E4", bidi-isolated LTR.
     final epTag = isSeries ? 'S${entry.season} E${entry.episode}' : null;
-    // Web fallback: episode number for series, remaining time for movies.
+    // Web fallback: episode name (when metadata resolves it), else the
+    // "الحلقة {n}" episode-number fallback; remaining time for movies.
+    final epName = enrichment?.episodeName;
     final subtitle = isSeries
-        ? (english ? 'Episode ${entry.episode}' : 'الحلقة ${entry.episode}')
+        ? (epName != null && epName.isNotEmpty
+            ? epName
+            : (english ? 'Episode ${entry.episode}' : 'الحلقة ${entry.episode}'))
         : _remainingLabel();
+    final badge = cwUpcomingLabel(enrichment?.nextAirMs, english, DateTime.now());
     final semantics = [
       english ? 'Resume' : 'استئناف',
       item.name,
       if (epTag != null) epTag,
       if (subtitle != null) subtitle,
+      if (badge != null) badge,
       if (progress > 0) '${(progress * 100).round()}%',
     ].join(', ');
 
@@ -742,6 +829,85 @@ class _ContinueCard extends StatelessWidget {
           ),
         );
 
+    /// Harbor-web long-press menu (web CwContextMenu → the mobile M3 sheet):
+    /// view details / mark as watched / remove from Continue Watching.
+    Future<void> openMenu() {
+      final app = context.read<AppState>();
+      return showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        backgroundColor: HorseTheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (sheetContext) {
+          void close() => Navigator.of(sheetContext).pop();
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding:
+                      const EdgeInsetsDirectional.fromSTEB(20, 14, 20, 2),
+                  child: Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(sheetContext).textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                ListTile(
+                  leading: const Icon(Icons.info_outline_rounded),
+                  title: Text(english ? 'View details' : 'عرض التفاصيل'),
+                  onTap: () {
+                    close();
+                    openDetail();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.visibility_outlined),
+                  title: Text(english ? 'Mark as watched' : 'تحديد كمشاهد'),
+                  onTap: () {
+                    close();
+                    unawaited(
+                      app.markContinueWatchingWatched(item.id).then((_) {
+                        if (context.mounted) {
+                          NoorToast.show(
+                            context,
+                            english
+                                ? 'Marked as watched'
+                                : 'تم التحديد كمشاهد',
+                          );
+                        }
+                      }),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: _progressRed,
+                  ),
+                  title: Text(
+                    english
+                        ? 'Remove from Continue Watching'
+                        : 'إزالة من متابعة المشاهدة',
+                    style: const TextStyle(color: _progressRed),
+                  ),
+                  onTap: () {
+                    close();
+                    unawaited(app.removeContinueWatchingEntry(item.id));
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
     return SizedBox(
       width: width,
       height: height,
@@ -751,8 +917,7 @@ class _ContinueCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: openDetail,
-          onLongPress: () =>
-              showMediaQuickLook(context, item: item, onOpen: openDetail),
+          onLongPress: () => unawaited(openMenu()),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -851,6 +1016,52 @@ class _ContinueCard extends StatelessWidget {
                               backgroundColor:
                                   Colors.white.withValues(alpha: .24),
                               color: _progressRed,
+                            ),
+                          ),
+                        ),
+                      // Web .cw-badge: top-end black-70 pill, radius 8,
+                      // 12px/500 white text, 8px inset.
+                      if (badge != null)
+                        PositionedDirectional(
+                          top: 8,
+                          end: 8,
+                          child: Container(
+                            height: 22,
+                            constraints:
+                                BoxConstraints(maxWidth: width * .7),
+                            padding: const EdgeInsetsDirectional.symmetric(
+                              horizontal: 7,
+                            ),
+                            alignment: AlignmentDirectional.center,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: .7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              badge,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Web .cw-fresh: 5px amber dot above the progress bar.
+                      if (enrichment?.fresh ?? false)
+                        const PositionedDirectional(
+                          start: 8,
+                          bottom: 12,
+                          child: SizedBox(
+                            width: 5,
+                            height: 5,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: _freshDot,
+                                shape: BoxShape.circle,
+                              ),
                             ),
                           ),
                         ),

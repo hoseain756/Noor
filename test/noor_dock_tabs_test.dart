@@ -6,27 +6,23 @@ void main() {
   group('Noor dock tab set', () {
     test('five tabs in Settings|Library|Kids|Anime|Home visual order, both directions',
         () {
-      final ltr = noorDockTabsFor(hideAnime: false, rtl: false);
+      final ltr = noorDockTabsFor(rtl: false);
       expect(
         ltr.map((t) => t.id).toList(),
         ['settings', 'library', 'kids', 'anime', 'home'],
       );
-      final rtl = noorDockTabsFor(hideAnime: false, rtl: true);
+      final rtl = noorDockTabsFor(rtl: true);
       expect(
         rtl.map((t) => t.id).toList(),
         ['home', 'anime', 'kids', 'library', 'settings'],
       );
     });
 
-    test('hide-anime drops only the Anime tab, order preserved', () {
-      expect(
-        noorDockTabsFor(hideAnime: true, rtl: false).map((t) => t.id).toList(),
-        ['settings', 'library', 'kids', 'home'],
-      );
-      expect(
-        noorDockTabsFor(hideAnime: true, rtl: true).map((t) => t.id).toList(),
-        ['home', 'kids', 'library', 'settings'],
-      );
+    test('the Anime tab is permanent — no filter drops it (user mandate)', () {
+      // Task 111: hideContent.anime must never remove the dock button again.
+      // There is no hide parameter anymore; assert the tab in every build.
+      expect(noorDockTabsFor(rtl: false).map((t) => t.id), contains('anime'));
+      expect(noorDockTabsFor(rtl: true).map((t) => t.id), contains('anime'));
     });
 
     test('index ↔ tab id mapping round-trips for every shell view', () {
