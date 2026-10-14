@@ -1,32 +1,46 @@
-# Horse for Flutter
+# Noor for mobile
 
-Native Flutter client for Horse on Android phones, iPhones, and tablets.
+Native Flutter client for Android phones, iPhones, and tablets. **Fully
+account-free**: every provider is called directly from the device and there is
+no server dependency of any kind.
 
-## Included features
+## Highlights
 
-- Home, Anime, Kids, and My Library as the only primary destinations.
-- Bottom navigation on phones and a tablet navigation rail on wider screens.
-- Cinemeta and installed Stremio add-on catalogs, metadata, and stream discovery.
-- Add-on install, enable/disable, removal, Stremio collection sync, and Horse account sync.
-- Trakt and Simkl account linking, watchlist/history import, and playback scrobbling.
-- Real-Debrid, AllDebrid, and TorBox key verification and cached torrent resolution.
-- A native video player for HTTP/HLS and supported torrent sources, with seek, playback controls, orientation handling, and progress sync.
-- Watchlist, watch history, playback progress, and viewing statistics.
-- Arabic RTL as the default language, English as an option, and the fixed Horse dark-bronze theme.
+- **No login, ever.** No account, no pairing, no server. Install and watch.
+- **Built-in torrent engine** (libtorrent via jlibtorrent, prebuilt natives —
+  no NDK needed): paste a **magnet link or info hash** in *Library → Torrent*
+  and stream directly, or tap a `magnet:` link in any browser app to open Noor.
+  Sequential downloading with first/last-piece priority, so playback starts
+  fast and seeking stays responsive while the download continues.
+- **Open torrents from outside the app** — Android VIEW intents for `magnet:`
+  links are handled end-to-end (cold and warm start).
+- **Torrent downloads manager** — Settings → *Data & privacy* lists what is on
+  disk (sizes, file counts) with per-torrent delete and clear-all. Streamed
+  torrents are kept on disk for **instant resume** from the watch history.
+- **Debrid integration (optional)** — Real-Debrid / AllDebrid / TorBox keys
+  resolve cached torrents to instant direct URLs; the on-device engine is the
+  automatic fallback.
+- Direct metadata providers: **TMDB** (built-in key, BYO override), **AniList**,
+  and a six-provider ratings aggregate (IMDb, Rotten Tomatoes, Metacritic,
+  TMDB, Trakt, MDBList) with local caching.
+- **Trakt & Simkl** device-flow linking, watchlist/history import, and playback
+  scrobbling — all straight from the device.
+- **Noor Sync** — accountless cross-device sync through a dedicated Postgres
+  (Supabase) instance using a least-privilege role. Settings, watchlist, lists,
+  watch history, and add-ons sync per device identity; nothing to sign up for.
+- Live TV (M3U), calendar, anime, kids, catalogs, custom lists, statistics.
+- media_kit playback stack (MKV/TS/RMVB/FLV and more), subtitle and audio track
+  switching, external add-on subtitles, torrent HUD (speed / peers / progress).
+- Arabic RTL default with English option, fixed dark-bronze theme, phone and
+  tablet layouts.
 
 ## Project layout
 
-`lib/core` contains the API client, models, catalog repository, app state, and design tokens. `lib/features` groups each app feature by its screen and related UI. `lib/shared` contains reusable widgets.
-
-## Server
-
-The default server is `https://horse-silk.vercel.app`. Change it from Settings if you host Horse elsewhere. For a build-time override:
-
-```sh
-flutter build apk --dart-define=HORSE_API_BASE_URL=https://your-horse.example
-```
-
-Content catalogs work without signing in. A Horse account syncs add-ons, watchlist, history, and playback progress across devices. A Stremio account syncs the add-on collection. Trakt and Simkl linking require a Horse account and server-side provider configuration. Debrid API keys are kept in device secure storage and sent only to the Horse server when validating or resolving a torrent.
+`lib/core` — API clients (NoorApi), models, catalog repository, torrent engine
+bridge (`torrent/`), device sync (`sync/`), app state, and design tokens.
+`lib/features` — one folder per screen group (home, media, player, torrent,
+library, live_tv, anime, kids, calendar, catalog, settings, shell).
+`lib/shared` — reusable widgets.
 
 ## Run and build
 
@@ -44,6 +58,9 @@ Build the iOS app on macOS with Xcode installed:
 flutter build ios --release
 ```
 
-Direct HTTP and HLS streams are played by the platform media player. Magnet/torrent sources use the connected Debrid service when configured; otherwise the Horse server must expose a reachable torrent engine.
+Torrent playback: on Android the embedded libtorrent engine handles magnets
+natively; on platforms without the engine, connect a Debrid service in
+Settings → Integrations.
 
-The checked-in Android release build uses the debug signing key until a private release keystore is configured. Do not upload that build to an app store. Build iOS on macOS with Xcode; iOS compilation is not available from Windows.
+The checked-in Android release build uses the debug signing key until a private
+release keystore is configured. Do not upload that build to an app store.
