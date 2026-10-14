@@ -35,6 +35,10 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
   Future<List<MediaItem>>? _results;
   final Set<String> _resolving = {};
 
+  /// Which provider's catalog the sheet is querying — both searches are
+  /// public (no link required) and parse through the same shared row shape.
+  String _provider = 'anilist';
+
   @override
   void initState() {
     super.initState();
@@ -63,9 +67,22 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
     });
   }
 
+  /// Switching provider re-runs the current query immediately so the grid
+  /// reflects the other catalog without requiring a re-type.
+  void _switchProvider(String provider) {
+    if (provider == _provider) return;
+    setState(() {
+      _provider = provider;
+      final term = _query.text.trim();
+      _results = term.isEmpty ? null : _search(term);
+    });
+  }
+
   Future<List<MediaItem>> _search(String term) async {
     final app = context.read<AppState>();
-    final rows = await app.api.aniListSearch(term, perPage: 30);
+    final rows = _provider == 'mal'
+        ? await app.api.malSearch(term, limit: 30)
+        : await app.api.aniListSearch(term, perPage: 30);
     if (!mounted) return const [];
     return CatalogRepository.parseAnimeResponse({
       'data': {
@@ -135,9 +152,13 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.search_rounded),
-                  hintText: english
-                      ? 'Search anime on AniList…'
-                      : 'ابحث عن الأنمي في AniList…',
+                  hintText: _provider == 'mal'
+                      ? (english
+                          ? 'Search anime on MyAnimeList…'
+                          : 'ابحث عن الأنمي في MyAnimeList…')
+                      : (english
+                          ? 'Search anime on AniList…'
+                          : 'ابحث عن الأنمي في AniList…'),
                   suffixIcon: _query.text.isEmpty
                       ? null
                       : IconButton(
@@ -149,6 +170,20 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                         ),
                   border: const OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'anilist', label: Text('AniList')),
+                  ButtonSegment(
+                    value: 'mal',
+                    label: Text('MyAnimeList'),
+                  ),
+                ],
+                selected: {_provider},
+                showSelectedIcon: false,
+                onSelectionChanged: (selection) =>
+                    _switchProvider(selection.first),
               ),
               const SizedBox(height: 12),
               Expanded(

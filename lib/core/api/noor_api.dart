@@ -1900,6 +1900,10 @@ mutation ($id: Int) {
     return <String, dynamic>{
       'id': id,
       'idMal': id,
+      // Marks this row as MAL-sourced for parseAnimeResponse: the item id
+      // becomes `mal:{id}` and anilistId stays null (the numeric id here is
+      // MyAnimeList's — it must never be mistaken for an AniList media id).
+      'source': 'mal',
       'title': {'english': title},
       'coverImage': {
         if (picture?['large'] != null) 'large': picture!['large'],

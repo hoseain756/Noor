@@ -443,6 +443,12 @@ query ($weekStart: Int!, $weekEnd: Int!) {
                   ? 'series'
                   : null;
           if (type == null) return null;
+          // MAL-sourced rows (from malSearch) carry their provider id in
+          // both `id` and `idMal` — never misread the MAL id as an AniList
+          // media id, or tracker pushes would hit the wrong media.
+          final malSourced = value['source']?.toString() == 'mal';
+          final idNum = (value['id'] as num?)?.toInt();
+          final idMalNum = (value['idMal'] as num?)?.toInt();
           final title = value['title'] is Map
               ? Map<String, dynamic>.from(value['title'] as Map)
               : const <String, dynamic>{};
@@ -458,12 +464,12 @@ query ($weekStart: Int!, $weekEnd: Int!) {
           }
           final description = value['description']?.toString();
           return MediaItem(
-            id: 'anilist:${value['id'] ?? ''}',
+            id: malSourced ? 'mal:${idNum ?? ''}' : 'anilist:${idNum ?? ''}',
             type: type,
             name: (title['english'] ??
                     title['romaji'] ??
                     title['native'] ??
-                    'AniList #${value['id'] ?? ''}')
+                    '${malSourced ? 'MyAnimeList' : 'AniList'} #${idNum ?? ''}')
                 .toString(),
             poster: (cover['extraLarge'] ?? cover['large'])?.toString(),
             description: description == null ? null : _plainText(description),
@@ -472,12 +478,12 @@ query ($weekStart: Int!, $weekEnd: Int!) {
                 ? null
                 : (score / 10).toStringAsFixed(1),
             genres: genres,
-            anilistId: (value['id'] as num?)?.toInt(),
-            idMal: (value['idMal'] as num?)?.toInt(),
+            anilistId: malSourced ? null : idNum,
+            idMal: malSourced ? (idMalNum ?? idNum) : idMalNum,
           );
         })
         .whereType<MediaItem>()
-        .where((item) => item.id != 'anilist:')
+        .where((item) => item.id != 'anilist:' && item.id != 'mal:')
         .toList();
   }
 
