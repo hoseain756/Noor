@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
+import '../../core/theme/horse_theme.dart';
 import '../../core/models/media_item.dart';
 import 'poster_card.dart';
 
@@ -11,11 +12,16 @@ class MediaRail extends StatelessWidget {
     required this.title,
     required this.items,
     required this.onTap,
+    this.onOpenSection,
   });
 
   final String title;
   final List<MediaItem> items;
   final ValueChanged<MediaItem> onTap;
+
+  /// When provided, the header gains the "greater-than" mark that opens the
+  /// full catalog section this rail belongs to.
+  final VoidCallback? onOpenSection;
 
   static double sectionSpacing(BuildContext context) =>
       (MediaQuery.sizeOf(context).width * .045).clamp(14.0, 24.0).toDouble();
@@ -63,6 +69,7 @@ class MediaRail extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
+              if (onOpenSection != null) _SectionChevron(onTap: onOpenSection!),
             ],
           ),
         ),
@@ -87,6 +94,54 @@ class MediaRail extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The header "greater-than" mark that opens the rail's full section.
+/// A chevron glyph (not a shafted arrow), pointing forward in both locales.
+class _SectionChevron extends StatelessWidget {
+  const _SectionChevron({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final english = context.read<AppState>().english;
+    final forward = Directionality.of(context) == TextDirection.ltr;
+    final label = english ? 'Open section' : 'فتح القسم';
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: HorseTheme.raised.withValues(alpha: .6),
+                  border: Border.all(color: HorseTheme.line),
+                ),
+                child: Icon(
+                  forward
+                      ? Icons.chevron_right_rounded
+                      : Icons.chevron_left_rounded,
+                  size: 22,
+                  color: HorseTheme.gold,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
