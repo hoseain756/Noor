@@ -1265,15 +1265,16 @@ class _HeroSkeletonDot extends StatelessWidget {
 double _featuredHeroHeight(BuildContext context) {
   final size = MediaQuery.sizeOf(context);
   final viewPadding = MediaQuery.viewPaddingOf(context);
-  final large = size.width >= 600;
+  // Task: the featured hero takes ~65% of the screen height on every
+  // device. It must never exceed the visible area under the system bars
+  // and the glass navigation, and keeps a small floor for very short
+  // viewports (e.g. landscape phones).
   final availableHeight = (size.height -
           viewPadding.top -
           viewPadding.bottom -
           GlassNavigationBar.contentBottomInset)
-      .clamp(0.0, 640.0);
-  final preferredHeight = large
-      ? (size.height * .48).clamp(380.0, 540.0)
-      : (size.height * .45).clamp(320.0, 440.0);
+      .clamp(0.0, double.infinity);
+  final preferredHeight = (size.height * .65).clamp(280.0, double.infinity);
   return math.min(availableHeight, preferredHeight).toDouble();
 }
 
