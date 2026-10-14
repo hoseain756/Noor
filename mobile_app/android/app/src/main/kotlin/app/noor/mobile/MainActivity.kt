@@ -1,5 +1,7 @@
 package app.noor.mobile
 
+import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -33,6 +35,7 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "NoorTorrent"
 private const val METHOD_CHANNEL = "noor/torrent"
 private const val EVENT_CHANNEL = "noor/torrent/events"
+private const val LINK_CHANNEL = "noor/links"
 
 /** Hard limit for magnet metadata fetches (matches the Dart-side contract). */
 private const val RESOLVE_TIMEOUT_SECONDS = 30
@@ -105,6 +108,13 @@ class MainActivity :
     private var eventExecutor: ScheduledExecutorService? = null
     private var pumpFuture: ScheduledFuture<*>? = null
 
+    /** Dart-side listener for incoming magnet links (noor/links). */
+    private var linkSink: EventChannel.EventSink? = null
+
+    /** Magnet link captured before Flutter attached (cold-start VIEW intent). */
+    @Volatile
+    private var pendingLink: String? = null
+
     /** Clears the active torrent if libtorrent reports it removed. */
     private val sessionListener = object : AlertListener {
         override fun types(): IntArray = intArrayOf(
@@ -137,10 +147,55 @@ class MainActivity :
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         MethodChannel(messenger, METHOD_CHANNEL).setMethodCallHandler(this)
         EventChannel(messenger, EVENT_CHANNEL).setStreamHandler(this)
+        EventChannel(messenger, LINK_CHANNEL).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    synchronized(eventLock) {
+                        linkSink = events
+                        // Deliver a magnet link captured before Flutter was ready.
+                        pendingLink?.let { link ->
+                            pendingLink = null
+                            events.success(link)
+                        }
+                    }
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    synchronized(eventLock) { linkSink = null }
+                }
+            },
+        )
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        captureLink(intent)
+    }
+
+    /** Emits a magnet ACTION_VIEW link to Dart, or parks it until it listens. */
+    private fun captureLink(intent: Intent?) {
+        val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
+        if (!link.startsWith("magnet:", ignoreCase = true)) return
+        synchronized(eventLock) {
+            val sink = linkSink
+            if (sink != null) {
+                runOnUiThread { sink.success(link) }
+            } else {
+                pendingLink = link
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        synchronized(eventLock) { eventSink = null }
+        synchronized(eventLock) {
+            eventSink = null
+            linkSink = null
+        }
         stopEventPump()
         super.cleanUpFlutterEngine(flutterEngine)
     }

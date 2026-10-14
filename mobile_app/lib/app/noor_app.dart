@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../core/state/app_state.dart';
 import '../core/theme/horse_theme.dart';
 import '../features/shell/main_shell.dart';
+import '../features/torrent/magnet_link_handler.dart';
 
 class NoorApp extends StatelessWidget {
   const NoorApp({super.key, required this.state});
@@ -23,7 +24,7 @@ class NoorApp extends StatelessWidget {
           locale: Locale(app.english ? 'en' : 'ar'),
           supportedLocales: const [Locale('ar'), Locale('en')],
           localizationsDelegates: GlobalMaterialLocalizations.delegates,
-          home: const _LaunchGate(),
+          home: const MagnetLinkListener(child: _LaunchGate()),
         ),
       ),
     );

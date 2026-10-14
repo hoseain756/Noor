@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../../shared/widgets/glass_navigation.dart';
+import '../torrent/magnet_opener.dart';
 import 'custom_lists_page.dart';
 import '../media/media_detail_page.dart';
 
@@ -57,18 +59,34 @@ class _LibraryPageState extends State<LibraryPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  english ? 'My library' : 'مكتبتي',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  english
-                      ? 'Keep your watchlist, collections and recent plays together.'
-                      : 'اجمع قوائمك وآخر ما شغّلته في مكان واحد.',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: HorseTheme.muted),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            english ? 'My library' : 'مكتبتي',
+                            style:
+                                Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            english
+                                ? 'Keep your watchlist, collections and recent plays together.'
+                                : 'اجمع قوائمك وآخر ما شغّلته في مكان واحد.',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: HorseTheme.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _OpenTorrentButton(english: english),
+                  ],
                 ),
                 const SizedBox(height: 18),
                 Container(
@@ -399,4 +417,45 @@ class _EmptyLibrary extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Gold-tinted entry pill that opens the paste-a-magnet torrent flow.
+class _OpenTorrentButton extends StatelessWidget {
+  const _OpenTorrentButton({required this.english});
+
+  final bool english;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: HorseTheme.gold.withValues(alpha: .14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(13),
+        side: BorderSide(color: HorseTheme.gold.withValues(alpha: .45)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: () => unawaited(openMagnetFlow(context)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.bolt_rounded,
+                  color: HorseTheme.gold, size: 18),
+              const SizedBox(width: 7),
+              Text(
+                english ? 'Torrent' : 'تورنت',
+                style: const TextStyle(
+                  color: HorseTheme.gold,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
