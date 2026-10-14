@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/noor_toast.dart';
 
 class IntegrationsPage extends StatelessWidget {
   const IntegrationsPage({super.key});
@@ -80,8 +81,6 @@ class _TmdbKeyCard extends StatefulWidget {
 class _TmdbKeyCardState extends State<_TmdbKeyCard> {
   final TextEditingController _key = TextEditingController();
   bool _busy = false;
-  String? _message;
-  bool _error = false;
 
   @override
   void dispose() {
@@ -91,40 +90,35 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
 
   Future<void> _save() async {
     final app = context.read<AppState>();
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
+    setState(() => _busy = true);
     try {
       await app.api.saveTmdbUserKey(_key.text);
       if (!mounted) return;
-      setState(() {
-        _message = app.english
-            ? 'TMDB key verified and saved securely on this device.'
-            : 'تم التحقق من مفتاح TMDB وحفظه بأمان على هذا الجهاز.';
-        _error = false;
-      });
       _key.clear();
+      NoorToast.show(
+        context,
+        app.english
+            ? 'TMDB key verified and saved securely on this device.'
+            : 'تم التحقق من مفتاح TMDB وحفظه بأمان على هذا الجهاز.',
+      );
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _message = _friendlyError(error);
-        _error = true;
-      });
+      NoorToast.show(context, _friendlyError(error), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _remove() async {
-    await context.read<AppState>().api.clearTmdbUserKey();
+    final app = context.read<AppState>();
+    await app.api.clearTmdbUserKey();
     if (!mounted) return;
-    setState(() {
-      _message = context.read<AppState>().english
+    NoorToast.show(
+      context,
+      app.english
           ? 'TMDB key removed from this device.'
-          : 'تمت إزالة مفتاح TMDB من هذا الجهاز.';
-      _error = false;
-    });
+          : 'تمت إزالة مفتاح TMDB من هذا الجهاز.',
+    );
   }
 
   @override
@@ -228,15 +222,6 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
               ),
             ),
           ],
-          if (_message != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _message!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: _error ? const Color(0xFFFF8178) : HorseTheme.gold,
-                  ),
-            ),
-          ],
         ],
       ),
     );
@@ -266,8 +251,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   bool _busy = false;
   bool _syncing = false;
   bool _needsSecret = false;
-  String? _message;
-  bool _error = false;
   final _secret = TextEditingController();
   static const _secure = FlutterSecureStorage();
 
@@ -285,18 +268,24 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       _busy = true;
       _flow = null;
       _needsSecret = false;
-      _message = null;
     });
     try {
       final result = await app.api.startLinkedService(widget.service);
       final deviceCode = result?['device_code']?.toString() ?? '';
       final code = result?['user_code']?.toString() ?? '';
-      final verificationUrl = result?['verification_url']?.toString() ?? '';
+      // Simkl's OAuth 2.0 flow names the field verification_uri(_complete);
+      // Trakt uses verification_url — accept every variant.
+      final verificationUrl = (result?['verification_uri_complete'] ??
+              result?['verification_uri'] ??
+              result?['verification_url'])
+          ?.toString() ??
+          '';
       if (deviceCode.isEmpty || code.isEmpty || verificationUrl.isEmpty) {
         throw const FormatException('تعذر إنشاء رمز الربط.');
       }
       if (!mounted) return;
-      final interval = ((result?['interval'] as num?)?.toInt() ?? 5).clamp(3, 30);
+      final interval =
+          ((result?['interval'] as num?)?.toInt() ?? 5).clamp(3, 30);
       setState(() {
         _flow = {
           'device_code': deviceCode,
@@ -317,7 +306,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       );
       _schedulePoll(Duration(seconds: interval));
     } catch (error) {
-      _setMessage(_friendlyError(error), error: true);
+      if (mounted) NoorToast.show(context, _friendlyError(error), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -347,6 +336,23 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         setState(() => _needsSecret = true);
         return;
       }
+      if (result?['reason']?.toString() == 'invalid_client') {
+        // Trakt rejected the client secret (400 with no JSON body). Re-open
+        // the secret form; the pending device code stays alive and the flow
+        // resumes right after a correct secret is saved.
+        _pollTimer?.cancel();
+        setState(() => _needsSecret = true);
+        if (mounted) {
+          NoorToast.show(
+            context,
+            context.read<AppState>().english
+                ? 'Wrong client secret — copy the Client Secret of the Noor app from trakt.tv/settings/api.'
+                : 'سر العميل غير صحيح — انسخ Client Secret الخاص بتطبيق Noor من trakt.tv/settings/api.',
+            error: true,
+          );
+        }
+        return;
+      }
       if (status == 'success') {
         // NoorApi stores the provider token in secure storage itself; only
         // the display state is mirrored into app state.
@@ -357,11 +363,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         if (!mounted) return;
         setState(() {
           _flow = null;
-          _error = false;
-          _message = context.read<AppState>().english
-              ? 'Account connected.'
-              : 'تم ربط الحساب.';
+          _needsSecret = false;
         });
+        NoorToast.show(
+          context,
+          context.read<AppState>().english
+              ? 'Account connected.'
+              : 'تم ربط الحساب.',
+        );
         return;
       }
       if (status == 'pending') {
@@ -372,11 +381,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       }
       setState(() {
         _flow = {...flow, 'status': status ?? 'error'};
-        _message = (context.read<AppState>().english
-            ? 'The link was not approved. Generate a new code and try again.'
-            : 'لم تتم الموافقة على الربط. أنشئ رمزًا جديدًا وأعد المحاولة.');
-        _error = true;
       });
+      NoorToast.show(
+        context,
+        context.read<AppState>().english
+            ? 'The link was not approved. Generate a new code and try again.'
+            : 'لم تتم الموافقة على الربط. أنشئ رمزًا جديدًا وأعد المحاولة.',
+        error: true,
+      );
     } catch (_) {
       // Keep the device flow alive through brief mobile-network interruptions.
       if (mounted) _schedulePoll(const Duration(seconds: 8));
@@ -395,39 +407,37 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       await _secure.write(key: 'noor.trakt.client-secret', value: value);
       _secret.clear();
       if (!mounted) return;
-      setState(() {
-        _needsSecret = false;
-        _error = false;
-        _message = context.read<AppState>().english
+      setState(() => _needsSecret = false);
+      NoorToast.show(
+        context,
+        context.read<AppState>().english
             ? 'Secret saved — completing the link…'
-            : 'تم حفظ السر — جارٍ إكمال الربط…';
-      });
+            : 'تم حفظ السر — جارٍ إكمال الربط…',
+      );
       _schedulePoll(const Duration(milliseconds: 800));
     } catch (error) {
-      _setMessage(_friendlyError(error), error: true);
+      if (mounted) NoorToast.show(context, _friendlyError(error), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _sync() async {
-    setState(() {
-      _syncing = true;
-      _message = null;
-    });
+    setState(() => _syncing = true);
     try {
       final (watchlist, history) =
           await context.read<AppState>().syncLinkedService(widget.service);
       if (mounted) {
         final english = context.read<AppState>().english;
-        _setMessage(
+        NoorToast.show(
+          context,
           english
               ? 'Imported $watchlist titles and $history history items.'
               : 'تم استيراد $watchlist عنوانًا و$history من سجل المشاهدة.',
         );
       }
     } catch (error) {
-      _setMessage(_friendlyError(error), error: true);
+      if (mounted) NoorToast.show(context, _friendlyError(error), error: true);
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
@@ -436,20 +446,13 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   Future<void> _unlink() async {
     await context.read<AppState>().unlinkService(widget.service);
     if (mounted) {
-      _setMessage(
+      NoorToast.show(
+        context,
         context.read<AppState>().english
             ? 'Account disconnected.'
             : 'تم فصل الحساب.',
       );
     }
-  }
-
-  void _setMessage(String value, {bool error = false}) {
-    if (!mounted) return;
-    setState(() {
-      _message = value;
-      _error = error;
-    });
   }
 
   void _cancelFlow() {
@@ -562,11 +565,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     await Clipboard.setData(
                       ClipboardData(text: _flow?['user_code']?.toString() ?? ''),
                     );
-                    if (mounted) {
-                      _setMessage(
-                        english ? 'Code copied.' : 'تم نسخ الرمز.',
-                      );
-                    }
+                    if (!mounted) return;
+                    NoorToast.show(
+                      this.context,
+                      english ? 'Code copied.' : 'تم نسخ الرمز.',
+                    );
                   },
                   icon: const Icon(Icons.copy_rounded),
                   label: Text(english ? 'Copy code' : 'نسخ الرمز'),
@@ -597,8 +600,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               const SizedBox(height: 14),
               Text(
                 english
-                    ? "Linking ${widget.title} needs its OAuth client secret (from the provider's developer portal). Paste it below — the pending code resumes automatically."
-                    : 'ربط ${widget.title} يتطلب سر العميل (client secret) الخاص بالتطبيق من بوابة المطورين. ألصقه أدناه وسيُستأنف الرمز المعلّق تلقائيًا.',
+                    ? 'Trakt requires the OAuth client secret of the Noor app — verified against the Trakt API. Open trakt.tv/settings/api, select the Noor app, copy the Client Secret and paste it below; the pending code resumes automatically.'
+                    : 'يتطلب Trakt سر العميل (Client Secret) الخاص بتطبيق Noor — وهذا مطلب من واجهة Trakt نفسها. افتح trakt.tv/settings/api واختر تطبيق Noor وانسخ Client Secret وألصقه أدناه، وسيُستأنف الرمز المعلّق تلقائيًا.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: const Color(0xFFFF8178),
                     ),
@@ -659,15 +662,6 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 label: Text(english ? 'Generate a new code' : 'إنشاء رمز جديد'),
               ),
           ],
-          if (_message != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _message!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: _error ? const Color(0xFFFF8178) : HorseTheme.gold,
-                  ),
-            ),
-          ],
         ],
       ),
     );
@@ -692,8 +686,6 @@ class _DebridCardState extends State<_DebridCard> {
   final _key = TextEditingController();
   String _service = 'realdebrid';
   bool _busy = false;
-  String? _message;
-  bool _error = false;
 
   @override
   void initState() {
@@ -710,42 +702,35 @@ class _DebridCardState extends State<_DebridCard> {
   Future<void> _save() async {
     if (_key.text.trim().isEmpty) return;
     final app = context.read<AppState>();
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
+    setState(() => _busy = true);
     try {
       await app.configureDebrid(_service, _key.text);
       _key.clear();
       if (mounted) {
-        setState(() {
-          _message = app.english
+        NoorToast.show(
+          context,
+          app.english
               ? 'Key verified and saved securely.'
-              : 'تم التحقق من المفتاح وحفظه بأمان.';
-          _error = false;
-        });
+              : 'تم التحقق من المفتاح وحفظه بأمان.',
+        );
       }
     } catch (error) {
-      if (mounted) {
-        setState(() {
-          _message = _friendlyError(error);
-          _error = true;
-        });
-      }
+      if (mounted) NoorToast.show(context, _friendlyError(error), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _remove() async {
-    await context.read<AppState>().disconnectDebrid();
+    final app = context.read<AppState>();
+    await app.disconnectDebrid();
     if (mounted) {
-      setState(() {
-        _message = context.read<AppState>().english
+      NoorToast.show(
+        context,
+        app.english
             ? 'Debrid service disconnected.'
-            : 'تم فصل خدمة Debrid.';
-        _error = false;
-      });
+            : 'تم فصل خدمة Debrid.',
+      );
     }
   }
 
@@ -852,15 +837,6 @@ class _DebridCardState extends State<_DebridCard> {
                     : const Icon(Icons.verified_user_outlined),
                 label: Text(english ? 'Verify and save' : 'التحقق والحفظ'),
               ),
-            ),
-          ],
-          if (_message != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _message!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: _error ? const Color(0xFFFF8178) : HorseTheme.gold,
-                  ),
             ),
           ],
         ],

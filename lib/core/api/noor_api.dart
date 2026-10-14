@@ -635,7 +635,7 @@ class NoorApi {
         case 'torbox':
           {
             final response = await _client.get<dynamic>(
-              'https://torbox.app/api/users/me',
+              'https://api.torbox.app/v1/api/user/me',
               options: _debridGetOptions(<String, String>{
                 'Authorization': 'Bearer $apiKey',
               }),
@@ -857,7 +857,7 @@ class NoorApi {
 
     // 1. Create the torrent (seed 3 keeps the TorBox tracker happy).
     final created = await _client.post<dynamic>(
-      'https://torbox.app/api/torrents/createtorrent',
+      'https://api.torbox.app/v1/api/torrents/createtorrent',
       data: <String, dynamic>{'magnet': magnet, 'seed': 3},
       options: _debridJsonOptions(auth),
     );
@@ -875,7 +875,7 @@ class NoorApi {
     var files = const <Map<String, dynamic>>[];
     while (true) {
       final mylist = await _client.get<dynamic>(
-        'https://torbox.app/api/torrents/mylist',
+        'https://api.torbox.app/v1/api/torrents/mylist',
         queryParameters: <String, String>{
           'search': infoHash,
           'bypass_cache': 'true',
@@ -912,7 +912,7 @@ class NoorApi {
 
     // 3. Request the direct download URL for the chosen file.
     final request = await _client.get<dynamic>(
-      'https://torbox.app/api/torrents/requestdl',
+      'https://api.torbox.app/v1/api/torrents/requestdl',
       queryParameters: <String, String>{
         'token': apiKey,
         'torrent_id': torrentId,
@@ -1091,8 +1091,11 @@ class NoorApi {
           }
         case 'simkl':
           {
+            // Simkl registers this client as an OAuth 2.0 app: the legacy
+            // /oauth/device endpoint answers 404 url_failed — the device
+            // flow lives at /oauth2/device (verified live against the API).
             final response = await _client.post<dynamic>(
-              '$simklBaseUrl/oauth/device',
+              '$simklBaseUrl/oauth2/device',
               queryParameters: <String, String>{
                 'client_id': defaultSimklClientId,
               },
@@ -1161,13 +1164,15 @@ class NoorApi {
           }
         case 'simkl':
           {
+            // OAuth 2.0 apps poll /oauth2/token with the RFC 8628 device
+            // grant; the legacy /oauth/token answers unauthorized_client.
             final response = await _client.post<dynamic>(
-              '$simklBaseUrl/oauth/token',
+              '$simklBaseUrl/oauth2/token',
               data: <String, String>{
                 'client_id': defaultSimklClientId,
                 'client_secret': defaultSimklClientSecret,
                 'device_code': start['device_code']?.toString() ?? '',
-                'grant_type': 'device',
+                'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
               },
               options: Options(
                 headers: <String, String>{
@@ -1188,14 +1193,32 @@ class NoorApi {
       }
     } on DioException catch (error) {
       final status = error.response?.statusCode;
-      // Trakt: 400 = authorization_pending, 429 = slow_down.
-      if (service == 'trakt' && (status == 400 || status == 429)) {
-        return <String, dynamic>{'status': 'pending'};
+      final body = _asMap(error.response?.data);
+      final detail = body?['error']?.toString() ??
+          (error.response?.data is String
+              ? (error.response!.data as String)
+              : '');
+      if (service == 'trakt') {
+        // 400 comes back BOTH for authorization_pending (JSON body) and for
+        // a bad client secret (usually an EMPTY body) — only treat the
+        // pending variants as pending, otherwise the UI would poll forever
+        // on a wrong secret. 429 = slow_down.
+        if (status == 429) {
+          return <String, dynamic>{'status': 'pending'};
+        }
+        if (status == 400) {
+          final isPending =
+              detail.contains('pending') || detail.contains('slow_down');
+          return <String, dynamic>{
+            'status': isPending ? 'pending' : 'error',
+            if (!isPending) 'reason': 'invalid_client',
+          };
+        }
+        return <String, dynamic>{'status': 'error'};
       }
-      // Simkl signals pending via a 400 body.
-      if (service == 'simkl' && status == 400) {
-        final body = _asMap(error.response?.data);
-        final detail = body?['error']?.toString() ?? '';
+      // Simkl signals pending via a 400/429 body (authorization_pending /
+      // slow_down); expired_token means the device code timed out.
+      if (service == 'simkl' && (status == 400 || status == 429)) {
         if (detail.contains('pending') || detail.contains('slow_down')) {
           return <String, dynamic>{'status': 'pending'};
         }

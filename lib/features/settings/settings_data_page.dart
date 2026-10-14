@@ -11,6 +11,7 @@ import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_service.dart';
+import '../../shared/widgets/noor_toast.dart';
 
 class SettingsDataPage extends StatelessWidget {
   const SettingsDataPage({super.key});
@@ -40,11 +41,11 @@ class SettingsDataPage extends StatelessWidget {
                   await Clipboard.setData(
                       ClipboardData(text: await app.exportLocalData()));
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(english
-                            ? 'Backup copied as JSON.'
-                            : 'تم نسخ النسخة الاحتياطية بصيغة JSON.')),
+                  NoorToast.show(
+                    context,
+                    english
+                        ? 'Backup copied as JSON.'
+                        : 'تم نسخ النسخة الاحتياطية بصيغة JSON.',
                   );
                 },
               ),

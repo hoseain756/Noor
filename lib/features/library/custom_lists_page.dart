@@ -7,6 +7,7 @@ import '../../core/models/custom_list.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/noor_toast.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
 
@@ -408,10 +409,12 @@ Future<void> _copyList(BuildContext context, CustomMediaList list) async {
   if (code == null) return;
   await Clipboard.setData(ClipboardData(text: code));
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(english
-          ? 'Share code copied. The recipient can import it in My Library.'
-          : 'نُسخ رمز المشاركة. يمكن استيراده من مكتبتي.')));
+  NoorToast.show(
+    context,
+    english
+        ? 'Share code copied. The recipient can import it in My Library.'
+        : 'نُسخ رمز المشاركة. يمكن استيراده من مكتبتي.',
+  );
 }
 
 Future<void> _deleteList(BuildContext context, CustomMediaList list) async {
