@@ -12,6 +12,53 @@ import '../engine/playback_engine.dart';
 /// streams). They belong to the app's design language; only the on-video
 /// chrome follows the cinematic reference.
 
+/// Common subtitle language codes → native names (Task 124 mandate: the
+/// subtitles window groups addon results by language). Unknown codes fall
+/// back to the upper-cased code itself.
+const Map<String, String> kSubtitleLanguageNames = {
+  'ar': 'العربية',
+  'en': 'English',
+  'es': 'Español',
+  'fr': 'Français',
+  'de': 'Deutsch',
+  'it': 'Italiano',
+  'pt': 'Português',
+  'pt-BR': 'Português (Brasil)',
+  'ru': 'Русский',
+  'tr': 'Türkçe',
+  'hi': 'हिन्दी',
+  'ur': 'اردو',
+  'fa': 'فارسی',
+  'he': 'עברית',
+  'ja': '日本語',
+  'ko': '한국어',
+  'zh': '中文',
+  'id': 'Bahasa Indonesia',
+  'ms': 'Bahasa Melayu',
+  'th': 'ไทย',
+  'vi': 'Tiếng Việt',
+  'nl': 'Nederlands',
+  'pl': 'Polski',
+  'sv': 'Svenska',
+  'no': 'Norsk',
+  'da': 'Dansk',
+  'fi': 'Suomi',
+  'el': 'Ελληνικά',
+  'uk': 'Українська',
+  'cs': 'Čeština',
+  'ro': 'Română',
+  'hu': 'Magyar',
+  'sw': 'Kiswahili',
+};
+
+String subtitleLanguageName(String code) {
+  final key = code.trim();
+  if (key.isEmpty) return '';
+  return kSubtitleLanguageNames[key] ??
+      kSubtitleLanguageNames[key.split('-').first] ??
+      key.toUpperCase();
+}
+
 Future<T?> showPlayerSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
@@ -341,7 +388,6 @@ class AudioTracksSheet extends StatelessWidget {
   String _label(AudioTrack track) {
     final parts = <String>[
       if (track.title?.isNotEmpty == true) track.title!,
-      if (track.language?.isNotEmpty == true) track.language!,
       if (track.codec?.isNotEmpty == true) track.codec!,
       if (track.channelscount != null) '${track.channelscount}ch',
     ];
@@ -351,150 +397,73 @@ class AudioTracksSheet extends StatelessWidget {
     return parts.join(' · ');
   }
 
+  /// Group the embedded tracks by their language tag (Task 124: the dub
+  /// window mirrors the subtitles window's language organization).
+  Map<String, List<AudioTrack>> get _groups {
+    final groups = <String, List<AudioTrack>>{};
+    for (final track in tracks) {
+      final code = (track.language ?? '').trim();
+      final key = code.isEmpty ? (english ? 'Default' : 'افتراضي') : code;
+      groups.putIfAbsent(key, () => []).add(track);
+    }
+    return groups;
+  }
+
+  String _groupTitle(String code) {
+    final name = subtitleLanguageName(code);
+    return code == 'Default' || code == 'افتراضي'
+        ? (english ? 'Default' : 'افتراضي')
+        : (name.isEmpty ? code : '$name · $code');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final groups = _groups.entries.toList();
     return SheetScaffold(
-      title: english ? 'Audio track' : 'المسار الصوتي',
+      title: english ? 'Audio track / dub' : 'المسار الصوتي / الدبلاج',
       child: tracks.isEmpty
           ? _EmptyNote(
               english
-                  ? 'No selectable audio tracks in this stream.'
-                  : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر.',
+                  ? 'No selectable audio tracks in this stream. Dubs may be '
+                      'available as separate sources.'
+                  : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر. قد '
+                      'يتوفر الدبلاج ضمن مصادر أخرى.',
             )
           : ListView.separated(
               shrinkWrap: true,
-              itemCount: tracks.length,
+              itemCount: groups.length,
               separatorBuilder: (_, __) =>
                   const Divider(color: HorseTheme.line, height: 1),
               itemBuilder: (context, index) {
-                final track = tracks[index];
-                final isSelected = track.id == selected.id;
-                return ListTile(
-                  dense: true,
-                  selected: isSelected,
-                  leading: Icon(
-                    isSelected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    size: 20,
-                    color: isSelected ? HorseTheme.gold : Colors.white38,
-                  ),
-                  title: Text(
-                    _label(track),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  onTap: () {
-                    onPick(track);
-                    Navigator.of(context).pop();
-                  },
-                );
-              },
-            ),
-    );
-  }
-}
-
-class SubtitleTracksSheet extends StatelessWidget {
-  const SubtitleTracksSheet({
-    super.key,
-    required this.english,
-    required this.tracks,
-    required this.selected,
-    required this.onPick,
-    this.onOpenSettings,
-  });
-
-  final bool english;
-  final List<SubtitleTrack> tracks;
-  final SubtitleTrack selected;
-  final ValueChanged<SubtitleTrack> onPick;
-
-  /// When set, a tuning icon appears at the top of the sheet (user request:
-  /// subtitle style/timing settings reachable from the player subtitles
-  /// section, not only from the app settings page).
-  final VoidCallback? onOpenSettings;
-
-  String _label(SubtitleTrack track) {
-    final parts = <String>[
-      if (track.title?.isNotEmpty == true) track.title!,
-      if (track.language?.isNotEmpty == true) track.language!,
-      if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
-    ];
-    if (parts.isEmpty) {
-      return english ? 'Track ${track.id}' : 'مسار ${track.id}';
-    }
-    return parts.join(' · ');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final off = SubtitleTrack.no();
-    final offSelected = selected.id == off.id;
-    return SheetScaffold(
-      title: english ? 'Subtitles' : 'الترجمة',
-      headerAction: onOpenSettings == null
-          ? null
-          : Tooltip(
-              message: english ? 'Subtitle settings' : 'إعدادات الترجمة',
-              child: IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed: onOpenSettings,
-                icon: const Icon(Icons.tune_rounded,
-                    size: 22, color: HorseTheme.gold),
-              ),
-            ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            dense: true,
-            selected: offSelected,
-            leading: Icon(
-              offSelected
-                  ? Icons.radio_button_checked
-                  : Icons.subtitles_off_outlined,
-              size: 20,
-              color: offSelected ? HorseTheme.gold : Colors.white38,
-            ),
-            title: Text(
-              english ? 'Off' : 'إيقاف',
-              style: const TextStyle(fontSize: 14),
-            ),
-            onTap: () {
-              onPick(off);
-              Navigator.of(context).pop();
-            },
-          ),
-          const Divider(color: HorseTheme.line, height: 1),
-          Flexible(
-            child: tracks.isEmpty
-                ? _EmptyNote(
-                    english
-                        ? 'No embedded subtitle tracks in this stream.'
-                        : 'لا توجد ترجمات مدمجة في هذا المصدر.',
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: tracks.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(color: HorseTheme.line, height: 1),
-                    itemBuilder: (context, index) {
-                      final track = tracks[index];
-                      if (track.id == 'no' || track.id == 'auto') {
-                        return const SizedBox.shrink();
-                      }
-                      final isSelected = track.id == selected.id;
-                      return ListTile(
+                final entry = groups[index];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
+                      child: Text(
+                        _groupTitle(entry.key),
+                        style: const TextStyle(
+                          color: HorseTheme.gold,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: .5,
+                        ),
+                      ),
+                    ),
+                    for (final track in entry.value)
+                      ListTile(
                         dense: true,
-                        selected: isSelected,
+                        selected: track.id == selected.id,
                         leading: Icon(
-                          isSelected
+                          track.id == selected.id
                               ? Icons.radio_button_checked
                               : Icons.radio_button_off,
                           size: 20,
-                          color: isSelected ? HorseTheme.gold : Colors.white38,
+                          color: track.id == selected.id
+                              ? HorseTheme.gold
+                              : Colors.white38,
                         ),
                         title: Text(
                           _label(track),
@@ -506,6 +475,385 @@ class SubtitleTracksSheet extends StatelessWidget {
                           onPick(track);
                           Navigator.of(context).pop();
                         },
+                      ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+}
+
+/// A selectable subtitle row model: external addon subtitles carry their raw
+/// language code + source addon; embedded mpv tracks carry track info.
+class SubtitleChoice {
+  const SubtitleChoice({
+    required this.track,
+    required this.groupKey,
+    required this.title,
+    this.subtitle,
+  });
+
+  final SubtitleTrack track;
+  final String groupKey; // language code, or 'embedded'
+  final String title;
+  final String? subtitle;
+}
+
+/// Task 124 mandate: the subtitles window fetches from every addon across
+/// ALL languages (done lazily by the page), then presents them grouped by
+/// language — tapping a language chip shows only that language's results —
+/// with a live search field on top.
+class SubtitleTracksSheet extends StatefulWidget {
+  const SubtitleTracksSheet({
+    super.key,
+    required this.english,
+    required this.embedded,
+    required this.external,
+    required this.selected,
+    required this.onPick,
+    this.onOpenSettings,
+  });
+
+  final bool english;
+
+  /// mpv-embedded subtitle tracks (inside the file itself).
+  final List<SubtitleTrack> embedded;
+
+  /// Raw addon subtitle rows: url / lang / label / addonName.
+  final List<Map<String, dynamic>> external;
+
+  final SubtitleTrack selected;
+  final ValueChanged<SubtitleTrack> onPick;
+
+  /// When set, a tuning icon appears at the top of the sheet (user request:
+  /// subtitle style/timing settings reachable from the player subtitles
+  /// section, not only from the app settings page).
+  final VoidCallback? onOpenSettings;
+
+  @override
+  State<SubtitleTracksSheet> createState() => _SubtitleTracksSheetState();
+}
+
+class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
+  final _search = TextEditingController();
+  String _language = 'all';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<SubtitleChoice> get _choices {
+    final choices = <SubtitleChoice>[];
+    for (final track in widget.embedded) {
+      if (track.id == 'no' || track.id == 'auto') continue;
+      choices.add(SubtitleChoice(
+        track: track,
+        groupKey: 'embedded',
+        title: (track.title?.isNotEmpty == true
+                ? track.title!
+                : track.language?.isNotEmpty == true
+                    ? subtitleLanguageName(track.language!)
+                    : (widget.english
+                        ? 'Track ${track.id}'
+                        : 'مسار ${track.id}'))
+            .split('\n')
+            .first,
+        subtitle: [
+          if (track.language?.isNotEmpty == true)
+            subtitleLanguageName(track.language!),
+          if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
+        ].join(' · '),
+      ));
+    }
+    for (final row in widget.external) {
+      final url = row['url']?.toString() ?? '';
+      if (url.isEmpty) continue;
+      final lang = (row['lang'] ?? '').toString().trim();
+      final label = (row['label'] ?? '').toString().trim();
+      final addon = (row['addonName'] ?? '').toString().trim();
+      final name = subtitleLanguageName(lang);
+      choices.add(SubtitleChoice(
+        track: SubtitleTrack.uri(url, title: label.isEmpty ? lang : label),
+        groupKey: lang.isEmpty ? 'all' : lang,
+        title: label.isEmpty
+            ? (lang.isEmpty
+                ? (widget.english ? 'Addon subtitle' : 'ترجمة إضافة')
+                : name)
+            : label,
+        subtitle: [
+          if (addon.isNotEmpty) addon,
+          if (lang.isNotEmpty) name,
+        ].join(' · '),
+      ));
+    }
+    return choices;
+  }
+
+  Map<String, List<SubtitleChoice>> get _groups {
+    final groups = <String, List<SubtitleChoice>>{};
+    for (final choice in _choices) {
+      groups.putIfAbsent(choice.groupKey, () => []).add(choice);
+    }
+    // Arabic first (the app's primary language), then alphabetical by
+    // native name, embedded section last.
+    int rank(String key) {
+      if (key == 'ar') return 0;
+      if (key == 'embedded') return 2;
+      return 1;
+    }
+
+    final keys = groups.keys.toList()
+      ..sort((a, b) {
+        final byRank = rank(a).compareTo(rank(b));
+        if (byRank != 0) return byRank;
+        return subtitleLanguageName(a)
+            .toLowerCase()
+            .compareTo(subtitleLanguageName(b).toLowerCase());
+      });
+    return {for (final key in keys) key: groups[key]!};
+  }
+
+  bool _matches(SubtitleChoice choice, String query) {
+    if (query.isEmpty) return true;
+    final q = query.toLowerCase();
+    return choice.title.toLowerCase().contains(q) ||
+        (choice.subtitle ?? '').toLowerCase().contains(q) ||
+        choice.groupKey.toLowerCase().contains(q) ||
+        subtitleLanguageName(choice.groupKey).toLowerCase().contains(q);
+  }
+
+  String _groupTitle(String key) {
+    if (key == 'embedded') {
+      return widget.english ? 'In this file' : 'داخل الملف';
+    }
+    if (key == 'all') {
+      return widget.english ? 'Unknown language' : 'لغة غير معروفة';
+    }
+    final name = subtitleLanguageName(key);
+    return name.isEmpty ? key : '$name · $key';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final off = SubtitleTrack.no();
+    final offSelected = widget.selected.id == off.id;
+    final groups = _groups;
+    final query = _search.text.trim();
+    final visibleGroups = <String, List<SubtitleChoice>>{};
+    for (final entry in groups.entries) {
+      if (_language != 'all' && _language != entry.key) continue;
+      final rows = entry.value.where((c) => _matches(c, query)).toList();
+      if (rows.isNotEmpty) visibleGroups[entry.key] = rows;
+    }
+    final totalVisible =
+        visibleGroups.values.fold<int>(0, (sum, rows) => sum + rows.length);
+    // Precompute the flat row list (+1 offset for the leading Off row) with
+    // a showHeader flag marking the first item of each language group.
+    final flatRows = <(SubtitleChoice, bool)>[
+      for (final entry in visibleGroups.entries)
+        for (var i = 0; i < entry.value.length; i++) (entry.value[i], i == 0),
+    ];
+
+    return SheetScaffold(
+      title: widget.english ? 'Subtitles' : 'الترجمة',
+      headerAction: widget.onOpenSettings == null
+          ? null
+          : Tooltip(
+              message: widget.english ? 'Subtitle settings' : 'إعدادات الترجمة',
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: widget.onOpenSettings,
+                icon: const Icon(Icons.tune_rounded,
+                    size: 22, color: HorseTheme.gold),
+              ),
+            ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Search — filters by title / language / addon instantly.
+          TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              isDense: true,
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      onPressed: () {
+                        _search.clear();
+                        setState(() {});
+                      },
+                    ),
+              hintText:
+                  widget.english ? 'Search subtitles…' : 'ابحث في الترجمات…',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: HorseTheme.line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: HorseTheme.line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: HorseTheme.gold, width: 1.4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Language chips — tapping one shows only its language's results.
+          SizedBox(
+            height: 34,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: groups.keys.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                final key =
+                    index == 0 ? 'all' : groups.keys.elementAt(index - 1);
+                final selectedChip =
+                    _language == key || (_language == 'all' && key == 'all');
+                final count = key == 'all'
+                    ? groups.values
+                        .fold<int>(0, (sum, rows) => sum + rows.length)
+                    : groups[key]!.length;
+                final label = key == 'all'
+                    ? (widget.english ? 'All' : 'الكل')
+                    : subtitleLanguageName(key).isEmpty
+                        ? key.toUpperCase()
+                        : subtitleLanguageName(key);
+                return InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => setState(() => _language = key),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: selectedChip
+                          ? HorseTheme.gold.withValues(alpha: .18)
+                          : Colors.white.withValues(alpha: .05),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: selectedChip ? HorseTheme.gold : HorseTheme.line,
+                      ),
+                    ),
+                    child: Text(
+                      '$label ($count)',
+                      style: TextStyle(
+                        color: selectedChip ? HorseTheme.gold : Colors.white70,
+                        fontSize: 12,
+                        fontWeight:
+                            selectedChip ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const Divider(color: HorseTheme.line, height: 14),
+          Flexible(
+            child: totalVisible == 0
+                ? _EmptyNote(
+                    query.isEmpty
+                        ? (widget.english
+                            ? 'No subtitles found for this title.'
+                            : 'لم يتم العثور على ترجمات لهذا العمل.')
+                        : (widget.english
+                            ? 'No matches for your search.'
+                            : 'لا توجد نتائج مطابقة لبحثك.'),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: flatRows.length + 1,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: HorseTheme.line, height: 1),
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        // The persistent "Off" row leads the list.
+                        return ListTile(
+                          dense: true,
+                          selected: offSelected,
+                          leading: Icon(
+                            offSelected
+                                ? Icons.radio_button_checked
+                                : Icons.subtitles_off_outlined,
+                            size: 20,
+                            color:
+                                offSelected ? HorseTheme.gold : Colors.white38,
+                          ),
+                          title: Text(
+                            widget.english ? 'Off' : 'إيقاف',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          onTap: () {
+                            widget.onPick(off);
+                            Navigator.of(context).pop();
+                          },
+                        );
+                      }
+                      final (choice, showHeader) = flatRows[index - 1];
+                      final isSelected = choice.track.id == widget.selected.id;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (showHeader)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(4, 6, 4, 2),
+                              child: Text(
+                                _groupTitle(choice.groupKey),
+                                style: const TextStyle(
+                                  color: HorseTheme.gold,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: .5,
+                                ),
+                              ),
+                            ),
+                          ListTile(
+                            dense: true,
+                            selected: isSelected,
+                            leading: Icon(
+                              isSelected
+                                  ? Icons.radio_button_checked
+                                  : (choice.track.uri
+                                      ? Icons.cloud_download_outlined
+                                      : Icons.radio_button_off),
+                              size: 20,
+                              color:
+                                  isSelected ? HorseTheme.gold : Colors.white38,
+                            ),
+                            title: Text(
+                              choice.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            subtitle: choice.subtitle?.isEmpty != true
+                                ? Text(
+                                    choice.subtitle!,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white38, fontSize: 12),
+                                  )
+                                : null,
+                            onTap: () {
+                              widget.onPick(choice.track);
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -591,18 +939,19 @@ class EpisodesSheet extends StatelessWidget {
             subtitle: season > 0
                 ? Text(
                     english ? 'S$season' : 'الموسم $season',
-                    style: const TextStyle(
-                        color: Colors.white38, fontSize: 12),
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
                   )
                 : null,
             trailing: isCurrent
                 ? const Icon(Icons.play_arrow_rounded,
                     size: 20, color: HorseTheme.gold)
                 : null,
-            onTap: isCurrent ? null : () {
-              Navigator.of(context).pop();
-              onPick(episode);
-            },
+            onTap: isCurrent
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    onPick(episode);
+                  },
           );
         },
       ),
@@ -667,10 +1016,12 @@ class StreamsSheet extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
-            onTap: isSelected ? null : () {
-              Navigator.of(context).pop();
-              onPick(stream);
-            },
+            onTap: isSelected
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    onPick(stream);
+                  },
           );
         },
       ),
@@ -717,6 +1068,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       'subBorderColor': (st['subBorderColor'] as String?) ?? '#000000',
       'subBorderSize': intVal('subBorderSize', 0),
       'subBackgroundOpacity': doubleVal('subBackgroundOpacity', .35),
+      'subPos': intVal('subPos', 100),
       'subtitleOffsetMs': intVal('subtitleOffsetMs', 0),
     };
   }
@@ -746,6 +1098,14 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         : (widget.english ? 'Delay $abs ms' : 'تأخير $abs ms');
   }
 
+  /// mpv sub-pos: 100 = bottom of the frame (default), 0 = top.
+  String _posLabel(int pos) {
+    if (pos >= 98) return widget.english ? 'Bottom' : 'أسفل';
+    if (pos <= 2) return widget.english ? 'Top' : 'أعلى';
+    if (pos >= 48 && pos <= 52) return widget.english ? 'Middle' : 'منتصف';
+    return '$pos%';
+  }
+
   @override
   Widget build(BuildContext context) {
     final english = widget.english;
@@ -772,6 +1132,16 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
               display: '${_v['subFontSize']} px',
               onChanged: (v) => _preview('subFontSize', v.round()),
               onChangeEnd: (v) => _commit('subFontSize', v.round()),
+            ),
+            _sliderRow(
+              label: english ? 'Subtitle position' : 'تموضع الترجمة',
+              value: (_v['subPos'] as int).toDouble(),
+              min: 0,
+              max: 100,
+              divisions: 20,
+              display: _posLabel(_v['subPos'] as int),
+              onChanged: (v) => _preview('subPos', v.round()),
+              onChangeEnd: (v) => _commit('subPos', v.round()),
             ),
             _styleChips(),
             _colorRow(
@@ -820,11 +1190,9 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   // ── Pieces ────────────────────────────────────────────────────────────────
 
   Widget _previewBox() {
-    final text = widget.english
-        ? 'Subtitle sample — Noor'
-        : 'مثال نص الترجمة — Noor';
-    final fontSize =
-        ((_v['subFontSize']! as int).clamp(12, 26)).toDouble();
+    final text =
+        widget.english ? 'Subtitle sample — Noor' : 'مثال نص الترجمة — Noor';
+    final fontSize = ((_v['subFontSize']! as int).clamp(12, 26)).toDouble();
     final color = _hex(_v['subFontColor']! as String);
     final borderColor = _hex(_v['subBorderColor']! as String);
     final style = _v['subStyle']! as String;
@@ -838,8 +1206,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           color: Colors.black.withValues(alpha: opacity),
-          child: Text(text,
-              style: TextStyle(fontSize: fontSize, color: color)),
+          child: Text(text, style: TextStyle(fontSize: fontSize, color: color)),
         );
         break;
       case 'outline':
@@ -856,8 +1223,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
                   ..color = borderColor,
               ),
             ),
-            Text(text,
-                style: TextStyle(fontSize: fontSize, color: color)),
+            Text(text, style: TextStyle(fontSize: fontSize, color: color)),
           ],
         );
         break;
@@ -893,7 +1259,9 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       ),
       child: Directionality(
         textDirection: TextDirection.rtl,
-        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: content),
+        child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: content),
       ),
     );
   }

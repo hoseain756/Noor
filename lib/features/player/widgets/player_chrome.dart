@@ -5,6 +5,15 @@ import '../../../core/theme/horse_theme.dart';
 /// Visual language of the cinematic player chrome (reference design):
 /// white controls over the video, a teal→blue gradient timeline, a large
 /// outlined central play control and slim translucent scrims.
+///
+/// Task 124 layout mandate (user spec):
+///  · top bar — exit arrow at the far LEFT, title at the far RIGHT with a
+///    zero-padded `S01E12` tag underneath for series;
+///  · progress row (current · timeline · total) sits ABOVE every control;
+///  · bottom-left: volume icon (tap = mute) + persistent volume slider +
+///    fullscreen toggle; bottom-CENTER exactly [rewind][play][forward] with
+///    the step seconds from settings; bottom-RIGHT: source / subtitles /
+///    audio (plus prev/next episode for series).
 class PlayerPalette {
   static const Color gradientStart = Color(0xFF2FE3B4);
   static const Color gradientEnd = Color(0xFF3B82F6);
@@ -26,29 +35,29 @@ String formatPlayerTime(Duration value) {
   return hours > 0 ? '$hours:$minutes:$seconds' : '${value.inMinutes}:$seconds';
 }
 
+/// Zero-padded episode tag per the user mandate: `S01E12`.
+String seasonEpisodeTag(int? season, int? episode) {
+  if (season == null || episode == null) return '';
+  final s = season.toString().padLeft(2, '0');
+  final e = episode.toString().padLeft(2, '0');
+  return 'S${s}E$e';
+}
+
 // ── Top bar ────────────────────────────────────────────────────────────────
 
 class PlayerTopBar extends StatelessWidget {
   const PlayerTopBar({
     super.key,
     required this.title,
-    required this.subtitle,
+    required this.episodeTag,
     required this.onClose,
-    required this.onSettings,
-    this.onSubtitles,
-    this.onQueue,
-    this.onStreams,
-    this.streamLabel,
   });
 
   final String title;
-  final String subtitle;
+
+  /// Empty for movies; `S01E12` for series (rendered under the title).
+  final String episodeTag;
   final VoidCallback onClose;
-  final VoidCallback onSettings;
-  final VoidCallback? onSubtitles;
-  final VoidCallback? onQueue;
-  final VoidCallback? onStreams;
-  final String? streamLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -67,104 +76,54 @@ class PlayerTopBar extends StatelessWidget {
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 10, 26),
+            padding: const EdgeInsets.fromLTRB(12, 6, 16, 26),
             child: Row(
               children: [
                 PlayerBackButton(onTap: onClose),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          shadows: PlayerPalette.iconShadow,
-                        ),
-                      ),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: .62),
-                            fontSize: 12,
-                            shadows: PlayerPalette.iconShadow,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (onStreams != null && streamLabel != null) ...[
-                  const SizedBox(width: 8),
-                  Material(
-                    color: Colors.black.withValues(alpha: .40),
-                    borderRadius: BorderRadius.circular(999),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(999),
-                      onTap: onStreams,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.swap_horiz_rounded,
-                              size: 15,
-                              color: Colors.white,
-                              shadows: PlayerPalette.iconShadow,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: ConstrainedBox(
-                                constraints:
-                                    const BoxConstraints(maxWidth: 110),
-                                child: Text(
-                                  streamLabel!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                const Spacer(),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        shadows: PlayerPalette.iconShadow,
                       ),
                     ),
-                  ),
-                ],
-                const SizedBox(width: 6),
-                // Reference top-right icons: settings · queue · subtitles.
-                if (onSubtitles != null)
-                  PlayerRailButton(
-                    icon: Icons.subtitles_outlined,
-                    semanticLabel: 'Subtitles',
-                    onTap: onSubtitles!,
-                  ),
-                if (onQueue != null)
-                  PlayerRailButton(
-                    icon: Icons.format_list_bulleted_rounded,
-                    semanticLabel: 'Episodes',
-                    onTap: onQueue!,
-                  ),
-                PlayerRailButton(
-                  icon: Icons.settings_rounded,
-                  semanticLabel: 'Playback settings',
-                  onTap: onSettings,
+                    if (episodeTag.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: .35),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: Text(
+                            episodeTag,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: .8,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                              shadows: PlayerPalette.iconShadow,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -355,27 +314,17 @@ class _GradientTimelineState extends State<GradientTimeline> {
   double _valueFromDx(double dx, double width) =>
       (dx / (width == 0 ? 1 : width)).clamp(0.0, 1.0);
 
-  void _startDrag(double value) {
-    widget.onScrubStart();
-    setState(() {
-      _dragging = true;
-      _dragValue = value * widget.durationMs;
-    });
-    widget.onScrubUpdate(_dragValue * widget.durationMs / 1000);
-  }
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final duration = widget.durationMs;
-        final buffered = duration > 0
-            ? (widget.bufferedMs / duration).clamp(0.0, 1.0)
-            : 0.0;
+        final buffered =
+            duration > 0 ? (widget.bufferedMs / duration).clamp(0.0, 1.0) : 0.0;
         final progress = _progress;
 
-        void handleTap(DragUpdateDetails? d, double dx) {
+        void handleTap(double dx) {
           final value = _valueFromDx(dx, width);
           widget.onScrubStart();
           widget.onScrubEnd(value * duration / 1000);
@@ -385,14 +334,22 @@ class _GradientTimelineState extends State<GradientTimeline> {
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: duration <= 0
               ? null
-              : (details) => _startDrag(_valueFromDx(details.localPosition.dx, width)),
+              : (details) {
+                  widget.onScrubStart();
+                  setState(() {
+                    _dragging = true;
+                    _dragValue = _valueFromDx(details.localPosition.dx, width) *
+                        duration;
+                  });
+                  widget.onScrubUpdate(_dragValue / 1000);
+                },
           onHorizontalDragUpdate: duration <= 0
               ? null
               : (details) {
                   setState(() {
                     _dragging = true;
-                    _dragValue =
-                        _valueFromDx(details.localPosition.dx, width) * duration;
+                    _dragValue = _valueFromDx(details.localPosition.dx, width) *
+                        duration;
                   });
                   widget.onScrubUpdate(_dragValue / 1000);
                 },
@@ -403,7 +360,9 @@ class _GradientTimelineState extends State<GradientTimeline> {
                   setState(() => _dragging = false);
                 },
           onHorizontalDragCancel: () => setState(() => _dragging = false),
-          onTapUp: duration <= 0 ? null : (details) => handleTap(null, details.localPosition.dx),
+          onTapUp: duration <= 0
+              ? null
+              : (details) => handleTap(details.localPosition.dx),
           child: SizedBox(
             height: 40,
             child: Stack(
@@ -500,16 +459,22 @@ class _GradientTimelineState extends State<GradientTimeline> {
 
 // ── Bottom cluster ─────────────────────────────────────────────────────────
 
+/// Spec-exact bottom block (Task 124): progress row above ALL controls;
+/// volume + fullscreen on the LEFT, the [rewind][play][forward] trio dead
+/// CENTER, and source / subtitles / audio (+ episode skips) on the RIGHT.
 class PlayerBottomCluster extends StatelessWidget {
   const PlayerBottomCluster({
     super.key,
     required this.durationMs,
     required this.positionMs,
     required this.bufferedMs,
-    required this.previewSeconds,
     required this.isPlaying,
-    required this.muted,
     required this.showRemaining,
+    required this.volume,
+    required this.muted,
+    required this.backStepSec,
+    required this.forwardStepSec,
+    required this.fullscreen,
     required this.canPrev,
     required this.canNext,
     required this.scale,
@@ -517,8 +482,13 @@ class PlayerBottomCluster extends StatelessWidget {
     required this.onSkip,
     required this.onPrev,
     required this.onNext,
+    required this.onVolumeChanged,
+    required this.onVolumeDragEnd,
     required this.onMuteToggle,
-    required this.onFitCycle,
+    required this.onToggleFullscreen,
+    required this.onOpenStreams,
+    required this.onOpenSubtitles,
+    required this.onOpenAudio,
     required this.onToggleRemaining,
     required this.onScrubStart,
     required this.onScrubUpdate,
@@ -528,10 +498,20 @@ class PlayerBottomCluster extends StatelessWidget {
   final int durationMs;
   final int positionMs;
   final int bufferedMs;
-  final double previewSeconds; // −1 = none (surface scrub HUD shown instead)
   final bool isPlaying;
-  final bool muted;
   final bool showRemaining;
+
+  /// mpv volume, normalized 0..1 (drives the left slider).
+  final double volume;
+  final bool muted;
+
+  /// Seek steps from settings (spec: "preset seconds in the settings").
+  final int backStepSec;
+  final int forwardStepSec;
+
+  /// True = system UI hidden (immersive); false = system UI visible.
+  final bool fullscreen;
+
   final bool canPrev;
   final bool canNext;
   final double scale; // 1.0 phone · ~1.15 tablet
@@ -539,8 +519,13 @@ class PlayerBottomCluster extends StatelessWidget {
   final ValueChanged<int> onSkip;
   final VoidCallback? onPrev;
   final VoidCallback? onNext;
+  final ValueChanged<double> onVolumeChanged;
+  final VoidCallback onVolumeDragEnd;
   final VoidCallback onMuteToggle;
-  final VoidCallback onFitCycle;
+  final VoidCallback onToggleFullscreen;
+  final VoidCallback? onOpenStreams;
+  final VoidCallback? onOpenSubtitles;
+  final VoidCallback? onOpenAudio;
   final VoidCallback onToggleRemaining;
   final VoidCallback onScrubStart;
   final ValueChanged<double> onScrubUpdate;
@@ -548,9 +533,8 @@ class PlayerBottomCluster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shownPosition =
-        previewSeconds >= 0 ? (previewSeconds * 1000).round() : positionMs;
     final big = 64.0 * scale;
+    final controlSize = 44.0 * scale;
     return Positioned(
       left: 0,
       right: 0,
@@ -570,18 +554,19 @@ class PlayerBottomCluster extends StatelessWidget {
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(18, 30, 18, 8 * scale),
+            padding: EdgeInsets.fromLTRB(14, 30, 14, 8 * scale),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Time row — bar always LTR (media convention).
+                // Progress row — bar always LTR (media convention); the full
+                // duration sits at the far right, current time to its left.
                 Directionality(
                   textDirection: TextDirection.ltr,
                   child: Row(
                     children: [
                       _TimeLabel(
                         text: formatPlayerTime(
-                          Duration(milliseconds: shownPosition),
+                          Duration(milliseconds: positionMs),
                         ),
                         onTap: onToggleRemaining,
                       ),
@@ -598,98 +583,30 @@ class PlayerBottomCluster extends StatelessWidget {
                       _TimeLabel(
                         text: showRemaining && durationMs > 0
                             ? '-${formatPlayerTime(Duration(milliseconds: durationMs - positionMs))}'
-                            : formatPlayerTime(Duration(milliseconds: durationMs)),
+                            : formatPlayerTime(
+                                Duration(milliseconds: durationMs)),
                         onTap: onToggleRemaining,
                       ),
                     ],
                   ),
                 ),
                 SizedBox(height: 2 * scale),
-                // Cinematic control row — symmetric around the big play.
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 760),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _RaillessControl(
-                          icon: muted
-                              ? Icons.volume_off_rounded
-                              : Icons.volume_up_rounded,
-                          semanticLabel: muted ? 'Unmute' : 'Mute',
-                          scale: scale,
-                          onTap: onMuteToggle,
-                        ),
-                        _RaillessControl(
-                          icon: Icons.replay_10_rounded,
-                          semanticLabel: 'Rewind 10 seconds',
-                          scale: scale,
-                          onTap: () => onSkip(-10),
-                        ),
-                        if (canPrev)
-                          _RaillessControl(
-                            icon: Icons.skip_previous_rounded,
-                            semanticLabel: 'Previous episode',
-                            scale: scale,
-                            iconSize: 30,
-                            onTap: onPrev,
-                          ),
-                        Semantics(
-                          button: true,
-                          label: isPlaying ? 'Pause' : 'Play',
-                          child: GestureDetector(
-                            onTap: onPlayPause,
-                            child: Container(
-                              width: big,
-                              height: big,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: .14),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2.4,
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Colors.black38,
-                                    blurRadius: 16,
-                                    offset: Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: Icon(
-                                isPlaying
-                                    ? Icons.pause_rounded
-                                    : Icons.play_arrow_rounded,
-                                color: Colors.white,
-                                size: big * .52,
-                                shadows: PlayerPalette.iconShadow,
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (canNext)
-                          _RaillessControl(
-                            icon: Icons.skip_next_rounded,
-                            semanticLabel: 'Next episode',
-                            scale: scale,
-                            iconSize: 30,
-                            onTap: onNext,
-                          ),
-                        _RaillessControl(
-                          icon: Icons.forward_10_rounded,
-                          semanticLabel: 'Forward 10 seconds',
-                          scale: scale,
-                          onTap: () => onSkip(10),
-                        ),
-                        _RaillessControl(
-                          icon: Icons.aspect_ratio_rounded,
-                          semanticLabel: 'Cycle video fit',
-                          scale: scale,
-                          onTap: onFitCycle,
-                        ),
-                      ],
-                    ),
+                // Control row: a Stack keeps the mandated center trio dead
+                // center regardless of side-cluster widths.
+                SizedBox(
+                  height: big + 8,
+                  child: Stack(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _leftGroup(controlSize),
+                      ),
+                      Center(child: _centerGroup(big, controlSize)),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _rightGroup(controlSize),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -699,6 +616,226 @@ class PlayerBottomCluster extends StatelessWidget {
       ),
     );
   }
+
+  // LEFT: volume icon (tap = mute) + slider + fullscreen.
+  Widget _leftGroup(double controlSize) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _RaillessControl(
+            icon: muted
+                ? Icons.volume_off_rounded
+                : volume < .5
+                    ? Icons.volume_down_rounded
+                    : Icons.volume_up_rounded,
+            semanticLabel: muted ? 'Unmute' : 'Mute',
+            scale: scale,
+            onTap: onMuteToggle,
+          ),
+          _VolumeSlider(
+            value: muted ? 0 : volume,
+            width: 84 * scale,
+            onChanged: onVolumeChanged,
+            onChangeEnd: (_) => onVolumeDragEnd(),
+          ),
+          _RaillessControl(
+            icon: fullscreen
+                ? Icons.fullscreen_rounded
+                : Icons.fullscreen_exit_rounded,
+            semanticLabel: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            scale: scale,
+            onTap: onToggleFullscreen,
+          ),
+        ],
+      );
+
+  // CENTER: exactly [rewind][play/pause][forward].
+  Widget _centerGroup(double big, double controlSize) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SkipButton(
+            forward: false,
+            seconds: backStepSec,
+            size: controlSize,
+            onTap: () => onSkip(-backStepSec),
+          ),
+          SizedBox(width: 14 * scale),
+          Semantics(
+            button: true,
+            label: isPlaying ? 'Pause' : 'Play',
+            child: GestureDetector(
+              onTap: onPlayPause,
+              child: Container(
+                width: big,
+                height: big,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: .14),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white,
+                    width: 2.4,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black38,
+                      blurRadius: 16,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: big * .52,
+                  shadows: PlayerPalette.iconShadow,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 14 * scale),
+          _SkipButton(
+            forward: true,
+            seconds: forwardStepSec,
+            size: controlSize,
+            onTap: () => onSkip(forwardStepSec),
+          ),
+        ],
+      );
+
+  // RIGHT: source / subtitles / audio (+ prev & next episode for series).
+  Widget _rightGroup(double controlSize) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (canPrev)
+            _RaillessControl(
+              icon: Icons.skip_previous_rounded,
+              semanticLabel: 'Previous episode',
+              scale: scale,
+              iconSize: 28,
+              onTap: onPrev,
+            ),
+          if (onOpenStreams != null)
+            _RaillessControl(
+              icon: Icons.swap_horiz_rounded,
+              semanticLabel: 'Change source',
+              scale: scale,
+              onTap: onOpenStreams!,
+            ),
+          if (onOpenSubtitles != null)
+            _RaillessControl(
+              icon: Icons.subtitles_outlined,
+              semanticLabel: 'Subtitles',
+              scale: scale,
+              onTap: onOpenSubtitles!,
+            ),
+          if (onOpenAudio != null)
+            _RaillessControl(
+              icon: Icons.graphic_eq_rounded,
+              semanticLabel: 'Audio track / dub',
+              scale: scale,
+              onTap: onOpenAudio!,
+            ),
+          if (canNext)
+            _RaillessControl(
+              icon: Icons.skip_next_rounded,
+              semanticLabel: 'Next episode',
+              scale: scale,
+              iconSize: 28,
+              onTap: onNext,
+            ),
+        ],
+      );
+}
+
+/// Compact persistent volume bar (user mandate: "volume icon AND bar").
+class _VolumeSlider extends StatelessWidget {
+  const _VolumeSlider({
+    required this.value,
+    required this.width,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double value; // 0..1
+  final double width;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: width,
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            padding: EdgeInsets.zero,
+          ),
+          child: Slider(
+            value: value.clamp(0.0, 1.0),
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+            activeColor: Colors.white,
+            inactiveColor: Colors.white24,
+          ),
+        ),
+      );
+}
+
+/// Circular-arrow skip button with the configurable seconds rendered inside
+/// (replaces the fixed replay_10/forward_10 glyphs).
+class _SkipButton extends StatelessWidget {
+  const _SkipButton({
+    required this.forward,
+    required this.seconds,
+    required this.size,
+    required this.onTap,
+  });
+
+  final bool forward;
+  final int seconds;
+  final double size;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: '${forward ? 'Forward' : 'Rewind'} $seconds seconds',
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(
+                  forward ? Icons.forward_rounded : Icons.replay_rounded,
+                  color: Colors.white,
+                  size: size * .62,
+                  shadows: PlayerPalette.iconShadow,
+                ),
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: size * .08,
+                    left: forward ? size * .16 : 0,
+                    right: forward ? 0 : size * .16,
+                  ),
+                  child: Text(
+                    '$seconds',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 }
 
 class _TimeLabel extends StatelessWidget {
@@ -754,6 +891,107 @@ class _RaillessControl extends StatelessWidget {
               color: Colors.white,
               size: iconSize * scale,
               shadows: PlayerPalette.iconShadow,
+            ),
+          ),
+        ),
+      );
+}
+
+// ── Double-tap ripple (user mandate: animated ±N feedback) ────────────────
+
+/// YouTube-style double-tap feedback: a soft circular burst anchored to the
+/// tapped side, showing the arrow glyph and the ±N seconds label, scaling in
+/// and fading out once.
+class DoubleTapRipple extends StatefulWidget {
+  const DoubleTapRipple({
+    super.key,
+    required this.forward,
+    required this.seconds,
+    required this.english,
+  });
+
+  final bool forward;
+  final int seconds;
+  final bool english;
+
+  @override
+  State<DoubleTapRipple> createState() => _DoubleTapRippleState();
+}
+
+class _DoubleTapRippleState extends State<DoubleTapRipple>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 750),
+  )..forward();
+
+  late final Animation<double> _scale = TweenSequence<double>([
+    TweenSequenceItem(
+      tween: Tween(begin: .55, end: 1.0)
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      weight: 42,
+    ),
+    TweenSequenceItem(tween: ConstantTween(1.0), weight: 58),
+  ]).animate(_controller);
+
+  late final Animation<double> _fade = TweenSequence<double>([
+    TweenSequenceItem(
+      tween:
+          Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeOut)),
+      weight: 18,
+    ),
+    TweenSequenceItem(tween: ConstantTween(1.0), weight: 42),
+    TweenSequenceItem(
+      tween:
+          Tween(begin: 1.0, end: 0.0).chain(CurveTween(curve: Curves.easeIn)),
+      weight: 40,
+    ),
+  ]).animate(_controller);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: _fade,
+        child: ScaleTransition(
+          scale: _scale,
+          child: Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: .16),
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  widget.forward
+                      ? Icons.fast_forward_rounded
+                      : Icons.fast_rewind_rounded,
+                  color: Colors.white,
+                  size: 30,
+                  shadows: PlayerPalette.iconShadow,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  widget.english
+                      ? '${widget.forward ? '+' : '-'}${widget.seconds}s'
+                      : '${widget.forward ? '+' : '-'}${widget.seconds}ث',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                    shadows: PlayerPalette.iconShadow,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

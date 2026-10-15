@@ -35,7 +35,8 @@ abstract class PlaybackEngine extends ChangeNotifier {
   AudioTrack get selectedAudio;
   SubtitleTrack get selectedSubtitle;
 
-  Future<void> open(String url, {Duration? startAt, Map<String, String>? httpHeaders});
+  Future<void> open(String url,
+      {Duration? startAt, Map<String, String>? httpHeaders});
   Future<void> play();
   Future<void> pause();
   Future<void> togglePlayPause();
@@ -55,11 +56,12 @@ abstract class PlaybackEngine extends ChangeNotifier {
   /// Best-effort user subtitle styling via libmpv properties.
   Future<void> applySubtitleStyle({
     int? fontSize,
-    String? colorHex,      // #RRGGBB
+    String? colorHex, // #RRGGBB
     String? borderColorHex,
     int? borderSize,
     double? backgroundOpacity, // 0..1
-    String? style,             // shadow|outline|box
+    String? style, // shadow|outline|box
+    int? position, // vertical placement 0=top .. 100=bottom
   });
 
   /// Live subtitle timing offset: negative = advance (earlier),
@@ -167,7 +169,8 @@ class MediaKitEngine extends PlaybackEngine {
   VideoController get controller => _controller;
 
   @override
-  Future<void> open(String url, {Duration? startAt, Map<String, String>? httpHeaders}) async {
+  Future<void> open(String url,
+      {Duration? startAt, Map<String, String>? httpHeaders}) async {
     if (_disposed) return;
     _failed = false;
     _errorMessage = null;
@@ -176,8 +179,11 @@ class MediaKitEngine extends PlaybackEngine {
     notifyListeners();
     // Opening paused, seeking to the resume point once the media is parsed,
     // then starting playback keeps mpv from decoding the first frames twice.
-        await _player.open(
-        Media(url, httpHeaders: httpHeaders == null || httpHeaders.isEmpty ? null : httpHeaders),
+    await _player.open(
+        Media(url,
+            httpHeaders: httpHeaders == null || httpHeaders.isEmpty
+                ? null
+                : httpHeaders),
         play: false);
     if (startAt != null && startAt > Duration.zero) {
       await _player.seek(startAt);
@@ -251,7 +257,6 @@ class MediaKitEngine extends PlaybackEngine {
     await _player.setSubtitleTrack(track);
   }
 
-
   @override
   Future<void> setSubtitleUri(String url, {String? title}) async {
     if (_disposed) return;
@@ -266,6 +271,7 @@ class MediaKitEngine extends PlaybackEngine {
     int? borderSize,
     double? backgroundOpacity,
     String? style,
+    int? position,
   }) async {
     if (_disposed) return;
     final platform = _player.platform;
@@ -280,6 +286,10 @@ class MediaKitEngine extends PlaybackEngine {
     if (colorHex != null) await prop('sub-color', colorHex);
     if (borderColorHex != null) await prop('sub-border-color', borderColorHex);
     if (borderSize != null) await prop('sub-border-size', '$borderSize');
+    // mpv sub-pos: 100 = bottom of the frame (default), 0 = top.
+    if (position != null) {
+      await prop('sub-pos', '${position.clamp(0, 100)}');
+    }
     if (style == 'box' || style == 'opaque' || style == 'background') {
       await prop('sub-border-style', 'opaque');
     } else if (style == 'outline' || style == 'shadow') {
@@ -287,7 +297,8 @@ class MediaKitEngine extends PlaybackEngine {
     }
     if (backgroundOpacity != null) {
       final a = (backgroundOpacity.clamp(0.0, 1.0) * 255).round();
-      await prop('sub-back-color', '#${a.toRadixString(16).padLeft(2, '0')}000000');
+      await prop(
+          'sub-back-color', '#${a.toRadixString(16).padLeft(2, '0')}000000');
     }
   }
 

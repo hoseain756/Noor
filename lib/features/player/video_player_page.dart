@@ -55,12 +55,16 @@ class VideoPlayerPage extends StatefulWidget {
   final List<Map<String, dynamic>> streams;
   final int? streamIndex;
   final Future<void> Function(Map<String, dynamic> stream)? onSwitchStream;
+
   /// Extra HTTP headers (addon behaviorHints.proxyHeaders) for direct streams.
   final Map<String, String>? headers;
+
   /// Human stream name hint (used for debrid resolution).
   final String? filename;
+
   /// Prepared on-device torrent stream (when source was an infoHash).
   final PreparedTorrent? torrent;
+
   /// Explicit next-episode map from the detail page (fallback: computed).
   final Map<String, dynamic>? nextEpisode;
   final bool recordProgress;
@@ -87,6 +91,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   BoxFit _fit = BoxFit.contain;
   double _zoom = 1.0;
   bool _showRemaining = false;
+  bool _fullscreen = true;
 
   // Resume flow.
   bool _resuming = false;
@@ -105,6 +110,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   double _hudValue = 0;
   int _hudDeltaSeconds = 0;
   int _hudTargetMs = 0;
+
+  // Double-tap ripple state (Task 124 mandate: animated ±N feedback).
+  int _rippleKey = 0;
+  bool _rippleForward = false;
+  int _rippleSeconds = 10;
+  Timer? _rippleTimer;
 
   _OrientationMode _orientation = _OrientationMode.auto;
 
@@ -149,13 +160,25 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       borderSize: (st['subBorderSize'] as num?)?.toInt(),
       backgroundOpacity: (st['subBackgroundOpacity'] as num?)?.toDouble(),
       style: st['subStyle'] as String?,
+      position: (st['subPos'] as num?)?.toInt(),
     ));
-    unawaited(engineRef.setSubtitleDelayMs(
-        (st['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
+    unawaited(engineRef
+        .setSubtitleDelayMs((st['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
     if (st['subtitlesOffByDefault'] == true) {
       unawaited(engineRef.selectSubtitle(SubtitleTrack.no()));
     }
   }
+
+  /// Configurable skip steps (spec: "preset seconds in the settings").
+  int get _backStepSec =>
+      (context.read<AppState>().webSettings['seekBackStepSec'] as num?)
+          ?.toInt() ??
+      10;
+
+  int get _forwardStepSec =>
+      (context.read<AppState>().webSettings['seekForwardStepSec'] as num?)
+          ?.toInt() ??
+      10;
 
   void _createEngine() {
     final engine = MediaKitEngine();
@@ -164,7 +187,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     unawaited(
       engine.open(
         widget.url,
-        startAt: !_resuming ? Duration(milliseconds: _resumePositionMs ?? 0) : null,
+        startAt:
+            !_resuming ? Duration(milliseconds: _resumePositionMs ?? 0) : null,
         httpHeaders: widget.headers,
       ),
     );
@@ -189,8 +213,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       .where((v) => ((v['season'] as num?)?.toInt() ?? 0) > 0)
       .toList()
     ..sort((a, b) {
-      final bySeason = ((a['season'] as num?) ?? 0)
-          .compareTo((b['season'] as num?) ?? 0);
+      final bySeason =
+          ((a['season'] as num?) ?? 0).compareTo((b['season'] as num?) ?? 0);
       if (bySeason != 0) return bySeason;
       return ((a['episode'] as num?) ?? 0)
           .compareTo((b['episode'] as num?) ?? 0);
@@ -278,6 +302,32 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _bumpControls();
   }
 
+  /// Fullscreen toggle (Task 124): hides/shows the system UI around the
+  /// immersive video surface.
+  Future<void> _toggleFullscreen() async {
+    final next = !_fullscreen;
+    setState(() => _fullscreen = next);
+    await SystemChrome.setEnabledSystemUIMode(
+      next ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+    );
+    _bumpControls();
+  }
+
+  /// Shows the mandated double-tap ripple (Task 124) on the tapped side.
+  void _showRipple({required bool forward, required int seconds}) {
+    _rippleTimer?.cancel();
+    setState(() {
+      _rippleKey++;
+      _rippleForward = forward;
+      _rippleSeconds = seconds;
+    });
+    _rippleTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  bool get _rippleVisible => _rippleTimer?.isActive ?? false;
+
   Future<void> _saveProgress() async {
     if (!widget.recordProgress) return;
     final engine = _engine;
@@ -296,12 +346,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final app = context.read<AppState>();
     final engine = _engine;
     final duration = engine?.duration.inMilliseconds ?? 0;
-    final progress =
-        duration <= 0 ? 0.0 : (engine!.position.inMilliseconds / duration) * 100;
+    final progress = duration <= 0
+        ? 0.0
+        : (engine!.position.inMilliseconds / duration) * 100;
     final type = widget.item.type == 'series' ? 'series' : 'movie';
-    final year = RegExp(r'^\d{4}')
-        .firstMatch(widget.item.releaseInfo ?? '')
-        ?.group(0);
+    final year =
+        RegExp(r'^\d{4}').firstMatch(widget.item.releaseInfo ?? '')?.group(0);
     for (final service in const ['trakt', 'simkl']) {
       if (!app.api.isLinked(service)) continue;
       unawaited(app.api.scrobbleLinkedService(
@@ -336,8 +386,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final end = engine.duration.inMilliseconds;
     await engine.seekTo(
       Duration(
-        milliseconds:
-            (_resumePositionMs ?? 0).clamp(0, end - 5000).toInt(),
+        milliseconds: (_resumePositionMs ?? 0).clamp(0, end - 5000).toInt(),
       ),
     );
     await engine.play();
@@ -511,25 +560,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         );
       });
 
-  List<SubtitleTrack> _externalSubs = const [];
+  List<Map<String, dynamic>> _externalSubRows = const [];
 
   Future<void> _loadExternalSubs() async {
-    if (_externalSubs.isNotEmpty) return;
+    if (_externalSubRows.isNotEmpty) return;
     try {
       final app = context.read<AppState>();
       final subs = await app.catalogs
           .subtitles(widget.item.type, widget.videoId, app.addons);
-      _externalSubs = subs
-          .where((sub) => sub['url'] is String)
-          .map<SubtitleTrack>(
-            (sub) => SubtitleTrack.uri(
-              sub['url'] as String,
-              title: (sub['lang'] ?? sub['label'] ?? 'Addon').toString(),
-            ),
-          )
-          .toList();
+      _externalSubRows = subs.where((sub) => sub['url'] is String).toList();
     } catch (_) {
-      _externalSubs = const [];
+      _externalSubRows = const [];
     }
   }
 
@@ -542,7 +583,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           context,
           builder: (_) => SubtitleTracksSheet(
             english: english,
-            tracks: [...engine.subtitleTracks, ..._externalSubs],
+            embedded: engine.subtitleTracks,
+            external: _externalSubRows,
             selected: engine.selectedSubtitle,
             onPick: (track) {
               if (track.uri && track.id.isNotEmpty) {
@@ -551,8 +593,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 unawaited(engine.selectSubtitle(track));
               }
             },
-            onOpenSettings: () =>
-                Navigator.of(context).pop('style-settings'),
+            onOpenSettings: () => Navigator.of(context).pop('style-settings'),
           ),
         );
         if (!mounted) return;
@@ -583,6 +624,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       borderSize: (values['subBorderSize'] as num?)?.toInt(),
       backgroundOpacity: (values['subBackgroundOpacity'] as num?)?.toDouble(),
       style: values['subStyle'] as String?,
+      position: (values['subPos'] as num?)?.toInt(),
     ));
     unawaited(engineRef.setSubtitleDelayMs(
         (values['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
@@ -687,8 +729,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   Map<String, dynamic> _bestStream(List<Map<String, dynamic>> list) {
     int score(Map<String, dynamic> s) {
-      final t =
-          ((s['name'] ?? s['title'] ?? '') as String).toUpperCase();
+      final t = ((s['name'] ?? s['title'] ?? '') as String).toUpperCase();
       var v = 0;
       if (t.contains('2160') || t.contains('4K')) v += 50;
       if (t.contains('1080')) v += 40;
@@ -725,7 +766,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final infoHash = stream['infoHash']?.toString();
     if (infoHash == null) return null;
     final filename =
-        (stream['filename'] ?? stream['name'] ?? widget.filename ?? '').toString();
+        (stream['filename'] ?? stream['name'] ?? widget.filename ?? '')
+            .toString();
     final filesize = (stream['size'] as num?)?.toInt();
     // Premium debrid first: instant direct link, zero buffering.
     if (app.api.debridService != null) {
@@ -735,7 +777,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         filesize: filesize,
       );
       if (direct != null) {
-        return _PlaybackResolution(url: direct, headers: headers, torrent: null);
+        return _PlaybackResolution(
+            url: direct, headers: headers, torrent: null);
       }
     }
     // On-device torrent engine: sequential streaming via localhost server.
@@ -746,7 +789,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         filesize: filesize,
         displayName: widget.item.name,
       );
-      return _PlaybackResolution(url: torrent.url, headers: headers, torrent: torrent);
+      return _PlaybackResolution(
+          url: torrent.url, headers: headers, torrent: torrent);
     } on TorrentException {
       return null;
     }
@@ -757,10 +801,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   void _handleDoubleTap(TapDownDetails details) {
     if (_locked) return;
     final width = MediaQuery.sizeOf(context).width;
+    final backStep = _backStepSec;
+    final forwardStep = _forwardStepSec;
     if (details.localPosition.dx < width * .34) {
-      unawaited(_seekBy(-10));
+      _showRipple(forward: false, seconds: backStep);
+      unawaited(_seekBy(-backStep));
     } else if (details.localPosition.dx > width * .66) {
-      unawaited(_seekBy(10));
+      _showRipple(forward: true, seconds: forwardStep);
+      unawaited(_seekBy(forwardStep));
     } else {
       unawaited(_togglePlay());
     }
@@ -889,6 +937,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _hideTimer?.cancel();
     _progressTimer?.cancel();
     _hintTimer?.cancel();
+    _rippleTimer?.cancel();
     _torrentSub?.cancel();
     final torrent = widget.torrent;
     if (torrent != null) unawaited(torrent.stop());
@@ -917,9 +966,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final failed = engine?.failed ?? false;
     final duration = engine?.duration.inMilliseconds ?? 0;
     final position = engine?.position.inMilliseconds ?? 0;
-    final nearEnd =
-        duration > 0 && (duration - position) <= 30000 ||
-            (duration > 0 && position / duration >= 0.95);
+    final nearEnd = duration > 0 && (duration - position) <= 30000 ||
+        (duration > 0 && position / duration >= 0.95);
     final nextEpisode = widget.item.type == 'series'
         ? _episodeAt(_currentEpisodeIndex() + 1)
         : null;
@@ -1026,21 +1074,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         children: [
                           PlayerTopBar(
                             title: widget.item.name,
-                            subtitle: _topBarSubtitle(),
+                            episodeTag: widget.item.type == 'series'
+                                ? seasonEpisodeTag(
+                                    widget.season, widget.episode)
+                                : '',
                             onClose: _close,
-                            onSettings: _openSettings,
-                            onSubtitles: engine.subtitleTracks.isEmpty
-                                ? null
-                                : _openSubtitlesSheet,
-                            onQueue: widget.item.type == 'series' &&
-                                    _episodes.isNotEmpty
-                                ? _openEpisodesSheet
-                                : null,
-                            onStreams: widget.onSwitchStream == null ||
-                                    widget.streams.isEmpty
-                                ? null
-                                : _openStreamsSheet,
-                            streamLabel: widget.streamName,
                           ),
                           PlayerSideRail(
                             side: AxisSide.left,
@@ -1079,9 +1117,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             durationMs: duration,
                             positionMs: position,
                             bufferedMs: engine.bufferedEnd.inMilliseconds,
-                            previewSeconds: -1,
                             isPlaying: engine.playing,
+                            volume: engine.volume,
                             muted: engine.muted,
+                            backStepSec: _backStepSec,
+                            forwardStepSec: _forwardStepSec,
+                            fullscreen: _fullscreen,
                             showRemaining: _showRemaining,
                             canPrev: prevEpisode != null,
                             canNext: nextEpisode != null,
@@ -1094,13 +1135,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             onNext: nextEpisode == null
                                 ? null
                                 : () => unawaited(_switchEpisode(nextEpisode)),
+                            onVolumeChanged: (value) async {
+                              await engine.setVolume(value);
+                            },
+                            onVolumeDragEnd: () => _bumpControls(),
                             onMuteToggle: () async {
                               await engine.toggleMute();
                               _bumpControls();
                             },
-                            onFitCycle: () => unawaited(_cycleFit()),
-                            onToggleRemaining: () =>
-                                setState(() => _showRemaining = !_showRemaining),
+                            onToggleFullscreen: () =>
+                                unawaited(_toggleFullscreen()),
+                            onOpenStreams: widget.onSwitchStream == null ||
+                                    widget.streams.isEmpty
+                                ? null
+                                : _openStreamsSheet,
+                            onOpenSubtitles: _openSubtitlesSheet,
+                            onOpenAudio: _openAudioSheet,
+                            onToggleRemaining: () => setState(
+                                () => _showRemaining = !_showRemaining),
                             onScrubStart: () {
                               _hideTimer?.cancel();
                               setState(() => _controlsVisible = true);
@@ -1108,7 +1160,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             onScrubUpdate: (seconds) {},
                             onScrubEnd: (seconds) async {
                               await engine.seekTo(
-                                Duration(milliseconds: (seconds * 1000).round()),
+                                Duration(
+                                    milliseconds: (seconds * 1000).round()),
                               );
                               _bumpControls();
                             },
@@ -1216,10 +1269,32 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   if (_hintVisible)
                     Center(child: LockHintHud(message: _lastHint)),
 
+                  // Double-tap seek ripple (Task 124: animated ±N feedback),
+                  // anchored to the tapped third of the screen.
+                  if (_rippleVisible && !_locked)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Align(
+                          alignment: _rippleForward
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 56,
+                            ),
+                            child: DoubleTapRipple(
+                              key: ValueKey(_rippleKey),
+                              forward: _rippleForward,
+                              seconds: _rippleSeconds,
+                              english: english,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
                   // Resume card.
-                  if (!_locked &&
-                      _resuming &&
-                      (_resumePositionMs ?? 0) > 30000)
+                  if (!_locked && _resuming && (_resumePositionMs ?? 0) > 30000)
                     Positioned(
                       bottom: 180 * scale,
                       left: 16,
@@ -1233,8 +1308,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               icon: Icons.history_rounded,
                               label: english ? 'RESUME' : 'استئناف',
                               trailing: InkWell(
-                                onTap: () =>
-                                    setState(() => _resuming = false),
+                                onTap: () => setState(() => _resuming = false),
                                 child: const Icon(Icons.close_rounded,
                                     size: 17, color: Colors.white38),
                               ),
@@ -1263,14 +1337,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: PlayerSecondaryAction(
-                                    label: english ? 'Start over' : 'من البداية',
+                                    label:
+                                        english ? 'Start over' : 'من البداية',
                                     onPressed: () async {
                                       setState(() {
                                         _resuming = false;
                                         _resumePositionMs = 0;
                                       });
-                                      await _engine
-                                          ?.seekTo(Duration.zero);
+                                      await _engine?.seekTo(Duration.zero);
                                       await _engine?.play();
                                     },
                                   ),
@@ -1400,15 +1474,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return Icons.screen_lock_portrait_rounded;
     }
   }
-
-  String _topBarSubtitle() {
-    if (widget.season == null || widget.episode == null) {
-      return widget.streamName;
-    }
-    return english
-        ? 'S${widget.season}:E${widget.episode} · ${widget.streamName}'
-        : 'الموسم ${widget.season} · الحلقة ${widget.episode}';
-  }
 }
 
 // ── Error panel ────────────────────────────────────────────────────────────
@@ -1463,7 +1528,6 @@ class _ErrorPanel extends StatelessWidget {
       );
 }
 
-
 class _PlaybackResolution {
   const _PlaybackResolution({
     required this.url,
@@ -1483,7 +1547,9 @@ class _TorrentHud extends StatelessWidget {
   final bool english;
 
   String _speed(num bps) {
-    if (bps >= 1024 * 1024) return '${(bps / 1024 / 1024).toStringAsFixed(1)} MB/s';
+    if (bps >= 1024 * 1024) {
+      return '${(bps / 1024 / 1024).toStringAsFixed(1)} MB/s';
+    }
     if (bps >= 1024) return '${(bps / 1024).toStringAsFixed(0)} kB/s';
     return '${bps.toStringAsFixed(0)} B/s';
   }
