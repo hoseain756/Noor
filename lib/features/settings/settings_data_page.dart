@@ -12,6 +12,7 @@ import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_service.dart';
+import '../../core/version.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'widgets/settings_tiles.dart';
 
@@ -859,6 +860,19 @@ class SettingsAboutPage extends StatelessWidget {
                   children: [
                     Text('Noor',
                         style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    // Task 137: on-device build verification — the exact
+                    // pubspec version, so "did the update reach me?" is
+                    // answerable in two taps (Settings → حول Noor).
+                    Text(
+                      english
+                          ? 'Version $noorVersionLabel'
+                          : 'الإصدار $noorVersionLabel',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: HorseTheme.gold),
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       english

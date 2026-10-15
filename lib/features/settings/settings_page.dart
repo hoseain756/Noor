@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../core/version.dart';
 import '../shell/noor_dock_tabs.dart';
 import 'addons_page.dart';
 import 'integrations_page.dart';
@@ -208,9 +209,13 @@ class SettingsPage extends StatelessWidget {
               SettingsTile(
                 icon: Icons.info_outline_rounded,
                 title: english ? 'About Noor' : 'حول Noor',
+                // Task 137: the version is surfaced on the overview tile itself
+                // (no tap needed) so the user can verify which build is actually
+                // running on-device — a stale checkout previously looked
+                // identical to a shipped one.
                 subtitle: english
-                    ? 'Version, license, and acknowledgements'
-                    : 'الإصدار والترخيص والإسناد',
+                    ? 'Version $noorVersionLabel · license, and acknowledgements'
+                    : 'الإصدار $noorVersionLabel · الترخيص والإسناد',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                       builder: (_) => const SettingsAboutPage()),
