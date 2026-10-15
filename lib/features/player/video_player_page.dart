@@ -15,6 +15,7 @@ import 'engine/playback_engine.dart';
 import 'stream_headers.dart';
 import 'widgets/player_chrome.dart';
 import 'widgets/player_sheets.dart';
+import 'widgets/subtitle_overlay.dart';
 
 /// Cinematic player (reference design): the video is the screen — white
 /// controls, teal→blue gradient timeline, large outlined central play
@@ -102,6 +103,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   bool _upNextDismissed = false;
   int _streamIndex = 0;
 
+  // Task 130: live subtitle style. The settings sheet pushes every preview
+  // tick here (instant on-screen effect); commits persist through
+  // AppState.setSetting, and initState seeds from the persisted values so
+  // the style survives player re-open and the next-episode push-replacement.
+  late final ValueNotifier<SubtitleStyle> _subStyle;
+
   // Task 128: stuck-stream watchdog. Some devices (low-end Mali GPUs) render
   // an eternal WHITE texture when MediaCodec stalls, and dead URLs leave the
   // spinner forever — both look like "a white screen that never reaches the
@@ -150,9 +157,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _checkStreamStuck();
       },
     );
+    _subStyle = ValueNotifier<SubtitleStyle>(
+      SubtitleStyle.fromMap(context.read<AppState>().webSettings),
+    );
     _createEngine();
     _listenTorrent();
-    _applySubtitleStyle();
   }
 
   void _listenTorrent() {
@@ -164,19 +173,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     });
   }
 
-  void _applySubtitleStyle() {
-    final st = context.read<AppState>().webSettings;
+  /// Timing + track defaults that live engine-side (mpv owns timing; the
+  /// visual style is owned by the SubtitleOverlay through [_subStyle]).
+  /// Called from [_createEngine] so EVERY engine instance — initial and
+  /// software-decoding retry alike — starts with the user's persisted
+  /// offsets and the subtitles-off preference.
+  void _applyEngineSubtitleSettings() {
     final engineRef = _engine;
     if (engineRef == null) return;
-    unawaited(engineRef.applySubtitleStyle(
-      fontSize: (st['subFontSize'] as num?)?.toInt(),
-      colorHex: st['subFontColor'] as String?,
-      borderColorHex: st['subBorderColor'] as String?,
-      borderSize: (st['subBorderSize'] as num?)?.toInt(),
-      backgroundOpacity: (st['subBackgroundOpacity'] as num?)?.toDouble(),
-      style: st['subStyle'] as String?,
-      position: (st['subPos'] as num?)?.toInt(),
-    ));
+    final st = context.read<AppState>().webSettings;
     unawaited(engineRef
         .setSubtitleDelayMs((st['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
     unawaited(
@@ -214,6 +219,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     _engine = engine;
     engine.addListener(_onEngineTick);
+    _applyEngineSubtitleSettings();
     unawaited(
       engine.open(
         widget.url,
@@ -680,17 +686,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       });
 
   void _applySubtitleValues(Map<String, Object?> values) {
+    // Visual settings: straight into the overlay's notifier — the running
+    // video restyles instantly (Task 130 requirement: no restart, no
+    // re-open, no leaving the player).
+    _subStyle.value = SubtitleStyle.fromMap(values);
+    // Timing offset: mpv `sub-delay` — shifts WHICH text mpv emits.
     final engineRef = _engine;
     if (engineRef == null) return;
-    unawaited(engineRef.applySubtitleStyle(
-      fontSize: (values['subFontSize'] as num?)?.toInt(),
-      colorHex: values['subFontColor'] as String?,
-      borderColorHex: values['subBorderColor'] as String?,
-      borderSize: (values['subBorderSize'] as num?)?.toInt(),
-      backgroundOpacity: (values['subBackgroundOpacity'] as num?)?.toDouble(),
-      style: values['subStyle'] as String?,
-      position: (values['subPos'] as num?)?.toInt(),
-    ));
     unawaited(engineRef.setSubtitleDelayMs(
         (values['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
   }
@@ -1039,6 +1041,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _rippleTimer?.cancel();
     _hudLingerTimer?.cancel();
     _torrentSub?.cancel();
+    _subStyle.dispose();
     final torrent = widget.torrent;
     if (torrent != null) unawaited(torrent.stop());
     final engine = _engine;
@@ -1137,7 +1140,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 ClipRect(
                   child: Transform.scale(
                     scale: _zoom,
-                    child: PlayerVideoSurface(engine: engine, fit: _fit),
+                    child: PlayerVideoSurface(
+                      engine: engine,
+                      fit: _fit,
+                      overlay: SubtitleOverlay(
+                        engine: engine,
+                        style: _subStyle,
+                      ),
+                    ),
                   ),
                 )
               else

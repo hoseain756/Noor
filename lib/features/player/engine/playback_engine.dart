@@ -35,6 +35,15 @@ abstract class PlaybackEngine extends ChangeNotifier {
   AudioTrack get selectedAudio;
   SubtitleTrack get selectedSubtitle;
 
+  /// Text lines of the subtitle mpv currently renders (embedded or external
+  /// tracks alike, already shifted by `sub-delay`). The subtitle overlay
+  /// listens to this stream — mpv stays the single text/timing authority
+  /// while visual styling lives Flutter-side (see SubtitleOverlay).
+  Stream<List<String>> get subtitleTexts;
+
+  /// Current subtitle lines (initial value for late listeners).
+  List<String> get subtitleTextSnapshot;
+
   Future<void> open(String url,
       {Duration? startAt, Map<String, String>? httpHeaders});
   Future<void> play();
@@ -53,16 +62,11 @@ abstract class PlaybackEngine extends ChangeNotifier {
   /// Load an external subtitle from a URL (addon-provided SRT/VTT/ASS…).
   Future<void> setSubtitleUri(String url, {String? title});
 
-  /// Best-effort user subtitle styling via libmpv properties.
-  Future<void> applySubtitleStyle({
-    int? fontSize,
-    String? colorHex, // #RRGGBB
-    String? borderColorHex,
-    int? borderSize,
-    double? backgroundOpacity, // 0..1
-    String? style, // shadow|outline|box
-    int? position, // vertical placement 0=top .. 100=bottom
-  });
+  /// NOTE: visual subtitle styling intentionally has NO engine method.
+  /// media_kit runs with `libass: false` → mpv `sub-visibility=no`, so
+  /// libmpv-side style properties (sub-color, sub-font-size, sub-pos, …)
+  /// would target a renderer nobody sees. Styling is applied by the
+  /// Flutter-side SubtitleOverlay from SubtitleStyle (live, user-driven).
 
   /// Live subtitle timing offset: negative = advance (earlier),
   /// positive = delay (later). Maps to mpv `sub-delay` seconds.
@@ -190,7 +194,14 @@ class MediaKitEngine extends PlaybackEngine {
   @override
   SubtitleTrack get selectedSubtitle => _selected.subtitle;
 
-  /// Texture-backed video surface with libass subtitle rendering.
+  @override
+  Stream<List<String>> get subtitleTexts => _player.stream.subtitle;
+
+  @override
+  List<String> get subtitleTextSnapshot => _player.state.subtitle;
+
+  /// Texture-backed video surface (subtitles render Flutter-side — see
+  /// [PlayerVideoSurface.overlay] and widgets/subtitle_overlay.dart).
   VideoController get controller => _controller;
 
   @override
@@ -286,45 +297,6 @@ class MediaKitEngine extends PlaybackEngine {
   Future<void> setSubtitleUri(String url, {String? title}) async {
     if (_disposed) return;
     await _player.setSubtitleTrack(SubtitleTrack.uri(url, title: title));
-  }
-
-  @override
-  Future<void> applySubtitleStyle({
-    int? fontSize,
-    String? colorHex,
-    String? borderColorHex,
-    int? borderSize,
-    double? backgroundOpacity,
-    String? style,
-    int? position,
-  }) async {
-    if (_disposed) return;
-    final platform = _player.platform;
-    if (platform is! NativePlayer) return;
-    Future<void> prop(String name, String value) async {
-      try {
-        await platform.setProperty(name, value);
-      } catch (_) {/* best-effort: some platforms lack native props */}
-    }
-
-    if (fontSize != null) await prop('sub-font-size', '$fontSize');
-    if (colorHex != null) await prop('sub-color', colorHex);
-    if (borderColorHex != null) await prop('sub-border-color', borderColorHex);
-    if (borderSize != null) await prop('sub-border-size', '$borderSize');
-    // mpv sub-pos: 100 = bottom of the frame (default), 0 = top.
-    if (position != null) {
-      await prop('sub-pos', '${position.clamp(0, 100)}');
-    }
-    if (style == 'box' || style == 'opaque' || style == 'background') {
-      await prop('sub-border-style', 'opaque');
-    } else if (style == 'outline' || style == 'shadow') {
-      await prop('sub-border-style', 'outline-and-shadow');
-    }
-    if (backgroundOpacity != null) {
-      final a = (backgroundOpacity.clamp(0.0, 1.0) * 255).round();
-      await prop(
-          'sub-back-color', '#${a.toRadixString(16).padLeft(2, '0')}000000');
-    }
   }
 
   @override
@@ -442,31 +414,38 @@ class PlayerVideoSurface extends StatelessWidget {
     super.key,
     required this.engine,
     required this.fit,
+    this.overlay,
   });
 
   final MediaKitEngine engine;
   final BoxFit fit;
 
+  /// Layered above the video inside the same surface (the settings-aware
+  /// [SubtitleOverlay] — kept here so it inherits the page's pinch-zoom
+  /// transform exactly like media_kit's own subtitle view used to).
+  final Widget? overlay;
+
   @override
   Widget build(BuildContext context) {
-    return Video(
-      controller: engine.controller,
-      fit: fit,
-      // All chrome is rendered by this app's own player widgets.
-      controls: null,
-      wakelock: true,
-      // libass subtitle rendering over the texture.
-      subtitleViewConfiguration: const SubtitleViewConfiguration(
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 26,
-          height: 1.35,
-          shadows: [
-            Shadow(color: Colors.black, blurRadius: 6),
-            Shadow(color: Colors.black, blurRadius: 2),
-          ],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Video(
+          controller: engine.controller,
+          fit: fit,
+          // All chrome is rendered by this app's own player widgets.
+          controls: null,
+          wakelock: true,
+          // Subtitle text rendering is owned by [overlay]: media_kit's
+          // built-in SubtitleView carries a compile-time constant TextStyle
+          // (fixed white/26 — user settings could never reach the screen),
+          // and native libass rendering is disabled anyway
+          // (PlayerConfiguration.libass = false → mpv sub-visibility=no).
+          subtitleViewConfiguration:
+              const SubtitleViewConfiguration(visible: false),
         ),
-      ),
+        if (overlay != null) Positioned.fill(child: overlay!),
+      ],
     );
   }
 }
