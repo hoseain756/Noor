@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.util.Log
+import com.frostwire.jlibtorrent.AnnounceEntry
 import com.frostwire.jlibtorrent.AlertListener
 import com.frostwire.jlibtorrent.Priority
 import com.frostwire.jlibtorrent.SessionManager
@@ -24,6 +25,7 @@ import com.frostwire.jlibtorrent.swig.add_torrent_params
 import com.frostwire.jlibtorrent.swig.error_code
 import com.frostwire.jlibtorrent.swig.session_handle
 import com.frostwire.jlibtorrent.swig.settings_pack
+import java.net.URLDecoder
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -61,6 +63,9 @@ private const val RESOLVE_TOTAL_SECONDS = RESOLVE_ATTEMPT_SECONDS + RESOLVE_RETR
 
 /** How long to wait for the torrent handle to appear after an async add. */
 private const val HANDLE_WAIT_MS = 15_000L
+
+/** `tr=` / `tr[]=` entries of a magnet URI (opaque URIs — Uri.getQueryParameters throws). */
+private val MAGNET_TRACKER_REGEX = Regex("(?:^|&)(?:tr|tr\\[\\])=([^&]+)")
 
 /** How long to wait for the swarm to deliver metadata after starting a download. */
 private const val METADATA_WAIT_MS = 30_000L
@@ -528,6 +533,14 @@ class MainActivity :
                 "torrent_start_failed",
                 "Torrent handle did not appear within ${HANDLE_WAIT_MS / 1000}s",
             )
+        // Task 132: a torrent added from cached .torrent bytes only carries
+        // the announce entries embedded in that file — the public HTTP
+        // caches ship torrents with an EMPTY announce-list (verified live),
+        // so the handle would run on DHT alone. On networks that throttle
+        // UDP/DHT that is exactly the "Torrentio never works" failure. The
+        // magnet always carries the Dart-side tracker merge (stream sources
+        // + verified defaults) — re-announce those onto the handle.
+        mergeMagnetTrackers(th, magnet)
         if (sequential) {
             th.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD, TorrentFlags.SEQUENTIAL_DOWNLOAD)
         }
@@ -642,6 +655,36 @@ class MainActivity :
             Thread.sleep(250)
         }
         return null
+    }
+
+    /**
+     * Adds every `tr=` tracker of [magnet] to [th] that the handle does not
+     * already announce to. Deduplicated, failures per-tracker non-fatal.
+     */
+    private fun mergeMagnetTrackers(th: TorrentHandle, magnet: String) {
+        try {
+            val existing = th.trackers().mapTo(HashSet()) { it.url() }
+            var added = 0
+            for (match in MAGNET_TRACKER_REGEX.findAll(magnet)) {
+                val url = try {
+                    URLDecoder.decode(match.groupValues[1], "UTF-8").trim()
+                } catch (t: Throwable) {
+                    continue
+                }
+                if (url.isEmpty() || !existing.add(url)) continue
+                try {
+                    th.addTracker(AnnounceEntry(url))
+                    added++
+                } catch (t: Throwable) {
+                    Log.w(TAG, "addTracker failed for $url: ${t.message}")
+                }
+            }
+            if (added > 0) {
+                Log.i(TAG, "merged $added magnet tracker(s) onto the torrent handle")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "tracker merge skipped: ${t.message}")
+        }
     }
 
     /**
