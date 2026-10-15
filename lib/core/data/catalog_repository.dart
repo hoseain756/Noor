@@ -674,6 +674,9 @@ query ($weekStart: Int!, $weekEnd: Int!) {
                 (e) => <String, dynamic>{
                   ...Map<String, dynamic>.from(e),
                   'addonName': addon.name,
+                  // Task 123: add-on identity for the sources page rows
+                  // (icon square + per-add-on filter).
+                  if (addon.iconUrl != null) 'addonIcon': addon.iconUrl,
                 },
               )
               .toList();
