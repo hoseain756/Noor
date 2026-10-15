@@ -164,4 +164,34 @@ void main() {
 
     expect(find.byType(Text), findsNothing);
   });
+
+  testWidgets('subtitles render in the bundled subtitle family',
+      (tester) async {
+    testerSurface();
+    final controller = StreamController<List<String>>.broadcast();
+    addTearDown(controller.close);
+    final engine = _FakeEngine(controller.stream, const ['font check']);
+    final style = ValueNotifier<SubtitleStyle>(SubtitleStyle.fallback);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SubtitleOverlay(engine: engine, style: style),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final text = tester.widget<Text>(find.text('font check')).style!;
+    expect(text.fontFamily, 'NetflixSans');
+
+    // The family flows live through the same notifier path as every other
+    // style knob (parsing layer ready for a future font picker).
+    style.value = SubtitleStyle.fromMap({'subFontFamily': 'Tajawal'});
+    await tester.pump();
+    expect(
+      tester.widget<Text>(find.text('font check')).style!.fontFamily,
+      'Tajawal',
+    );
+  });
 }

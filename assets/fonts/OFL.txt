@@ -1,3 +1,19 @@
+Tajawal (bundled app UI font)
+Copyright (c) 2015, Boutros Fonts (boutrosfonts.com)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied above, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+---
+Netflix Sans (bundled subtitle font) is proprietary software:
+Copyright (c) 2018-2021. Netflix, Inc. and its affiliates. All rights
+reserved. Designed by Dalton Maag Ltd. Bundled at the app owner's explicit
+request; the app owner is responsible for holding a valid license to
+redistribute it.
+
+---
+
 Copyright 2009 The Cairo Project Authors (https://github.com/Gue3bara/Cairo)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

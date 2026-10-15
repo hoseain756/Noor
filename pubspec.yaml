@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.31+35
+version: 1.2.32+36
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -88,13 +88,26 @@ flutter:
   uses-material-design: true
 
   fonts:
-    - family: Cairo
+    # App-wide UI family (user request): Tajawal — Arabic + Latin, OFL.
+    - family: Tajawal
       fonts:
-        - asset: assets/fonts/Cairo-Regular.ttf
-        - asset: assets/fonts/Cairo-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Cairo-Bold.ttf
+        - asset: assets/fonts/Tajawal-Regular.ttf
+        - asset: assets/fonts/Tajawal-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Tajawal-Bold.ttf
           weight: 700
+        - asset: assets/fonts/Tajawal-ExtraBold.ttf
+          weight: 800
+    # Subtitle rendering family (user request): Netflix Sans, Light/Regular/
+    # Medium. Proprietary typeface (© Netflix, Inc. — Dalton Maag); bundled
+    # at the user's explicit request for their own distribution.
+    - family: NetflixSans
+      fonts:
+        - asset: assets/fonts/NetflixSans-Light.ttf
+          weight: 300
+        - asset: assets/fonts/NetflixSans-Regular.ttf
+        - asset: assets/fonts/NetflixSans-Medium.ttf
+          weight: 500
 
   # To add assets to your application, add an assets section, like this:
   # assets:

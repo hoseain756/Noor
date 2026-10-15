@@ -28,7 +28,13 @@ class SubtitleStyle {
     this.backgroundOpacity = 0.35,
     this.style = 'shadow',
     this.position = 100,
+    this.fontFamily = subtitleFontFamily,
   });
+
+  /// Subtitle typeface (user request): bundled Netflix Sans (Light/Regular/
+  /// Medium declared in pubspec). Declared once here so the overlay and the
+  /// settings-sheet preview can never drift apart (WYSIWYG parity).
+  static const String subtitleFontFamily = 'NetflixSans';
 
   /// Reference pixel size at ≤1080p (scaled down on larger surfaces).
   final int fontSize;
@@ -46,6 +52,11 @@ class SubtitleStyle {
 
   /// Vertical placement, mpv `sub-pos` semantics: 0 = top, 100 = bottom.
   final int position;
+
+  /// Typeface family used by the visible overlay (and the sheet preview).
+  /// Must match a family declared under `fonts:` in pubspec.yaml; unknown
+  /// names make Flutter fall back to the default font — never a crash.
+  final String fontFamily;
 
   static const SubtitleStyle fallback = SubtitleStyle();
 
@@ -89,8 +100,18 @@ class SubtitleStyle {
         _ => 'shadow',
       };
 
+  /// Empty/garbage family names fall back to the bundled subtitle font
+  /// (permissive on purpose: a future font picker can add families without
+  /// touching this parser).
+  static String _familyName(Object? raw) {
+    if (raw is! String) return subtitleFontFamily;
+    final value = raw.trim();
+    return value.isEmpty ? subtitleFontFamily : value;
+  }
+
   /// Parses the app settings map (keys: subFontSize, subFontColor, subStyle,
-  /// subBorderColor, subBorderSize, subBackgroundOpacity, subPos).
+  /// subBorderColor, subBorderSize, subBackgroundOpacity, subPos,
+  /// subFontFamily).
   factory SubtitleStyle.fromMap(Map<String, Object?> map) => SubtitleStyle(
         fontSize: _int(map, 'subFontSize', 28, 14, 44),
         color: _color(map['subFontColor'], const Color(0xFFFFFFFF)),
@@ -99,6 +120,7 @@ class SubtitleStyle {
         backgroundOpacity: _double(map, 'subBackgroundOpacity', 0.35, 0.0, 1.0),
         style: _styleName(map['subStyle']),
         position: _int(map, 'subPos', 100, 0, 100),
+        fontFamily: _familyName(map['subFontFamily']),
       );
 
   /// mpv sub-pos → Flutter alignment: 0 → topCenter, 50 → center, 100 →
@@ -219,12 +241,17 @@ class _SubtitleOverlayState extends State<SubtitleOverlay> {
           child: Text(
             text,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: fontSize, color: style.color),
+            style: TextStyle(
+              fontSize: fontSize,
+              color: style.color,
+              fontFamily: style.fontFamily,
+            ),
           ),
         );
       case 'outline':
         final stroke = TextStyle(
           fontSize: fontSize,
+          fontFamily: style.fontFamily,
           foreground: Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = style.strokeWidthAt(scale)
@@ -237,7 +264,11 @@ class _SubtitleOverlayState extends State<SubtitleOverlay> {
             Text(
               text,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: fontSize, color: style.color),
+              style: TextStyle(
+                fontSize: fontSize,
+                color: style.color,
+                fontFamily: style.fontFamily,
+              ),
             ),
           ],
         );
@@ -248,6 +279,7 @@ class _SubtitleOverlayState extends State<SubtitleOverlay> {
           style: TextStyle(
             fontSize: fontSize,
             color: style.color,
+            fontFamily: style.fontFamily,
             shadows: style.shadows,
           ),
         );

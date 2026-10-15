@@ -14,6 +14,37 @@ void main() {
       expect(s.backgroundOpacity, 0.35);
       expect(s.style, 'shadow');
       expect(s.position, 100);
+      expect(s.fontFamily, 'NetflixSans');
+    });
+  });
+
+  group('SubtitleStyle.fontFamily (user-requested subtitle typeface)', () {
+    test('defaults to the bundled Netflix Sans family', () {
+      expect(SubtitleStyle.subtitleFontFamily, 'NetflixSans');
+      expect(SubtitleStyle.fallback.fontFamily, 'NetflixSans');
+    });
+
+    test('explicit subFontFamily override is respected', () {
+      final s = SubtitleStyle.fromMap({'subFontFamily': 'Tajawal'});
+      expect(s.fontFamily, 'Tajawal');
+    });
+
+    test('empty or whitespace family falls back to the bundled font', () {
+      expect(
+        SubtitleStyle.fromMap({'subFontFamily': ''}).fontFamily,
+        'NetflixSans',
+      );
+      expect(
+        SubtitleStyle.fromMap({'subFontFamily': '   '}).fontFamily,
+        'NetflixSans',
+      );
+    });
+
+    test('non-string family values fall back instead of crashing', () {
+      expect(
+        SubtitleStyle.fromMap({'subFontFamily': 42}).fontFamily,
+        'NetflixSans',
+      );
     });
   });
 

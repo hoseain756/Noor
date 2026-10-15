@@ -7,6 +7,7 @@ import '../../../core/state/app_state.dart';
 import '../../../core/theme/horse_theme.dart';
 import '../../../shared/widgets/color_picker_dialog.dart';
 import '../engine/playback_engine.dart';
+import 'subtitle_overlay.dart' show SubtitleStyle;
 
 /// Dark-glass bottom sheets used by the player (settings, tracks, episodes,
 /// streams). They belong to the app's design language; only the on-video
@@ -1530,7 +1531,14 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           color: Colors.black.withValues(alpha: opacity),
-          child: Text(text, style: TextStyle(fontSize: fontSize, color: color)),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: fontSize,
+              color: color,
+              fontFamily: SubtitleStyle.subtitleFontFamily,
+            ),
+          ),
         );
         break;
       case 'outline':
@@ -1541,13 +1549,21 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
               text,
               style: TextStyle(
                 fontSize: fontSize,
+                fontFamily: SubtitleStyle.subtitleFontFamily,
                 foreground: Paint()
                   ..style = PaintingStyle.stroke
                   ..strokeWidth = stroke
                   ..color = borderColor,
               ),
             ),
-            Text(text, style: TextStyle(fontSize: fontSize, color: color)),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: fontSize,
+                color: color,
+                fontFamily: SubtitleStyle.subtitleFontFamily,
+              ),
+            ),
           ],
         );
         break;
@@ -1557,6 +1573,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
           style: TextStyle(
             fontSize: fontSize,
             color: color,
+            fontFamily: SubtitleStyle.subtitleFontFamily,
             shadows: [
               Shadow(
                 color: Colors.black.withValues(alpha: .9),
