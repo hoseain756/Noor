@@ -16,7 +16,6 @@
 library;
 
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,7 +23,11 @@ import 'package:flutter/services.dart';
 import '../../core/theme/horse_theme.dart';
 
 /// The glass-dock recipe as a pill/rounded-rect surface. Children paint on
-/// top of the blurred backdrop; the caller supplies ink/labels.
+/// top of the glass fill; the caller supplies ink/labels.
+///
+/// Task 136 (perf): the LIVE BackdropFilter is retired — these pills sit
+/// over the detail/sources pages' scrolling lists, so the blur recomputed on
+/// every scroll frame. Static black/72 fill under the same ring + shadow.
 class GlassPillSurface extends StatelessWidget {
   const GlassPillSurface({
     super.key,
@@ -36,13 +39,12 @@ class GlassPillSurface extends StatelessWidget {
   final Widget child;
   final double borderRadius;
 
-  /// Defaults to the dock blur ladder (12 < 600px viewport, else 14).
+  /// Legacy blur knob — retired by Task 136 (the live BackdropFilter was
+  /// removed); kept so existing call sites compile untouched.
   final double? blurSigma;
 
   @override
   Widget build(BuildContext context) {
-    final blur =
-        blurSigma ?? (MediaQuery.sizeOf(context).width < 600 ? 12.0 : 14.0);
     final radius = BorderRadius.circular(borderRadius);
     return DecoratedBox(
       // 1px white/15 ring painted above the clipped glass + the old
@@ -62,13 +64,10 @@ class GlassPillSurface extends StatelessWidget {
         borderRadius: radius,
         child: Stack(
           children: [
-            // Glass backdrop: blur over the black/55 fill — the old
-            // back-pill recipe verbatim (no tint sheen, no saturate, no
-            // inset hairlines).
+            // Static glass fill (was a live blur-12/14 backdrop — Task 136).
             Positioned.fill(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-                child: ColoredBox(color: Colors.black.withValues(alpha: .55)),
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: .72),
               ),
             ),
             // Content on top of the glass stack — the NON-positioned child
@@ -228,19 +227,19 @@ class _GlassMenuPanel extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: ColoredBox(
-            // bg-elevated/95 → HorseTheme.surface (#131617) at .95.
-            color: HorseTheme.surface.withValues(alpha: .95),
-            child: Material(
-              type: MaterialType.transparency,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxHeight),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(6),
-                  child: child,
-                ),
+        // Task 136 (perf): the blur-24 backdrop is gone — the .95 surface
+        // fill covered it almost completely, so the GPU paid a full gaussian
+        // pass for a nearly invisible effect every frame the menu scrolled.
+        child: ColoredBox(
+          // bg-elevated/95 → HorseTheme.surface (#131617) at .95.
+          color: HorseTheme.surface.withValues(alpha: .95),
+          child: Material(
+            type: MaterialType.transparency,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(6),
+                child: child,
               ),
             ),
           ),

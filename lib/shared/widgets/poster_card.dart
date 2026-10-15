@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import 'image_decode.dart';
 import 'media_quick_look.dart';
 
 class PosterCard extends StatelessWidget {
@@ -63,6 +64,8 @@ class PosterCard extends StatelessWidget {
                         Image.network(
                           item.poster!,
                           fit: BoxFit.cover,
+                          // Task 136: decode at the card's on-screen size.
+                          cacheWidth: imageCacheWidth(context, width),
                           errorBuilder: (_, __, ___) => const _PosterFallback(),
                         )
                       else

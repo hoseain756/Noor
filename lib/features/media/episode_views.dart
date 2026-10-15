@@ -1097,8 +1097,11 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
         ],
       );
       if (widget.blurred) {
+        // Task 136 (perf): spoiler blur 20 → 10 — every unwatched episode's
+        // still paid a 20-sigma gaussian on every paint while the list
+        // scrolled; 10 keeps the preview unreadable at half the cost.
         art = ImageFiltered(
-          imageFilter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Transform.scale(
             scale: 1.14,
             child: ColorFiltered(

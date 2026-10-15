@@ -1,7 +1,11 @@
-// Task 120 regression lock — the floating-glass family wears the OLD
-// detail back-pill recipe (user mandate): blur backdrop over a black/55
-// fill, 1px white/15 ring, soft black shadow — and NO cyan-tint layers
-// (`#BFE6F2` sheen / ring / saturate filter) remain on any surface.
+// Task 120 regression lock, EVOLVED by Task 136 (perf): the floating-glass
+// family still wears the OLD detail back-pill DECOR — 1px white/15 ring,
+// soft black shadow — and NO cyan-tint layers (`#BFE6F2` sheen / ring /
+// saturate filter) remain on any surface. What Task 136 retired is the LIVE
+// BackdropFilter: it re-blurred the page beneath the persistent chrome on
+// every content frame (the heaviest GPU cost on the low-end target), so
+// every surface now carries a static black/72 glass fill and ZERO
+// BackdropFilters.
 //
 // Surfaces pinned here: GlassSearchButton (search + detail back + sources
 // back), GlassPillSurface (season dropdown + sort chip + view toggle) and
@@ -49,8 +53,22 @@ void _expectNoCyanLayers(WidgetTester tester, Finder scope) {
   );
 }
 
+void _expectStaticGlassFill(WidgetTester tester, Finder scope) {
+  // Task 136: the retired live blur is replaced by a static black/72 fill
+  // so the glass surface keeps its depth without a per-frame gaussian.
+  final fills = tester.widgetList<ColoredBox>(find.descendant(
+    of: scope,
+    matching: find.byType(ColoredBox),
+  ));
+  expect(
+    fills.any((c) => c.color == Colors.black.withValues(alpha: .72)),
+    isTrue,
+    reason: 'the static black/72 glass fill must replace the live blur',
+  );
+}
+
 void main() {
-  testWidgets('GlassSearchButton wears the pre-118 back-pill recipe',
+  testWidgets('GlassSearchButton wears the blur-free glass recipe',
       (tester) async {
     await tester.pumpWidget(_host(GlassSearchButton(
       tooltip: 'search',
@@ -60,16 +78,19 @@ void main() {
 
     _expectBackPillRecipe(_firstOwnDecoration(tester, GlassSearchButton));
 
-    // Exactly ONE backdrop blur (sigma 12) and no tint layers.
-    final filters = tester.widgetList<BackdropFilter>(find.descendant(
-      of: find.byType(GlassSearchButton),
-      matching: find.byType(BackdropFilter),
-    ));
-    expect(filters.length, 1);
+    // Task 136: ZERO backdrop blurs; static fill instead; no tint layers.
+    expect(
+      find.descendant(
+        of: find.byType(GlassSearchButton),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsNothing,
+    );
+    _expectStaticGlassFill(tester, find.byType(GlassSearchButton));
     _expectNoCyanLayers(tester, find.byType(GlassSearchButton));
   });
 
-  testWidgets('GlassPillSurface wears the pre-118 back-pill recipe',
+  testWidgets('GlassPillSurface wears the blur-free glass recipe',
       (tester) async {
     await tester.pumpWidget(_host(
       const GlassPillSurface(child: SizedBox(width: 120, height: 48)),
@@ -78,15 +99,18 @@ void main() {
 
     _expectBackPillRecipe(_firstOwnDecoration(tester, GlassPillSurface));
 
-    final filters = tester.widgetList<BackdropFilter>(find.descendant(
-      of: find.byType(GlassPillSurface),
-      matching: find.byType(BackdropFilter),
-    ));
-    expect(filters.length, 1);
+    expect(
+      find.descendant(
+        of: find.byType(GlassPillSurface),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsNothing,
+    );
+    _expectStaticGlassFill(tester, find.byType(GlassPillSurface));
     _expectNoCyanLayers(tester, find.byType(GlassPillSurface));
   });
 
-  testWidgets('GlassDock wears the pre-118 back-pill recipe', (tester) async {
+  testWidgets('GlassDock wears the blur-free glass recipe', (tester) async {
     final tabs = dockTabsFor(kidsMode: false, hideAnime: false, rtl: false);
     await tester.pumpWidget(
       MediaQuery(
@@ -138,14 +162,16 @@ void main() {
       isTrue,
     );
 
-    // The dock kept its backdrop blur and lost the cyan saturate layer.
+    // Task 136: the dock retired its backdrop blur for a static fill and
+    // kept the ring/shadow; the cyan saturate layer stays gone.
     expect(
       find.descendant(
         of: find.byType(GlassDock),
         matching: find.byType(BackdropFilter),
       ),
-      findsOneWidget,
+      findsNothing,
     );
+    _expectStaticGlassFill(tester, find.byType(GlassDock));
     _expectNoCyanLayers(tester, find.byType(GlassDock));
   });
 }

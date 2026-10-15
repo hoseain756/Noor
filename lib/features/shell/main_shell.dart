@@ -36,15 +36,47 @@ class _MainShellState extends State<MainShell> {
   double _scrollDelta = 0;
   bool _tabletNavVisible = false;
 
+  // Task 136 (perf): the five kept-alive pages used to be rebuilt from
+  // scratch on EVERY shell setState — including the scroll auto-hide toggles
+  // that fire repeatedly while the user scrolls — and the IndexedStack then
+  // RELAID OUT all five subtrees on every such pass. The page instances now
+  // live in State fields built once (Home is the only page with an input,
+  // and its instance is swapped only when its `active` flag actually flips),
+  // so chrome toggles no longer touch any page's element tree.
+  late final Widget _animePage =
+      const SafeArea(bottom: false, child: AnimePage());
+  late final Widget _kidsPage =
+      const SafeArea(bottom: false, child: KidsPage());
+  late final Widget _libraryPage =
+      const SafeArea(bottom: false, child: LibraryPage());
+  late final Widget _settingsPage = SafeArea(
+    bottom: false,
+    child: SettingsPage(onOpenLibrary: () => _selectTab(3)),
+  );
+  // Home is intentionally UNWRAPPED by a SafeArea: its featured hero extends
+  // behind the transparent status bar (Task 119) and the page adds its own
+  // `safeTop` padding where content must stay clear of the icons.
+  HomePage _homePage = const HomePage();
+
+  Widget _pageAt(int index) => switch (index) {
+        0 => _homePage,
+        1 => _animePage,
+        2 => _kidsPage,
+        3 => _libraryPage,
+        _ => _settingsPage,
+      };
+
   void _selectTab(int index) {
     if (index == _selected) {
       if (!_chromeVisible) setState(() => _chromeVisible = true);
       return;
     }
+    final homeActiveFlips = (index == 0) != _homePage.active;
     setState(() {
       _selected = index;
       _chromeVisible = true;
       _scrollDelta = 0;
+      if (homeActiveFlips) _homePage = HomePage(active: index == 0);
     });
   }
 
@@ -135,21 +167,21 @@ class _MainShellState extends State<MainShell> {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final duration =
         reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
+    // Task 136 (perf): kept-alive pages via per-child Offstage + TickerMode
+    // instead of an IndexedStack. Identical state preservation, but:
+    //  - Offstage SKIPS layout+paint of hidden pages (IndexedStack always
+    //    laid out every child on every pass);
+    //  - TickerMode MUTES hidden pages' animation tickers (a shimmer skeleton
+    //    left behind in a hidden page no longer animates forever — it used to
+    //    burn CPU every frame even off-screen);
+    //  - the page instances are stable State fields (above), so this build
+    //    touches nothing inside any page.
     final pages = [
-      // Home is intentionally UNWRAPPED: its featured hero extends behind
-      // the transparent status bar (Task 119) and the page adds its own
-      // `safeTop` padding where content must stay clear of the icons.
-      HomePage(active: _selected == 0),
-      // Every other tab keeps the previous top inset (identical geometry to
-      // the old shell-wide SafeArea — its content still starts below the
-      // status icons).
-      const SafeArea(bottom: false, child: AnimePage()),
-      const SafeArea(bottom: false, child: KidsPage()),
-      const SafeArea(bottom: false, child: LibraryPage()),
-      SafeArea(
-        bottom: false,
-        child: SettingsPage(onOpenLibrary: () => _selectTab(3)),
-      ),
+      for (var i = 0; i < 5; i++)
+        TickerMode(
+          enabled: _selected == i,
+          child: Offstage(offstage: _selected != i, child: _pageAt(i)),
+        ),
     ];
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -170,10 +202,7 @@ class _MainShellState extends State<MainShell> {
                   width: math.min(size.width, 1600),
                   child: NotificationListener<ScrollNotification>(
                     onNotification: _onScroll,
-                    child: IndexedStack(
-                      index: _selected,
-                      children: pages,
-                    ),
+                    child: Stack(children: pages),
                   ),
                 ),
               ),

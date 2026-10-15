@@ -10,13 +10,12 @@
 ///   · [ShimmerBox] / [DetailLoadingSkeleton] — the loading state
 library;
 
-import 'dart:ui' show FontFeature, ImageFilter;
-
 import 'package:flutter/material.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/glass_navigation.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/shimmer_box.dart';
 import 'detail_glass.dart';
 
@@ -336,6 +335,10 @@ class _HeroImageState extends State<_HeroImage> {
             child: Image.network(
               src,
               fit: BoxFit.cover,
+              // Task 136: decode at the hero's on-screen width, not the
+              // w1280 URL the API hands out.
+              cacheWidth:
+                  imageCacheWidth(context, MediaQuery.sizeOf(context).width),
               alignment: widget.alignment,
               frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
                 if (frame != null || wasSynchronouslyLoaded) _markLoaded();
@@ -388,6 +391,8 @@ class _HeroTitleLogo extends StatelessWidget {
         child: Image.network(
           src,
           fit: BoxFit.contain,
+          // Task 136: decode at the logo's on-screen size.
+          cacheWidth: imageCacheWidth(context, maxLogoWidth),
           alignment: AlignmentDirectional.bottomCenter,
           frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
             if (wasSynchronouslyLoaded) return child;
@@ -1047,8 +1052,10 @@ class _CircleButton extends StatelessWidget {
   }
 }
 
-/// border white/8 + bg raised/80 + blur-12 circle (the web menu trigger
-/// recipe); [key] is honored so callers can measure the anchor rect.
+/// border white/8 + bg raised/85 circle (the web menu trigger recipe,
+/// Task 136: the blur-12 backdrop is retired — several of these buttons sit
+/// over the scrolling hero artwork and each one re-blurred its backdrop on
+/// every scroll frame); [key] is honored so callers can measure the anchor.
 class _CircleButtonBody extends StatelessWidget {
   const _CircleButtonBody({super.key, required this.child});
 
@@ -1059,20 +1066,13 @@ class _CircleButtonBody extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
+        color: HorseTheme.raised.withValues(alpha: .85),
         border: Border.all(color: Colors.white.withValues(alpha: .08)),
       ),
-      child: ClipOval(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: ColoredBox(
-            color: HorseTheme.raised.withValues(alpha: .80),
-            child: SizedBox(
-              width: 52,
-              height: 52,
-              child: Center(child: child),
-            ),
-          ),
-        ),
+      child: SizedBox(
+        width: 52,
+        height: 52,
+        child: Center(child: child),
       ),
     );
   }

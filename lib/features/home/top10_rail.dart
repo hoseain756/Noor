@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/media_quick_look.dart';
 import '../../shared/widgets/media_rail.dart';
 
@@ -316,6 +317,9 @@ class _Top10Sticker extends StatelessWidget {
                     Image.network(
                       item.poster!,
                       fit: BoxFit.cover,
+                      // Task 136: decode at the 120px slot, not the w780 URL.
+                      cacheWidth:
+                          imageCacheWidth(context, Top10Item._posterWidth),
                       errorBuilder: (_, __, ___) => const _PosterFallback(),
                     ),
                 ],

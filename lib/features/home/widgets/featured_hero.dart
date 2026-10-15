@@ -8,6 +8,7 @@ import '../../../core/models/featured_artwork.dart';
 import '../../../core/models/media_item.dart';
 import '../../../core/state/app_state.dart';
 import '../../../core/theme/horse_theme.dart';
+import '../../../shared/widgets/image_decode.dart';
 import '../../shell/noor_dock_tabs.dart' show glassDockContentClearance;
 
 /// The featured hero carousel (home's top slot): full-bleed autoplaying
@@ -275,6 +276,9 @@ class _FeaturedArtwork extends StatelessWidget {
               width: double.infinity,
               height: double.infinity,
               fit: BoxFit.cover,
+              // Task 136: decode at the hero's on-screen width — the TMDB
+              // backdrop URL can be w1280; on a phone the hero is ~400px.
+              cacheWidth: imageCacheWidth(context, size.width),
               alignment: large ? Alignment.center : Alignment.topCenter,
               errorBuilder: (_, __, ___) =>
                   const ColoredBox(color: HorseTheme.raised),
@@ -387,6 +391,9 @@ class _FeaturedOverlay extends StatelessWidget {
                             width: math.min(size.width * .5, 175.0),
                             height: 50,
                             fit: BoxFit.contain,
+                            // Task 136: decode at the logo's on-screen size.
+                            cacheWidth: imageCacheWidth(
+                                context, math.min(size.width * .5, 175.0)),
                             semanticLabel: item.name,
                             errorBuilder: (_, __, ___) =>
                                 const SizedBox.shrink(),

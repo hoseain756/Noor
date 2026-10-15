@@ -8,6 +8,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/app_state_message.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../player/video_player_page.dart';
 
 class LiveTvPage extends StatefulWidget {
@@ -302,6 +303,10 @@ class _LiveTvPageState extends State<LiveTvPage> {
                                                       color: HorseTheme.gold))
                                               : Image.network(channel.logo!,
                                                   fit: BoxFit.contain,
+                                                  // Task 136: decode at the
+                                                  // 64px channel logo size.
+                                                  cacheWidth: imageCacheWidth(
+                                                      context, 64),
                                                   errorBuilder: (_, __, ___) =>
                                                       const ColoredBox(
                                                           color:

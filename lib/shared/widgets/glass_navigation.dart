@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../../core/theme/horse_theme.dart';
@@ -11,12 +9,12 @@ import '../../core/theme/horse_theme.dart';
 
 /// Circular floating glass button wearing the OLD detail back-pill recipe
 /// (user mandate, Task 120: "the pre-118 back-button glow background for
-/// the search button AND the navigation bar"): a blur-12 backdrop over a
-/// black/55 fill with a 1px white/15 ring and a soft black drop shadow.
-/// This neutral dark glass replaces the previous dock's cyan-tint recipe
-/// (saturate(1.35) + `#BFE6F2` sheen/ring) across the whole floating-glass
-/// family — search button, detail back, sources back, glass dock and the
-/// detail page's pill toolbar all render the exact same surface now.
+/// the search button AND the navigation bar"): originally a blur-12 backdrop
+/// over a black/55 fill with a 1px white/15 ring and a soft black drop
+/// shadow. Task 136 (perf): the live blur is retired — the surface is now a
+/// static black/72 fill under the same ring + shadow (the button mounts on
+/// every screen, and a persistent BackdropFilter re-blurred the page on
+/// every content frame).
 ///
 /// Task 118: parameterized with [icon] and [size] so the detail page's back
 /// button (and any future floating chrome) wears the exact same surface —
@@ -62,12 +60,14 @@ class GlassSearchButton extends StatelessWidget {
           height: size,
           child: Stack(
             children: [
-              // Glass backdrop: blur-12 over the black/55 fill — the old
-              // back-pill recipe verbatim (no tint sheen, no saturate).
+              // Glass backdrop — Task 136 (perf): the LIVE BackdropFilter
+              // (blur-12) used to re-blur the page beneath the button on
+              // every content frame; the button sits on EVERY screen, so
+              // the blur rode along on all of them. Static fill now — the
+              // ring above and the shadow are unchanged.
               Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: .55)),
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: .72),
                 ),
               ),
               // Icon layer: transparent Material INSIDE the clip so the ink

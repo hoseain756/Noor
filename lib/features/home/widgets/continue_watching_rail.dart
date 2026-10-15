@@ -8,6 +8,7 @@ import '../../../core/models/integration_cw.dart';
 import '../../../core/models/media_item.dart';
 import '../../../core/state/app_state.dart';
 import '../../../core/theme/horse_theme.dart';
+import '../../../shared/widgets/image_decode.dart';
 import '../../../shared/widgets/noor_toast.dart';
 import '../../media/media_detail_page.dart';
 import '../cw_upcoming.dart';
@@ -407,6 +408,8 @@ class ContinueCard extends StatelessWidget {
                           : Image.network(
                               image,
                               fit: BoxFit.cover,
+                              // Task 136: decode at the card's on-screen size.
+                              cacheWidth: imageCacheWidth(context, width),
                               errorBuilder: (_, __, ___) => const ColoredBox(
                                 color: HorseTheme.surface,
                               ),

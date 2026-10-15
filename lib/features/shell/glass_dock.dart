@@ -37,7 +37,7 @@ library;
 
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter, PointerDeviceKind;
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -114,6 +114,10 @@ class GlassDockSizing {
   final double horizontalPadding;
 
   /// Backdrop blur: 14px, 12px below 600px viewport width (web).
+  ///
+  /// Task 136 (perf): RETIRED — the dock no longer renders a live
+  /// BackdropFilter (it re-blurred the page beneath on every content frame;
+  /// brutal on low-end GPUs). Kept in the ladder for sizing-API compat.
   final double blurSigma;
 
   /// Web `--nav-clearance` — the bottom padding page content needs so nothing
@@ -687,18 +691,18 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                     borderRadius: BorderRadius.circular(_kStadiumRadius),
                     child: Stack(
                       children: [
-                        // Glass backdrop: blur over the black/55 fill — the
-                        // pre-118 back-pill recipe verbatim (no tint sheen,
-                        // no saturate, no inset hairlines).
+                        // Glass backdrop — Task 136 (perf): the LIVE
+                        // BackdropFilter used to re-blur everything behind
+                        // the dock on EVERY frame the content changed (any
+                        // scroll/rail drag before the auto-hide kicks in),
+                        // which is brutal on low-end GPUs. The dock now
+                        // wears the same recipe as a static fill — the 1px
+                        // white/15 ring and the drop shadow above are
+                        // unchanged; the fill reads a touch darker to
+                        // compensate for the lost blur diffusion.
                         Positioned.fill(
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(
-                              sigmaX: sizing.blurSigma,
-                              sigmaY: sizing.blurSigma,
-                            ),
-                            child: ColoredBox(
-                              color: Colors.black.withValues(alpha: .55),
-                            ),
+                          child: ColoredBox(
+                            color: Colors.black.withValues(alpha: .72),
                           ),
                         ),
                         // Track: pill BEHIND equal-flex tabs (web .dock-track).

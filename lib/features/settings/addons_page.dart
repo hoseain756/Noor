@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/addon.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/image_decode.dart';
 import 'widgets/settings_tiles.dart';
 
 class AddonsPage extends StatefulWidget {
@@ -271,6 +272,8 @@ class _AddonRow extends StatelessWidget {
                   child: Image.network(
                     addon.manifest['logo'] as String,
                     fit: BoxFit.cover,
+                    // Task 136: decode at the 44px addon tile size.
+                    cacheWidth: imageCacheWidth(context, 44),
                     errorBuilder: (_, __, ___) => const Icon(
                       Icons.extension_rounded,
                       color: HorseTheme.gold,

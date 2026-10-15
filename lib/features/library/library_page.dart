@@ -9,6 +9,7 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../shell/noor_dock_tabs.dart';
 import '../player/video_player_page.dart';
@@ -71,8 +72,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         children: [
                           Text(
                             english ? 'My library' : 'مكتبتي',
-                            style:
-                                Theme.of(context).textTheme.headlineSmall,
+                            style: Theme.of(context).textTheme.headlineSmall,
                           ),
                           const SizedBox(height: 6),
                           Text(
@@ -471,6 +471,8 @@ class _HistoryRow extends StatelessWidget {
                         : Image.network(
                             item.poster!,
                             fit: BoxFit.cover,
+                            // Task 136: decode at the 54px history thumb.
+                            cacheWidth: imageCacheWidth(context, 54),
                             errorBuilder: (_, __, ___) => const ColoredBox(
                               color: HorseTheme.raised,
                               child: Icon(
@@ -579,8 +581,7 @@ class _OpenTorrentButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.bolt_rounded,
-                  color: HorseTheme.gold, size: 18),
+              const Icon(Icons.bolt_rounded, color: HorseTheme.gold, size: 18),
               const SizedBox(width: 7),
               Text(
                 english ? 'Torrent' : 'تورنت',

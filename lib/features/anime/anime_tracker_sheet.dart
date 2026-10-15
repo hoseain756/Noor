@@ -5,6 +5,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/track/track_link.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/noor_toast.dart';
 
 /// Anime tracking sheet: pick a watch status, nudge the episodes-watched
@@ -111,9 +112,7 @@ class _TrackerSheetState extends State<_TrackerSheet> {
           ? (english
               ? 'Could not reach the tracker — try again.'
               : 'تعذر الوصول للموقع — أعد المحاولة.')
-          : (english
-              ? 'Anime list updated.'
-              : 'تم تحديث قائمة الأنمي.'),
+          : (english ? 'Anime list updated.' : 'تم تحديث قائمة الأنمي.'),
       error: allFail,
     );
     if (anyOk) Navigator.of(context).pop();
@@ -177,6 +176,8 @@ class _TrackerSheetState extends State<_TrackerSheet> {
                         width: 46,
                         height: 64,
                         fit: BoxFit.cover,
+                        // Task 136: decode at the 46px thumbnail size.
+                        cacheWidth: imageCacheWidth(context, 46),
                         errorBuilder: (_, __, ___) => const SizedBox(width: 46),
                       ),
                     ),
@@ -225,13 +226,10 @@ class _TrackerSheetState extends State<_TrackerSheet> {
                     for (final entry in _statusLabels.entries)
                       ChoiceChip(
                         label: Text(
-                          english
-                              ? entry.value.$1
-                              : entry.value.$2,
+                          english ? entry.value.$1 : entry.value.$2,
                         ),
                         selected: _status == entry.key,
-                        onSelected: (_) =>
-                            setState(() => _status = entry.key),
+                        onSelected: (_) => setState(() => _status = entry.key),
                       ),
                   ],
                 ),
@@ -274,18 +272,13 @@ class _TrackerSheetState extends State<_TrackerSheet> {
                   children: [
                     Expanded(
                       child: Text(
-                        english
-                            ? 'Score (0–10)'
-                            : 'التقييم (من 0 إلى 10)',
+                        english ? 'Score (0–10)' : 'التقييم (من 0 إلى 10)',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
                     Text(
                       _score > 0 ? _score.toStringAsFixed(0) : '—',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: HorseTheme.gold,
                             fontWeight: FontWeight.w700,
                           ),

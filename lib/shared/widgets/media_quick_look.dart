@@ -8,6 +8,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../features/anime/anime_tracker_sheet.dart';
+import 'image_decode.dart';
 import 'noor_toast.dart';
 
 /// Long-press "quick look" for any media card (movie / series / anime).
@@ -57,14 +58,14 @@ class _QuickLookPageState extends State<_QuickLookPage>
 
   /// The card block grows in from ~82% with a soft overshoot; the menu rides
   /// in with a small upward slide. Reverse plays on close before the pop.
-  late final Animation<double> _scale = Tween<double>(begin: .82, end: 1)
-      .animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-      );
+  late final Animation<double> _scale =
+      Tween<double>(begin: .82, end: 1).animate(
+    CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+  );
   late final Animation<Offset> _menuSlide =
       Tween<Offset>(begin: const Offset(0, .16), end: Offset.zero).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-      );
+    CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+  );
 
   @override
   void initState() {
@@ -149,11 +150,15 @@ class _QuickLookPageState extends State<_QuickLookPage>
       child: Stack(
         children: [
           // Blurred, dimmed backdrop — tap anywhere to dismiss.
+          // Task 136 (perf): sigma 18 → 10 — an ephemeral modal still
+          // recomputes the blur during its open/close animation frames,
+          // and 18-sigma gaussians are the most expensive filter class on
+          // low-end GPUs; 10 reads nearly identically over the dimmer.
           GestureDetector(
             onTap: _close,
             excludeFromSemantics: true,
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
               child: Container(color: Colors.black.withValues(alpha: .62)),
             ),
           ),
@@ -223,6 +228,8 @@ class _QuickLookPageState extends State<_QuickLookPage>
                     Image.network(
                       item.poster!,
                       fit: BoxFit.cover,
+                      // Task 136: decode at the poster's on-screen size.
+                      cacheWidth: imageCacheWidth(context, posterWidth),
                       errorBuilder: (_, __, ___) => const Center(
                         child: Icon(
                           Icons.movie_outlined,
@@ -277,9 +284,7 @@ class _QuickLookPageState extends State<_QuickLookPage>
                 onTap: _watch,
               ),
               _QuickMenuRow(
-                icon: inLibrary
-                    ? Icons.check_rounded
-                    : Icons.add_rounded,
+                icon: inLibrary ? Icons.check_rounded : Icons.add_rounded,
                 label: inLibrary
                     ? (english ? 'Remove from library' : 'إزالة من المكتبة')
                     : (english ? 'Add to library' : 'إضافة للمكتبة'),

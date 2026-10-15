@@ -18,6 +18,7 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/glass_navigation.dart';
+import '../../shared/widgets/image_decode.dart';
 import 'detail_glass.dart';
 
 /// The full-screen sources page. Pushed over the detail page; completes with
@@ -719,6 +720,8 @@ class _AddonBadge extends StatelessWidget {
                       fit: BoxFit.cover,
                       width: size,
                       height: size,
+                      // Task 136: decode at the 38/44px badge size.
+                      cacheWidth: imageCacheWidth(context, size),
                       errorBuilder: (_, __, ___) => _fallback(initial),
                     )
                   : _fallback(initial),
@@ -792,6 +795,8 @@ class _AddonIcon extends StatelessWidget {
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,
+                // Task 136: decode at the tiny picker-icon size.
+                cacheWidth: imageCacheWidth(context, 24),
                 errorBuilder: (_, __, ___) => Center(
                   child: Text(
                     initial,

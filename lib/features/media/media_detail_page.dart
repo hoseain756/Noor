@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -1125,50 +1123,44 @@ class _RatingChip extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
         onTap: url?.hasScheme == true ? () => unawaited(launchUrl(url!)) : null,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: .30),
-                border: Border.all(color: Colors.white.withValues(alpha: .08)),
-                borderRadius: BorderRadius.circular(999),
+        child: Container(
+          // Task 136 (perf): the blur-6 backdrop is retired — a row of these
+          // rating chips sat over the scrolling artwork and each re-blurred
+          // its backdrop every frame; the .55 fill keeps the same contrast.
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .55),
+            border: Border.all(color: Colors.white.withValues(alpha: .08)),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                    color: color, borderRadius: BorderRadius.circular(999)),
+                child: Text(label,
+                    style: TextStyle(
+                        color: provider == 'imdb' ? Colors.black : Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900)),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                        color: color, borderRadius: BorderRadius.circular(999)),
-                    child: Text(label,
-                        style: TextStyle(
-                            color: provider == 'imdb'
-                                ? Colors.black
-                                : Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900)),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(display,
-                      style: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w600)),
-                  if (scale != '/10')
-                    Text(scale == '%' ? '' : scale,
-                        style: const TextStyle(
-                            fontSize: 10, color: HorseTheme.muted)),
-                  if (votes > 0) ...[
-                    const SizedBox(width: 4),
-                    Text(_compactVotes(votes),
-                        style: const TextStyle(
-                            fontSize: 10, color: HorseTheme.muted)),
-                  ],
-                ],
-              ),
-            ),
+              const SizedBox(width: 6),
+              Text(display,
+                  style: const TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600)),
+              if (scale != '/10')
+                Text(scale == '%' ? '' : scale,
+                    style:
+                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
+              if (votes > 0) ...[
+                const SizedBox(width: 4),
+                Text(_compactVotes(votes),
+                    style:
+                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
+              ],
+            ],
           ),
         ),
       ),

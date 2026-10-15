@@ -6,6 +6,7 @@ import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/app_state_message.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../media/media_detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -307,6 +308,8 @@ class _EpisodeTile extends StatelessWidget {
                     child: Icon(Icons.live_tv_rounded))
                 : Image.network(still,
                     fit: BoxFit.cover,
+                    // Task 136: decode at the 112px list thumbnail size.
+                    cacheWidth: imageCacheWidth(context, 112),
                     errorBuilder: (_, __, ___) => const ColoredBox(
                         color: HorseTheme.raised,
                         child: Icon(Icons.live_tv_rounded))),

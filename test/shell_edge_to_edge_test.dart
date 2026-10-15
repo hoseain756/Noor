@@ -104,9 +104,11 @@ void main() {
     // 1) Home is edge-to-edge: the page's scroll view starts at the very
     //    top of the screen (y=0) — before Task 119 it sat at `safeTop`
     //    because the shell SafeArea pushed every page below the status bar.
+    //    (Task 136: the pages now live in an Offstage Stack instead of an
+    //    IndexedStack — the geometry contract is unchanged.)
     final homeScroll = find
         .descendant(
-          of: find.byType(IndexedStack),
+          of: find.byType(MainShell),
           matching: find.byType(CustomScrollView),
         )
         .first;
@@ -117,8 +119,8 @@ void main() {
     );
 
     // 2) The four non-home tabs keep the previous top inset via SafeArea.
-    //    IndexedStack keeps the unselected tabs offstage, so every finder
-    //    here must include offstage widgets.
+    //    The shell keeps the unselected tabs alive but OFFSTAGE, so every
+    //    finder here must include offstage widgets.
     for (final page in const [AnimePage, KidsPage, LibraryPage, SettingsPage]) {
       expect(
         find.ancestor(

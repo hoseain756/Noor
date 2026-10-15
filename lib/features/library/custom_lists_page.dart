@@ -7,6 +7,7 @@ import '../../core/models/custom_list.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/noor_toast.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
@@ -486,6 +487,8 @@ class _ListArtwork extends StatelessWidget {
               )
             : Image.network(poster,
                 fit: BoxFit.cover,
+                // Task 136: decode at the 42px list thumbnail size.
+                cacheWidth: imageCacheWidth(context, 42),
                 errorBuilder: (_, __, ___) => const ColoredBox(
                     color: HorseTheme.raised,
                     child: Icon(Icons.movie_outlined, color: HorseTheme.gold))),

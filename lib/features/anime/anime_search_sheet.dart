@@ -7,6 +7,7 @@ import '../../core/data/catalog_repository.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/image_decode.dart';
 import '../media/media_detail_page.dart';
 
 /// Live anime search over AniList's public GraphQL (works without linking).
@@ -275,6 +276,10 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                                               Image.network(
                                                 item.poster!,
                                                 fit: BoxFit.cover,
+                                                // Task 136: decode at the
+                                                // ≤108px grid tile size.
+                                                cacheWidth: imageCacheWidth(
+                                                    context, 108),
                                                 errorBuilder: (_, __, ___) =>
                                                     const SizedBox(),
                                               ),
