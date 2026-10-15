@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/data/cache_reset_service.dart';
 import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
@@ -39,6 +40,7 @@ class SettingsDataPage extends StatelessWidget {
             children: [
               _SupabaseSyncCard(app: app),
               const _TorrentDownloadsCard(),
+              const _CacheResetCard(),
               _DataRow(
                 icon: Icons.download_outlined,
                 title: english ? 'Export backup' : 'تصدير نسخة احتياطية',
@@ -612,6 +614,181 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
           ),
         ],
       );
+}
+
+/// Cache auto-reset card (user request): pick the interval at which the app
+/// resets its transient storage (default 12 h — torrent temp files + image
+/// cache) and run a reset right now. Lives next to the torrent downloads
+/// card because that is the payload being cleaned.
+class _CacheResetCard extends StatelessWidget {
+  const _CacheResetCard();
+
+  // (hours, arabic, english)
+  static const List<(int, String, String)> _choices = [
+    (0, 'إيقاف', 'Off'),
+    (1, 'كل ساعة', 'Every hour'),
+    (3, 'كل 3 ساعات', 'Every 3 hours'),
+    (6, 'كل 6 ساعات', 'Every 6 hours'),
+    (12, 'كل 12 ساعة', 'Every 12 hours'),
+    (24, 'كل 24 ساعة', 'Every 24 hours'),
+    (48, 'كل 48 ساعة', 'Every 48 hours'),
+  ];
+
+  static String _labelFor(int hours, bool english) {
+    for (final (value, arabic, eng) in _choices) {
+      if (value == hours) return english ? eng : arabic;
+    }
+    final fallback = _choices.firstWhere(
+      (choice) => choice.$1 == CacheResetService.defaultHours,
+    );
+    return english ? fallback.$3 : fallback.$2;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (english, hours) = context.select<AppState, (bool, int)>(
+      (app) => (
+        app.english,
+        CacheResetService.hoursFromSettings(app.webSettings),
+      ),
+    );
+    final detail = hours <= 0
+        ? (english
+            ? 'Automatic reset is off — clear manually from this screen.'
+            : 'إعادة التعيين التلقائية معطّلة — يمكنك المسح يدويًا من هذه الشاشة.')
+        : (english
+            ? 'Torrent temp files and the image cache are reset ${_labelFor(hours, true).toLowerCase()}.'
+            : 'تُعاد تعيين ملفات التورنت المؤقتة وذاكرة الصور ${_labelFor(hours, false)}');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: HorseTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(color: HorseTheme.line),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          onTap: () => unawaited(_openSheet(context)),
+          minVerticalPadding: 10,
+          leading:
+              const Icon(Icons.auto_delete_outlined, color: HorseTheme.gold),
+          title: Text(english
+              ? 'Reset temporary storage'
+              : 'إعادة تعيين الذاكرة المؤقتة'),
+          subtitle: Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
+          trailing: Text(
+            _labelFor(hours, english),
+            style: const TextStyle(color: HorseTheme.gold),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSheet(BuildContext context) async {
+    final app = context.read<AppState>();
+    final english = app.english;
+    final current = CacheResetService.hoursFromSettings(app.webSettings);
+    var busy = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: HorseTheme.surface,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    english
+                        ? 'Reset temporary storage'
+                        : 'إعادة تعيين الذاكرة المؤقتة',
+                    style: Theme.of(sheetContext).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 10),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    english
+                        ? 'Clears downloaded torrent temp files and the image '
+                            'cache when the interval elapses. The torrent '
+                            'currently streaming is never touched.'
+                        : 'تمسح ملفات التورنت المؤقتة وذاكرة الصور عند انتهاء '
+                            'المدة المحددة، ولا تُمس ملفات التورنت الذي يُبث الآن.',
+                    style: Theme.of(sheetContext)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: HorseTheme.muted),
+                  ),
+                ),
+              ),
+              for (final (hours, arabic, label) in _choices)
+                ListTile(
+                  leading: Icon(
+                    current == hours
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color:
+                        current == hours ? HorseTheme.gold : HorseTheme.muted,
+                  ),
+                  title: Text(english ? label : arabic),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    unawaited(app.setSetting('cacheResetHours', hours));
+                  },
+                ),
+              const Divider(height: 8),
+              ListTile(
+                enabled: !busy,
+                leading: busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: HorseTheme.gold,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.cleaning_services_rounded,
+                        color: HorseTheme.gold,
+                      ),
+                title: Text(english ? 'Reset now' : 'إعادة التعيين الآن'),
+                onTap: busy
+                    ? null
+                    : () async {
+                        setSheetState(() => busy = true);
+                        final freed =
+                            await CacheResetService.instance.performReset();
+                        if (!sheetContext.mounted) return;
+                        Navigator.pop(sheetContext);
+                        if (!context.mounted) return;
+                        final megs = freed / (1024 * 1024);
+                        NoorToast.show(
+                          context,
+                          megs >= 0.1
+                              ? (english
+                                  ? 'Cache cleared — ${megs.toStringAsFixed(1)} MB freed.'
+                                  : 'تم مسح الذاكرة المؤقتة — تم تحرير ${megs.toStringAsFixed(1)} م.ب.')
+                              : (english
+                                  ? 'Cache cleared — nothing to free.'
+                                  : 'تم مسح الذاكرة المؤقتة — لا يوجد ما يُحرَّر.'),
+                        );
+                      },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DataRow extends StatelessWidget {

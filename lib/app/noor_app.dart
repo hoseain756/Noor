@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../core/data/cache_reset_service.dart';
 import '../core/state/app_state.dart';
 import '../core/theme/horse_theme.dart';
 import '../features/shell/main_shell.dart';
@@ -54,7 +55,12 @@ class _LaunchGateState extends State<_LaunchGate> {
 
   Future<void> _initialize() async {
     try {
-      await context.read<AppState>().initialize();
+      final app = context.read<AppState>();
+      await app.initialize();
+      // Periodic transient-cache reset (Settings → Data & privacy, default
+      // 12 h): torrent temp files + image cache. The first tick also covers
+      // intervals that elapsed while the app was closed.
+      CacheResetService.instance.start(app);
     } catch (error) {
       if (mounted) setState(() => _startupError = error.toString());
     }

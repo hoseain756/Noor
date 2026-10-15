@@ -90,6 +90,11 @@ class TorrentService {
   /// Info-hash of the currently active (last prepared) torrent.
   String? _activeHash;
 
+  /// Info-hash of the torrent the engine is currently streaming, or `null`
+  /// when idle. Consumers that purge stored torrent files (cache reset)
+  /// MUST skip this hash — its files belong to a live stream.
+  String? get activeInfoHash => _activeHash;
+
   /// Serialises mutating operations so concurrent prepare/stop/remove calls
   /// can never interleave.
   Future<void> _queue = Future<void>.value();

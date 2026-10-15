@@ -103,7 +103,8 @@ class StreamServer {
         return;
       }
 
-      final range = _parseRange(request.headers.value(HttpHeaders.rangeHeader), size);
+      final range =
+          _parseRange(request.headers.value(HttpHeaders.rangeHeader), size);
       if (range == _unsatisfiableSentinel) {
         request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
         request.response.headers.set(
@@ -118,7 +119,8 @@ class StreamServer {
       if (selected == null) {
         await _serve(request, 0, size - 1, size, partial: false);
       } else {
-        await _serve(request, selected.start, selected.end, size, partial: true);
+        await _serve(request, selected.start, selected.end, size,
+            partial: true);
       }
     } catch (_) {
       try {
@@ -214,7 +216,7 @@ class StreamServer {
 
     RandomAccessFile? raf;
     try {
-      raf = await File(filePath).open();
+      raf = await _openWhenExists();
       if (start > 0) await raf.setPosition(start);
 
       var remaining = length;
@@ -246,6 +248,28 @@ class StreamServer {
         await raf?.close();
       } catch (_) {
         // Handle may already be closed.
+      }
+    }
+  }
+
+  /// Opens the target file, WAITING for the torrent engine to create it
+  /// when it does not exist yet. libtorrent materialises the selected file
+  /// when its first piece lands; on a cold swarm (zero peers — the exact
+  /// report: "Failed to open http://127.0.0.1:…/stream" at P:0 S:0 0.0%)
+  /// the player's very first request arrived before that moment, the open()
+  /// threw and the response closed EMPTY, which mpv reports as "Failed to
+  /// open". The response now stays open and starts streaming the moment the
+  /// file appears — the same patience the server already applies to file
+  /// GROWTH. The deadline bounds the wait to the stall timeout, so a truly
+  /// dead swarm still fails loudly instead of hanging forever.
+  Future<RandomAccessFile> _openWhenExists() async {
+    final deadline = DateTime.now().add(_stallTimeout);
+    while (true) {
+      try {
+        return await File(filePath).open();
+      } on FileSystemException {
+        if (DateTime.now().isAfter(deadline)) rethrow;
+        await Future<void>.delayed(_pollInterval);
       }
     }
   }
