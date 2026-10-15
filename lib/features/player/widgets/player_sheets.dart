@@ -59,14 +59,59 @@ String subtitleLanguageName(String code) {
       key.toUpperCase();
 }
 
+/// Player sheet host (spec §0-ب): phones get a full-width bottom sheet at
+/// ~66% height; tablets (width ≥ 900) get a floating ~400px side panel
+/// anchored to the directional END so the video stays visible.
 Future<T?> showPlayerSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
 }) {
+  final size = MediaQuery.sizeOf(context);
+  if (size.width >= 900) {
+    return showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Player panel',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        final curved =
+            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, .06),
+              end: Offset.zero,
+            ).animate(curved),
+            child: Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Material(
+                  color: HorseTheme.raised.withValues(alpha: .98),
+                  borderRadius: BorderRadius.circular(22),
+                  clipBehavior: Clip.antiAlias,
+                  elevation: 12,
+                  shadowColor: Colors.black54,
+                  child: SizedBox(
+                    width: 400,
+                    height: size.height * .86,
+                    child: builder(dialogContext),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
   return showModalBottomSheet<T>(
     context: context,
     backgroundColor: HorseTheme.raised,
     isScrollControlled: true,
+    constraints: BoxConstraints(maxHeight: size.height * .66),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -371,13 +416,15 @@ class _EntryTile extends StatelessWidget {
 
 // ── Track pickers ──────────────────────────────────────────────────────────
 
-class AudioTracksSheet extends StatelessWidget {
+class AudioTracksSheet extends StatefulWidget {
   const AudioTracksSheet({
     super.key,
     required this.english,
     required this.tracks,
     required this.selected,
     required this.onPick,
+    required this.delayMs,
+    required this.onDelayChanged,
   });
 
   final bool english;
@@ -385,103 +432,238 @@ class AudioTracksSheet extends StatelessWidget {
   final AudioTrack selected;
   final ValueChanged<AudioTrack> onPick;
 
+  /// Current audio delay (ms) — persisted via AppState.webSettings.
+  final int delayMs;
+  final ValueChanged<int> onDelayChanged;
+
+  @override
+  State<AudioTracksSheet> createState() => _AudioTracksSheetState();
+}
+
+class _AudioTracksSheetState extends State<AudioTracksSheet> {
+  late int _delayMs = widget.delayMs;
+
+  void _shift(int delta) {
+    final next = (_delayMs + delta).clamp(-10000, 10000);
+    setState(() => _delayMs = next);
+    widget.onDelayChanged(next);
+  }
+
   String _label(AudioTrack track) {
     final parts = <String>[
       if (track.title?.isNotEmpty == true) track.title!,
-      if (track.codec?.isNotEmpty == true) track.codec!,
-      if (track.channelscount != null) '${track.channelscount}ch',
     ];
     if (parts.isEmpty) {
-      return english ? 'Track ${track.id}' : 'مسار ${track.id}';
+      return widget.english ? 'Track ${track.id}' : 'مسار ${track.id}';
     }
     return parts.join(' · ');
   }
 
-  /// Group the embedded tracks by their language tag (Task 124: the dub
-  /// window mirrors the subtitles window's language organization).
+  /// Spec §5: track info line — language name · codec · channels.
+  String _info(AudioTrack track) {
+    final parts = <String>[
+      if (track.language?.isNotEmpty == true)
+        subtitleLanguageName(track.language!),
+      if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
+      if (track.channelscount != null)
+        '${track.channelscount}${widget.english ? 'ch' : ' قنوات'}',
+    ];
+    return parts.join(' · ');
+  }
+
+  /// Group the embedded tracks by their language tag (the dub window
+  /// mirrors the subtitles window's language organization).
   Map<String, List<AudioTrack>> get _groups {
     final groups = <String, List<AudioTrack>>{};
-    for (final track in tracks) {
+    for (final track in widget.tracks) {
       final code = (track.language ?? '').trim();
-      final key = code.isEmpty ? (english ? 'Default' : 'افتراضي') : code;
+      final key =
+          code.isEmpty ? (widget.english ? 'default' : 'افتراضي') : code;
       groups.putIfAbsent(key, () => []).add(track);
     }
     return groups;
   }
 
   String _groupTitle(String code) {
+    if (code == 'default' || code == 'افتراضي') {
+      return widget.english ? 'Default' : 'افتراضي';
+    }
     final name = subtitleLanguageName(code);
-    return code == 'Default' || code == 'افتراضي'
-        ? (english ? 'Default' : 'افتراضي')
-        : (name.isEmpty ? code : '$name · $code');
+    return name.isEmpty ? code : '$name · $code';
+  }
+
+  String _delayLabel(int ms) {
+    if (ms == 0) return widget.english ? 'No delay' : 'بدون تأخير';
+    final abs = ms.abs();
+    return ms < 0
+        ? (widget.english ? 'Ahead $abs ms' : 'تقديم $abs ms')
+        : (widget.english ? 'Delay $abs ms' : 'تأخير $abs ms');
   }
 
   @override
   Widget build(BuildContext context) {
     final groups = _groups.entries.toList();
     return SheetScaffold(
-      title: english ? 'Audio track / dub' : 'المسار الصوتي / الدبلاج',
-      child: tracks.isEmpty
-          ? _EmptyNote(
-              english
-                  ? 'No selectable audio tracks in this stream. Dubs may be '
-                      'available as separate sources.'
-                  : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر. قد '
-                      'يتوفر الدبلاج ضمن مصادر أخرى.',
-            )
-          : ListView.separated(
-              shrinkWrap: true,
-              itemCount: groups.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(color: HorseTheme.line, height: 1),
-              itemBuilder: (context, index) {
-                final entry = groups[index];
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
-                      child: Text(
-                        _groupTitle(entry.key),
-                        style: const TextStyle(
-                          color: HorseTheme.gold,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: .5,
-                        ),
-                      ),
+      title: widget.english ? 'Audio track / dub' : 'المسار الصوتي / الدبلاج',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            child: widget.tracks.isEmpty
+                ? _EmptyNote(
+                    widget.english
+                        ? 'No selectable audio tracks in this stream. Dubs may '
+                            'be available as separate sources.'
+                        : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر. '
+                            'قد يتوفر الدبلاج ضمن مصادر أخرى.',
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: groups.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: HorseTheme.line, height: 1),
+                    itemBuilder: (context, index) {
+                      final entry = groups[index];
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
+                            child: Text(
+                              _groupTitle(entry.key),
+                              style: const TextStyle(
+                                color: HorseTheme.gold,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: .5,
+                              ),
+                            ),
+                          ),
+                          for (final track in entry.value)
+                            ListTile(
+                              dense: true,
+                              selected: track.id == widget.selected.id,
+                              leading: Icon(
+                                track.id == widget.selected.id
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_off,
+                                size: 20,
+                                color: track.id == widget.selected.id
+                                    ? HorseTheme.gold
+                                    : Colors.white38,
+                              ),
+                              title: Text(
+                                _label(track),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              subtitle: _info(track).isEmpty
+                                  ? null
+                                  : Text(
+                                      _info(track),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: Colors.white38, fontSize: 12),
+                                    ),
+                              onTap: () {
+                                widget.onPick(track);
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+          // Audio delay (spec §5): ±100 ms buttons, like the subtitle offset.
+          const Divider(color: HorseTheme.line, height: 1),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.timer_outlined,
+                  size: 18,
+                  color: Colors.white54,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  widget.english ? 'Audio delay' : 'تأخير الصوت',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                _DelayButton(
+                  icon: Icons.remove_rounded,
+                  english: widget.english,
+                  onTap: () => _shift(-100),
+                ),
+                Container(
+                  constraints: const BoxConstraints(minWidth: 96),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: HorseTheme.line),
+                  ),
+                  child: Text(
+                    _delayLabel(_delayMs),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: HorseTheme.gold,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
                     ),
-                    for (final track in entry.value)
-                      ListTile(
-                        dense: true,
-                        selected: track.id == selected.id,
-                        leading: Icon(
-                          track.id == selected.id
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_off,
-                          size: 20,
-                          color: track.id == selected.id
-                              ? HorseTheme.gold
-                              : Colors.white38,
-                        ),
-                        title: Text(
-                          _label(track),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        onTap: () {
-                          onPick(track);
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                  ],
-                );
-              },
+                  ),
+                ),
+                _DelayButton(
+                  icon: Icons.add_rounded,
+                  english: widget.english,
+                  onTap: () => _shift(100),
+                ),
+              ],
             ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+/// Round ± stepper button shared by the audio/subtitle delay controls.
+class _DelayButton extends StatelessWidget {
+  const _DelayButton({
+    required this.icon,
+    required this.onTap,
+    required this.english,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool english;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: english ? '±100 ms' : '±100 ms',
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(icon, size: 20, color: Colors.white70),
+          ),
+        ),
+      );
 }
 
 /// A selectable subtitle row model: external addon subtitles carry their raw
@@ -537,7 +719,7 @@ class SubtitleTracksSheet extends StatefulWidget {
 
 class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
   final _search = TextEditingController();
-  String _language = 'all';
+  final Set<String> _expanded = {};
 
   @override
   void dispose() {
@@ -636,6 +818,107 @@ class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
     return name.isEmpty ? key : '$name · $key';
   }
 
+  /// Spec §4: expandable language list. While searching, all matching
+  /// groups auto-expand; otherwise the default group (Arabic when present)
+  /// starts open until the user toggles sections themselves.
+  bool _isOpen(String key, Map<String, List<SubtitleChoice>> groups) {
+    if (_search.text.trim().isNotEmpty) return true;
+    if (_expanded.contains(key)) return true;
+    return _expanded.isEmpty &&
+        groups.keys.isNotEmpty &&
+        key == groups.keys.first;
+  }
+
+  Widget _languageHeader(String key, int count) {
+    final open = _search.text.trim().isNotEmpty || _expanded.contains(key);
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => setState(() {
+        open ? _expanded.remove(key) : _expanded.add(key);
+      }),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 9, 6, 7),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              turns: open ? 0 : -.25,
+              duration: const Duration(milliseconds: 160),
+              child: const Icon(
+                Icons.expand_more_rounded,
+                size: 18,
+                color: HorseTheme.gold,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _groupTitle(key),
+                style: const TextStyle(
+                  color: HorseTheme.gold,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .4,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .06),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: HorseTheme.line),
+              ),
+              child: Text(
+                '$count',
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _choiceRow(SubtitleChoice choice) {
+    final isSelected = choice.track.id == widget.selected.id;
+    return ListTile(
+      dense: true,
+      selected: isSelected,
+      leading: Icon(
+        isSelected
+            ? Icons.radio_button_checked
+            : (choice.track.uri
+                ? Icons.cloud_download_outlined
+                : Icons.radio_button_off),
+        size: 20,
+        color: isSelected ? HorseTheme.gold : Colors.white38,
+      ),
+      title: Text(
+        choice.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14),
+      ),
+      subtitle: choice.subtitle?.isEmpty != true
+          ? Text(
+              choice.subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            )
+          : null,
+      onTap: () {
+        widget.onPick(choice.track);
+        Navigator.of(context).pop();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final off = SubtitleTrack.no();
@@ -644,18 +927,11 @@ class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
     final query = _search.text.trim();
     final visibleGroups = <String, List<SubtitleChoice>>{};
     for (final entry in groups.entries) {
-      if (_language != 'all' && _language != entry.key) continue;
       final rows = entry.value.where((c) => _matches(c, query)).toList();
       if (rows.isNotEmpty) visibleGroups[entry.key] = rows;
     }
     final totalVisible =
         visibleGroups.values.fold<int>(0, (sum, rows) => sum + rows.length);
-    // Precompute the flat row list (+1 offset for the leading Off row) with
-    // a showHeader flag marking the first item of each language group.
-    final flatRows = <(SubtitleChoice, bool)>[
-      for (final entry in visibleGroups.entries)
-        for (var i = 0; i < entry.value.length; i++) (entry.value[i], i == 0),
-    ];
 
     return SheetScaffold(
       title: widget.english ? 'Subtitles' : 'الترجمة',
@@ -710,56 +986,6 @@ class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
             ),
           ),
           const SizedBox(height: 10),
-          // Language chips — tapping one shows only its language's results.
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: groups.keys.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
-              itemBuilder: (context, index) {
-                final key =
-                    index == 0 ? 'all' : groups.keys.elementAt(index - 1);
-                final selectedChip =
-                    _language == key || (_language == 'all' && key == 'all');
-                final count = key == 'all'
-                    ? groups.values
-                        .fold<int>(0, (sum, rows) => sum + rows.length)
-                    : groups[key]!.length;
-                final label = key == 'all'
-                    ? (widget.english ? 'All' : 'الكل')
-                    : subtitleLanguageName(key).isEmpty
-                        ? key.toUpperCase()
-                        : subtitleLanguageName(key);
-                return InkWell(
-                  borderRadius: BorderRadius.circular(999),
-                  onTap: () => setState(() => _language = key),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: selectedChip
-                          ? HorseTheme.gold.withValues(alpha: .18)
-                          : Colors.white.withValues(alpha: .05),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: selectedChip ? HorseTheme.gold : HorseTheme.line,
-                      ),
-                    ),
-                    child: Text(
-                      '$label ($count)',
-                      style: TextStyle(
-                        color: selectedChip ? HorseTheme.gold : Colors.white70,
-                        fontSize: 12,
-                        fontWeight:
-                            selectedChip ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
           const Divider(color: HorseTheme.line, height: 14),
           Flexible(
             child: totalVisible == 0
@@ -772,90 +998,39 @@ class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
                             ? 'No matches for your search.'
                             : 'لا توجد نتائج مطابقة لبحثك.'),
                   )
-                : ListView.separated(
+                : ListView(
                     shrinkWrap: true,
-                    itemCount: flatRows.length + 1,
-                    separatorBuilder: (_, __) =>
+                    children: [
+                      // The persistent "Off" row leads the list (spec §4).
+                      ListTile(
+                        dense: true,
+                        selected: offSelected,
+                        leading: Icon(
+                          offSelected
+                              ? Icons.radio_button_checked
+                              : Icons.subtitles_off_outlined,
+                          size: 20,
+                          color: offSelected ? HorseTheme.gold : Colors.white38,
+                        ),
+                        title: Text(
+                          widget.english ? 'Off' : 'إيقاف',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        onTap: () {
+                          widget.onPick(off);
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                      const Divider(color: HorseTheme.line, height: 1),
+                      // Expandable language sections (spec §4): tapping a
+                      // language shows only that language's subtitles.
+                      for (final entry in visibleGroups.entries) ...[
+                        _languageHeader(entry.key, entry.value.length),
+                        if (_isOpen(entry.key, visibleGroups))
+                          ...entry.value.map(_choiceRow),
                         const Divider(color: HorseTheme.line, height: 1),
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        // The persistent "Off" row leads the list.
-                        return ListTile(
-                          dense: true,
-                          selected: offSelected,
-                          leading: Icon(
-                            offSelected
-                                ? Icons.radio_button_checked
-                                : Icons.subtitles_off_outlined,
-                            size: 20,
-                            color:
-                                offSelected ? HorseTheme.gold : Colors.white38,
-                          ),
-                          title: Text(
-                            widget.english ? 'Off' : 'إيقاف',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          onTap: () {
-                            widget.onPick(off);
-                            Navigator.of(context).pop();
-                          },
-                        );
-                      }
-                      final (choice, showHeader) = flatRows[index - 1];
-                      final isSelected = choice.track.id == widget.selected.id;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (showHeader)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(4, 6, 4, 2),
-                              child: Text(
-                                _groupTitle(choice.groupKey),
-                                style: const TextStyle(
-                                  color: HorseTheme.gold,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: .5,
-                                ),
-                              ),
-                            ),
-                          ListTile(
-                            dense: true,
-                            selected: isSelected,
-                            leading: Icon(
-                              isSelected
-                                  ? Icons.radio_button_checked
-                                  : (choice.track.uri
-                                      ? Icons.cloud_download_outlined
-                                      : Icons.radio_button_off),
-                              size: 20,
-                              color:
-                                  isSelected ? HorseTheme.gold : Colors.white38,
-                            ),
-                            title: Text(
-                              choice.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            subtitle: choice.subtitle?.isEmpty != true
-                                ? Text(
-                                    choice.subtitle!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white38, fontSize: 12),
-                                  )
-                                : null,
-                            onTap: () {
-                              widget.onPick(choice.track);
-                              Navigator.of(context).pop();
-                            },
-                          ),
-                        ],
-                      );
-                    },
+                      ],
+                    ],
                   ),
           ),
         ],
@@ -1106,90 +1281,239 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
     return '$pos%';
   }
 
+  static const Map<String, Object?> _defaults = <String, Object?>{
+    'subFontSize': 28,
+    'subFontColor': '#FFFFFF',
+    'subStyle': 'shadow',
+    'subBorderColor': '#000000',
+    'subBorderSize': 0,
+    'subBackgroundOpacity': .35,
+    'subPos': 100,
+    'subtitleOffsetMs': 0,
+  };
+
+  /// Spec §4: "إعادة للافتراضي" — restore every value and commit it.
+  void _resetToDefaults() {
+    setState(() => _v.addAll(Map<String, Object?>.of(_defaults)));
+    widget.onApply(Map<String, Object?>.of(_v));
+    final app = context.read<AppState>();
+    for (final entry in _defaults.entries) {
+      unawaited(app.setSetting(entry.key, entry.value));
+    }
+  }
+
+  void _shiftDelay(int delta) {
+    final next =
+        (((_v['subtitleOffsetMs'] as int) + delta).clamp(-5000, 5000)).toInt();
+    _preview('subtitleOffsetMs', next);
+    _commit('subtitleOffsetMs', next);
+  }
+
   @override
   Widget build(BuildContext context) {
     final english = widget.english;
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final options = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _colorRow(
+          icon: Icons.format_color_text_rounded,
+          label: english ? 'Text color' : 'لون النص',
+          hex: _v['subFontColor']! as String,
+          onPick: (hex) => _commit('subFontColor', hex),
+        ),
+        _sliderRow(
+          label: english ? 'Subtitle size' : 'حجم الترجمة',
+          value: (_v['subFontSize'] as int).toDouble(),
+          min: 14,
+          max: 44,
+          divisions: 15,
+          display: '${_v['subFontSize']} px',
+          onChanged: (v) => _preview('subFontSize', v.round()),
+          onChangeEnd: (v) => _commit('subFontSize', v.round()),
+        ),
+        // Position: quick chips + fine slider (spec §4: أعلى/وسط/أسفل +
+        // رفع وخفض دقيق).
+        _posChips(),
+        _sliderRow(
+          label: english ? 'Fine position' : 'رفع وخفض دقيق',
+          value: (_v['subPos'] as int).toDouble(),
+          min: 0,
+          max: 100,
+          divisions: 20,
+          display: _posLabel(_v['subPos'] as int),
+          onChanged: (v) => _preview('subPos', v.round()),
+          onChangeEnd: (v) => _commit('subPos', v.round()),
+        ),
+        _styleChips(),
+        _colorRow(
+          icon: Icons.format_color_fill_rounded,
+          label: english ? 'Outline color' : 'لون الحد',
+          hex: _v['subBorderColor']! as String,
+          onPick: (hex) => _commit('subBorderColor', hex),
+        ),
+        _sliderRow(
+          label: english ? 'Outline thickness' : 'سماكة الحد',
+          value: (_v['subBorderSize'] as int).toDouble(),
+          min: 0,
+          max: 8,
+          divisions: 8,
+          display: '${_v['subBorderSize']} px',
+          onChanged: (v) => _preview('subBorderSize', v.round()),
+          onChangeEnd: (v) => _commit('subBorderSize', v.round()),
+        ),
+        _sliderRow(
+          label: english ? 'Background opacity' : 'شفافية الخلفية',
+          value: _v['subBackgroundOpacity']! as double,
+          min: 0,
+          max: 1,
+          divisions: 20,
+          display:
+              '${((_v['subBackgroundOpacity']! as double) * 100).round()}%',
+          onChanged: (v) => _preview('subBackgroundOpacity', v),
+          onChangeEnd: (v) => _commit('subBackgroundOpacity', v),
+        ),
+        // Timing offset: ±100 ms buttons (spec §4) + coarse slider.
+        _delayButtons(),
+        _sliderRow(
+          label: english ? 'Coarse timing' : 'ضبط تقريبي',
+          value: (_v['subtitleOffsetMs'] as int).toDouble(),
+          min: -5000,
+          max: 5000,
+          divisions: 40,
+          display: _offsetLabel(_v['subtitleOffsetMs']! as int),
+          onChanged: (v) => _preview('subtitleOffsetMs', v.round()),
+          onChangeEnd: (v) => _commit('subtitleOffsetMs', v.round()),
+        ),
+        const SizedBox(height: 6),
+        Center(
+          child: TextButton.icon(
+            onPressed: _resetToDefaults,
+            icon: const Icon(Icons.restart_alt_rounded, size: 18),
+            label: Text(
+              english ? 'Reset to defaults' : 'إعادة للافتراضي',
+              style: const TextStyle(
+                color: HorseTheme.gold,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+
     return SheetScaffold(
       title: english ? 'Subtitle settings' : 'إعدادات الترجمة',
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _previewBox(),
-            const SizedBox(height: 10),
-            _colorRow(
-              icon: Icons.format_color_text_rounded,
-              label: english ? 'Text color' : 'لون النص',
-              hex: _v['subFontColor']! as String,
-              onPick: (hex) => _commit('subFontColor', hex),
+      child: wide
+          ? // Tablet (spec §0-ب): live preview beside the options.
+          Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 230, child: _previewBox(widePreview: true)),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: SingleChildScrollView(child: options),
+                ),
+              ],
+            )
+          : SingleChildScrollView(
+              // Phone: preview on top, options below (spec §0-ب).
+              child: options,
             ),
-            _sliderRow(
-              label: english ? 'Subtitle size' : 'حجم الترجمة',
-              value: (_v['subFontSize'] as int).toDouble(),
-              min: 14,
-              max: 44,
-              divisions: 15,
-              display: '${_v['subFontSize']} px',
-              onChanged: (v) => _preview('subFontSize', v.round()),
-              onChangeEnd: (v) => _commit('subFontSize', v.round()),
+    );
+  }
+
+  Widget _posChips() {
+    final english = widget.english;
+    final pos = _v['subPos'] as int;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(top: 2, bottom: 4),
+      child: Row(
+        children: [
+          for (final option in [
+            (0, english ? 'Top' : 'أعلى'),
+            (50, english ? 'Middle' : 'وسط'),
+            (100, english ? 'Bottom' : 'أسفل'),
+          ])
+            Expanded(
+              child: Padding(
+                padding: EdgeInsetsDirectional.only(
+                  end: option.$1 == 100 ? 0 : 6,
+                ),
+                child: _SelectChip(
+                  label: option.$2,
+                  selected: (pos - option.$1).abs() <= 2,
+                  onTap: () {
+                    _preview('subPos', option.$1);
+                    _commit('subPos', option.$1);
+                  },
+                ),
+              ),
             ),
-            _sliderRow(
-              label: english ? 'Subtitle position' : 'تموضع الترجمة',
-              value: (_v['subPos'] as int).toDouble(),
-              min: 0,
-              max: 100,
-              divisions: 20,
-              display: _posLabel(_v['subPos'] as int),
-              onChanged: (v) => _preview('subPos', v.round()),
-              onChangeEnd: (v) => _commit('subPos', v.round()),
+        ],
+      ),
+    );
+  }
+
+  Widget _delayButtons() {
+    final ms = _v['subtitleOffsetMs'] as int;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(top: 4, bottom: 2),
+      child: Row(
+        children: [
+          Text(
+            widget.english ? 'Timing offset' : 'تقديم أو تأخير الترجمة',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
             ),
-            _styleChips(),
-            _colorRow(
-              icon: Icons.format_color_fill_rounded,
-              label: english ? 'Outline color' : 'لون الحد',
-              hex: _v['subBorderColor']! as String,
-              onPick: (hex) => _commit('subBorderColor', hex),
+          ),
+          const Spacer(),
+          _DelayButton(
+            english: widget.english,
+            icon: Icons.remove_rounded,
+            onTap: () => _shiftDelay(-100),
+          ),
+          Container(
+            constraints: const BoxConstraints(minWidth: 92),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: .05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: HorseTheme.line),
             ),
-            _sliderRow(
-              label: english ? 'Outline thickness' : 'سماكة الحد',
-              value: (_v['subBorderSize'] as int).toDouble(),
-              min: 0,
-              max: 8,
-              divisions: 8,
-              display: '${_v['subBorderSize']} px',
-              onChanged: (v) => _preview('subBorderSize', v.round()),
-              onChangeEnd: (v) => _commit('subBorderSize', v.round()),
+            child: Text(
+              _offsetLabel(ms),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: HorseTheme.gold,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            _sliderRow(
-              label: english ? 'Background opacity' : 'شفافية الخلفية',
-              value: _v['subBackgroundOpacity']! as double,
-              min: 0,
-              max: 1,
-              divisions: 20,
-              display:
-                  '${((_v['subBackgroundOpacity']! as double) * 100).round()}%',
-              onChanged: (v) => _preview('subBackgroundOpacity', v),
-              onChangeEnd: (v) => _commit('subBackgroundOpacity', v),
-            ),
-            _sliderRow(
-              label: english ? 'Subtitle offset' : 'تقديم أو تأخير الترجمة',
-              value: (_v['subtitleOffsetMs'] as int).toDouble(),
-              min: -5000,
-              max: 5000,
-              divisions: 40,
-              display: _offsetLabel(_v['subtitleOffsetMs']! as int),
-              onChanged: (v) => _preview('subtitleOffsetMs', v.round()),
-              onChangeEnd: (v) => _commit('subtitleOffsetMs', v.round()),
-            ),
-          ],
-        ),
+          ),
+          _DelayButton(
+            english: widget.english,
+            icon: Icons.add_rounded,
+            onTap: () => _shiftDelay(100),
+          ),
+        ],
       ),
     );
   }
 
   // ── Pieces ────────────────────────────────────────────────────────────────
 
-  Widget _previewBox() {
+  Widget _previewBox({bool widePreview = false}) {
+    if (widePreview) return _previewBoxInner(height: 300);
+    return _previewBoxInner(height: 96);
+  }
+
+  Widget _previewBoxInner({required double height}) {
     final text =
         widget.english ? 'Subtitle sample — Noor' : 'مثال نص الترجمة — Noor';
     final fontSize = ((_v['subFontSize']! as int).clamp(12, 26)).toDouble();
@@ -1244,10 +1568,13 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         );
     }
 
+    final pos = (_v['subPos']! as int).clamp(0, 100);
+    // Map mpv sub-pos (0=top .. 100=bottom) onto the preview box.
+    final vertical = Alignment(0, (pos / 50.0) - 1.0);
     return Container(
-      height: 96,
+      height: height,
       width: double.infinity,
-      alignment: Alignment.center,
+      alignment: vertical,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         gradient: const LinearGradient(

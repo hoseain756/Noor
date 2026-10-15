@@ -31,6 +31,8 @@ abstract final class HorseTheme {
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: scheme,
+      // One family for Arabic + Latin (Task 125 spec): bundled Cairo (OFL).
+      fontFamily: 'Cairo',
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
       dividerColor: line,

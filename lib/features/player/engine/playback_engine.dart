@@ -67,6 +67,9 @@ abstract class PlaybackEngine extends ChangeNotifier {
   /// Live subtitle timing offset: negative = advance (earlier),
   /// positive = delay (later). Maps to mpv `sub-delay` seconds.
   Future<void> setSubtitleDelayMs(int delayMs);
+
+  /// Live audio timing offset in ms (positive = delay) → mpv `audio-delay`.
+  Future<void> setAudioDelayMs(int delayMs);
 }
 
 /// libmpv-backed implementation (media_kit).
@@ -310,6 +313,17 @@ class MediaKitEngine extends PlaybackEngine {
     try {
       await platform.setProperty(
           'sub-delay', (delayMs / 1000).toStringAsFixed(3));
+    } catch (_) {/* best-effort */}
+  }
+
+  @override
+  Future<void> setAudioDelayMs(int delayMs) async {
+    if (_disposed) return;
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    try {
+      await platform.setProperty(
+          'audio-delay', (delayMs / 1000).toStringAsFixed(3));
     } catch (_) {/* best-effort */}
   }
 

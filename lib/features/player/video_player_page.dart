@@ -75,8 +75,6 @@ class VideoPlayerPage extends StatefulWidget {
 
 enum _GestureMode { none, seek, brightness, volume, zoom }
 
-enum _OrientationMode { auto, landscape, portrait }
-
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   MediaKitEngine? _engine;
   Timer? _hideTimer;
@@ -111,13 +109,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   int _hudDeltaSeconds = 0;
   int _hudTargetMs = 0;
 
-  // Double-tap ripple state (Task 124 mandate: animated ±N feedback).
+  // Double-tap ripple state (Task 125: cumulative ±N burst per side).
   int _rippleKey = 0;
   bool _rippleForward = false;
-  int _rippleSeconds = 10;
+  int _rippleSeconds = 0;
   Timer? _rippleTimer;
 
-  _OrientationMode _orientation = _OrientationMode.auto;
+  // Gesture HUD linger (spec §6: fade ~1s after the drag ends).
+  Timer? _hudLingerTimer;
 
   @override
   void initState() {
@@ -126,9 +125,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _resumePositionMs = widget.initialPositionMs;
     _resuming = (_resumePositionMs ?? 0) > 30000;
     SystemChrome.setPreferredOrientations(const [
+      // Spec §0-ب: landscape-only player — portrait rotation is locked out.
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _progressTimer = Timer.periodic(
@@ -164,6 +163,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ));
     unawaited(engineRef
         .setSubtitleDelayMs((st['subtitleOffsetMs'] as num?)?.toInt() ?? 0));
+    unawaited(
+        engineRef.setAudioDelayMs((st['audioDelayMs'] as num?)?.toInt() ?? 0));
     if (st['subtitlesOffByDefault'] == true) {
       unawaited(engineRef.selectSubtitle(SubtitleTrack.no()));
     }
@@ -313,13 +314,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _bumpControls();
   }
 
-  /// Shows the mandated double-tap ripple (Task 124) on the tapped side.
-  void _showRipple({required bool forward, required int seconds}) {
+  /// Shows the mandated double-tap ripple (Task 125): consecutive taps on
+  /// the same half accumulate the counter (+10 -> +20 -> +30 ...) and the
+  /// burst fades ~800 ms after the last tap.
+  void _showRipple({required bool forward, required int step}) {
     _rippleTimer?.cancel();
     setState(() {
-      _rippleKey++;
-      _rippleForward = forward;
-      _rippleSeconds = seconds;
+      if (_rippleVisible && _rippleForward == forward) {
+        _rippleSeconds += step;
+      } else {
+        _rippleSeconds = step;
+        _rippleForward = forward;
+        _rippleKey++;
+      }
     });
     _rippleTimer = Timer(const Duration(milliseconds: 800), () {
       if (mounted) setState(() {});
@@ -406,33 +413,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   void _unlock() {
     setState(() => _locked = false);
-    _bumpControls();
-  }
-
-  Future<void> _cycleOrientation() async {
-    switch (_orientation) {
-      case _OrientationMode.auto:
-        _orientation = _OrientationMode.landscape;
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-        _flashHint(english ? 'Landscape' : 'أفقي');
-      case _OrientationMode.landscape:
-        _orientation = _OrientationMode.portrait;
-        await SystemChrome.setPreferredOrientations(
-          const [DeviceOrientation.portraitUp],
-        );
-        _flashHint(english ? 'Portrait' : 'عمودي');
-      case _OrientationMode.portrait:
-        _orientation = _OrientationMode.auto;
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-          DeviceOrientation.portraitUp,
-        ]);
-        _flashHint(english ? 'Auto-rotate' : 'تدوير تلقائي');
-    }
     _bumpControls();
   }
 
@@ -556,6 +536,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             tracks: engine.audioTracks,
             selected: engine.selectedAudio,
             onPick: (track) => unawaited(engine.selectAudio(track)),
+            delayMs:
+                (context.read<AppState>().webSettings['audioDelayMs'] as num?)
+                        ?.toInt() ??
+                    0,
+            onDelayChanged: (ms) async {
+              await engine.setAudioDelayMs(ms);
+              if (!mounted) return;
+              await context.read<AppState>().setSetting('audioDelayMs', ms);
+            },
           ),
         );
       });
@@ -804,10 +793,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final backStep = _backStepSec;
     final forwardStep = _forwardStepSec;
     if (details.localPosition.dx < width * .34) {
-      _showRipple(forward: false, seconds: backStep);
+      _showRipple(forward: false, step: backStep);
       unawaited(_seekBy(-backStep));
     } else if (details.localPosition.dx > width * .66) {
-      _showRipple(forward: true, seconds: forwardStep);
+      _showRipple(forward: true, step: forwardStep);
       unawaited(_seekBy(forwardStep));
     } else {
       unawaited(_togglePlay());
@@ -817,6 +806,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   void _onScaleStart(ScaleStartDetails details) {
     if (_locked) return;
     _hideTimer?.cancel();
+    _hudLingerTimer?.cancel();
     final engine = _engine;
     _gestureModeStart(details.pointerCount);
     if (details.pointerCount >= 2) {
@@ -918,6 +908,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   void _onScaleEnd(ScaleEndDetails details) {
     if (_mode == _GestureMode.seek && _hudTargetMs > 0) {
       unawaited(_engine?.seekTo(Duration(milliseconds: _hudTargetMs)));
+      _mode = _GestureMode.none;
+      _hudValue = 0;
+      _hudDeltaSeconds = 0;
+      _hudTargetMs = 0;
+      if (mounted) setState(() {});
+      _bumpControls();
+      return;
+    }
+    // Spec §6: the side indicator (volume / brightness) lingers ~1s after
+    // the drag ends instead of vanishing instantly.
+    if (_mode == _GestureMode.volume || _mode == _GestureMode.brightness) {
+      _hudLingerTimer?.cancel();
+      _hudLingerTimer = Timer(const Duration(milliseconds: 900), () {
+        if (!mounted) return;
+        setState(() => _mode = _GestureMode.none);
+      });
+      _bumpControls();
+      return;
     }
     _mode = _GestureMode.none;
     _hudValue = 0;
@@ -938,6 +946,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _progressTimer?.cancel();
     _hintTimer?.cancel();
     _rippleTimer?.cancel();
+    _hudLingerTimer?.cancel();
     _torrentSub?.cancel();
     final torrent = widget.torrent;
     if (torrent != null) unawaited(torrent.stop());
@@ -975,7 +984,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         ? _episodeAt(_currentEpisodeIndex() - 1)
         : null;
     final width = MediaQuery.sizeOf(context).width;
-    final scale = width >= 768 ? 1.15 : 1.0;
+    // Spec §0-ب: phone (~844×390) vs tablet (~1180×820) sizing.
+    final wide = width >= 900;
+    final scale = wide ? 1.28 : 1.0;
     final railTopInset = 108.0 * scale;
 
     return PopScope(
@@ -990,465 +1001,469 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         backgroundColor: Colors.black,
         // The chrome follows the reference layout (LTR media convention);
         // Arabic strings still render correctly via bidi.
-        body: Directionality(
-          textDirection: TextDirection.ltr,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              if (_locked) {
-                _flashHint(english ? 'Controls locked' : 'التحكم مقفل');
-              } else {
-                _toggleControls();
-              }
-            },
-            onDoubleTapDown: _handleDoubleTap,
-            onScaleStart: _onScaleStart,
-            onScaleUpdate: _onScaleUpdate,
-            onScaleEnd: _onScaleEnd,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Video surface (+ pinch zoom).
-                if (engine != null && engine.ready)
-                  ClipRect(
-                    child: Transform.scale(
-                      scale: _zoom,
-                      child: PlayerVideoSurface(engine: engine, fit: _fit),
-                    ),
-                  )
-                else if (failed)
-                  _ErrorPanel(
-                    message: engine?.errorMessage,
+        body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (_locked) {
+              _flashHint(english ? 'Controls locked' : 'التحكم مقفل');
+            } else {
+              _toggleControls();
+            }
+          },
+          onDoubleTapDown: _handleDoubleTap,
+          onScaleStart: _onScaleStart,
+          onScaleUpdate: _onScaleUpdate,
+          onScaleEnd: _onScaleEnd,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Video surface (+ pinch zoom).
+              if (engine != null && engine.ready)
+                ClipRect(
+                  child: Transform.scale(
+                    scale: _zoom,
+                    child: PlayerVideoSurface(engine: engine, fit: _fit),
+                  ),
+                )
+              else if (failed)
+                _ErrorPanel(
+                  message: engine?.errorMessage,
+                  english: english,
+                  onRetry: () {
+                    final old = _engine;
+                    old?.removeListener(_onEngineTick);
+                    old?.dispose();
+                    setState(() {
+                      _controlsVisible = true;
+                      _zoom = 1;
+                    });
+                    _createEngine();
+                  },
+                )
+              else
+                const Center(
+                  child: CircularProgressIndicator(
+                    color: HorseTheme.gold,
+                    strokeWidth: 2,
+                  ),
+                ),
+
+              // Torrent streaming HUD (speed / peers / progress).
+              if (widget.torrent != null && _torrentStatus != null)
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top + 8,
+                  left: 12,
+                  child: _TorrentHud(
+                    status: _torrentStatus!,
                     english: english,
-                    onRetry: () {
-                      final old = _engine;
-                      old?.removeListener(_onEngineTick);
-                      old?.dispose();
-                      setState(() {
-                        _controlsVisible = true;
-                        _zoom = 1;
-                      });
-                      _createEngine();
-                    },
-                  )
-                else
-                  const Center(
+                  ),
+                ),
+
+              // Buffering spark.
+              if (engine != null && engine.ready && engine.buffering)
+                const Center(
+                  child: SizedBox(
+                    width: 30,
+                    height: 30,
                     child: CircularProgressIndicator(
-                      color: HorseTheme.gold,
+                      color: Colors.white70,
                       strokeWidth: 2,
                     ),
                   ),
+                ),
 
-                // Torrent streaming HUD (speed / peers / progress).
-                if (widget.torrent != null && _torrentStatus != null)
-                  Positioned(
-                    top: MediaQuery.paddingOf(context).top + 8,
-                    left: 12,
-                    child: _TorrentHud(
-                      status: _torrentStatus!,
-                      english: english,
+              if (ready && !failed) ...[
+                // Chrome — fades together.
+                AnimatedOpacity(
+                  opacity: _controlsVisible && !_locked ? 1 : 0,
+                  duration: const Duration(milliseconds: 280),
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible || _locked,
+                    child: Stack(
+                      children: [
+                        PlayerTopBar(
+                          title: widget.item.name,
+                          episodeTag: widget.item.type == 'series'
+                              ? seasonEpisodeTag(widget.season, widget.episode)
+                              : '',
+                          onClose: _close,
+                          wide: wide,
+                        ),
+                        PlayerSideRail(
+                          side: AxisSide.left,
+                          topInset: railTopInset,
+                          children: [
+                            PlayerRailButton(
+                              icon: Icons.aspect_ratio_rounded,
+                              semanticLabel: 'Video fit',
+                              onTap: () => unawaited(_cycleFit()),
+                            ),
+                            PlayerRailButton(
+                              icon: Icons.lock_outline_rounded,
+                              semanticLabel: 'Lock controls',
+                              onTap: _lock,
+                            ),
+                            if (widget.item.type == 'series' &&
+                                _episodes.isNotEmpty)
+                              PlayerRailButton(
+                                icon: Icons.format_list_bulleted_rounded,
+                                semanticLabel: 'Episodes',
+                                onTap: _openEpisodesSheet,
+                              ),
+                            PlayerSpeedPill(
+                              label: _speedLabel,
+                              semanticLabel: 'Playback speed',
+                              onTap: _openSettings,
+                            ),
+                          ],
+                        ),
+                        PlayerBottomCluster(
+                          durationMs: duration,
+                          positionMs: position,
+                          bufferedMs: engine.bufferedEnd.inMilliseconds,
+                          isPlaying: engine.playing,
+                          volume: engine.volume,
+                          muted: engine.muted,
+                          backStepSec: _backStepSec,
+                          forwardStepSec: _forwardStepSec,
+                          fullscreen: _fullscreen,
+                          showRemaining: _showRemaining,
+                          canPrev: prevEpisode != null,
+                          canNext: nextEpisode != null,
+                          scale: scale,
+                          wide: wide,
+                          english: english,
+                          onPlayPause: () => unawaited(_togglePlay()),
+                          onSkip: (s) => unawaited(_seekBy(s)),
+                          onPrev: prevEpisode == null
+                              ? null
+                              : () => unawaited(_switchEpisode(prevEpisode)),
+                          onNext: nextEpisode == null
+                              ? null
+                              : () => unawaited(_switchEpisode(nextEpisode)),
+                          onVolumeChanged: (value) async {
+                            await engine.setVolume(value);
+                          },
+                          onVolumeDragEnd: () => _bumpControls(),
+                          onMuteToggle: () async {
+                            await engine.toggleMute();
+                            _bumpControls();
+                          },
+                          onToggleFullscreen: () =>
+                              unawaited(_toggleFullscreen()),
+                          onOpenStreams: widget.onSwitchStream == null ||
+                                  widget.streams.isEmpty
+                              ? null
+                              : _openStreamsSheet,
+                          onOpenSubtitles: _openSubtitlesSheet,
+                          onOpenAudio: _openAudioSheet,
+                          onToggleRemaining: () =>
+                              setState(() => _showRemaining = !_showRemaining),
+                          onScrubStart: () {
+                            _hideTimer?.cancel();
+                            setState(() => _controlsVisible = true);
+                          },
+                          onScrubUpdate: (seconds) {},
+                          onScrubEnd: (seconds) async {
+                            await engine.seekTo(
+                              Duration(milliseconds: (seconds * 1000).round()),
+                            );
+                            _bumpControls();
+                          },
+                        ),
+                      ],
                     ),
                   ),
+                ),
 
-                // Buffering spark.
-                if (engine != null && engine.ready && engine.buffering)
-                  const Center(
-                    child: SizedBox(
-                      width: 30,
-                      height: 30,
-                      child: CircularProgressIndicator(
-                        color: Colors.white70,
-                        strokeWidth: 2,
+                // Center gesture HUDs.
+                if (_mode == _GestureMode.seek)
+                  Center(
+                    child: SeekHud(
+                      deltaSeconds: _hudDeltaSeconds,
+                      targetText: formatPlayerTime(
+                        Duration(milliseconds: _hudTargetMs),
+                      ),
+                    ),
+                  )
+                else if (_mode == _GestureMode.brightness)
+                  // Sides are FIXED (never mirrored): left = brightness.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 24),
+                      child: VerticalHud(
+                        icon: Icons.brightness_6_rounded,
+                        label: english ? 'Brightness' : 'السطوع',
+                        value: _hudValue,
+                        vertical: true,
+                      ),
+                    ),
+                  )
+                else if (_mode == _GestureMode.volume)
+                  // Right = volume, in both directions.
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 24),
+                      child: VerticalHud(
+                        icon: Icons.volume_up_rounded,
+                        label: english ? 'Volume' : 'الصوت',
+                        value: _hudValue,
+                        vertical: true,
+                      ),
+                    ),
+                  )
+                else if (_mode == _GestureMode.zoom && _zoom > 1.01)
+                  Center(child: ZoomHud(scale: _zoom)),
+
+                // Reset-zoom chip.
+                if (_zoom > 1.01 &&
+                    _mode == _GestureMode.none &&
+                    _controlsVisible)
+                  Positioned(
+                    top: railTopInset + 168,
+                    right: 14,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: .55),
+                      borderRadius: BorderRadius.circular(999),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: () => setState(() => _zoom = 1),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.center_focus_strong_rounded,
+                                  size: 14, color: Colors.white),
+                              SizedBox(width: 6),
+                              Text(
+                                '1×',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
 
-                if (ready && !failed) ...[
-                  // Chrome — fades together.
-                  AnimatedOpacity(
-                    opacity: _controlsVisible && !_locked ? 1 : 0,
-                    duration: const Duration(milliseconds: 280),
-                    child: IgnorePointer(
-                      ignoring: !_controlsVisible || _locked,
-                      child: Stack(
-                        children: [
-                          PlayerTopBar(
-                            title: widget.item.name,
-                            episodeTag: widget.item.type == 'series'
-                                ? seasonEpisodeTag(
-                                    widget.season, widget.episode)
-                                : '',
-                            onClose: _close,
+                // Lock pill — the only chrome while locked.
+                if (_locked)
+                  Positioned(
+                    bottom: 26,
+                    left: 16,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: .45),
+                      borderRadius: BorderRadius.circular(999),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: _unlock,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 9,
                           ),
-                          PlayerSideRail(
-                            side: AxisSide.left,
-                            topInset: railTopInset,
+                          child: Icon(
+                            Icons.lock_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Hint pill.
+                if (_hintVisible)
+                  Center(child: LockHintHud(message: _lastHint)),
+
+                // Double-tap seek ripple (Task 124: animated ±N feedback),
+                // anchored to the tapped third of the screen.
+                if (_rippleVisible && !_locked)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Align(
+                        alignment: _rippleForward
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 56,
+                          ),
+                          child: DoubleTapRipple(
+                            key: ValueKey(_rippleKey),
+                            forward: _rippleForward,
+                            seconds: _rippleSeconds,
+                            english: english,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Resume card.
+                if (!_locked && _resuming && (_resumePositionMs ?? 0) > 30000)
+                  Positioned(
+                    bottom: 180 * scale,
+                    left: 16,
+                    child: PlayerCardShell(
+                      width: 340,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          PlayerCardHeader(
+                            icon: Icons.history_rounded,
+                            label: english ? 'RESUME' : 'استئناف',
+                            trailing: InkWell(
+                              onTap: () => setState(() => _resuming = false),
+                              child: const Icon(Icons.close_rounded,
+                                  size: 17, color: Colors.white38),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            english
+                                ? 'Resume from ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}?'
+                                : 'استئناف من ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}؟',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 11),
+                          Row(
                             children: [
-                              PlayerRailButton(
-                                icon: _orientationIcon,
-                                semanticLabel: 'Orientation',
-                                onTap: () => unawaited(_cycleOrientation()),
-                              ),
-                              PlayerRailButton(
-                                icon: Icons.aspect_ratio_rounded,
-                                semanticLabel: 'Video fit',
-                                onTap: () => unawaited(_cycleFit()),
-                              ),
-                              PlayerRailButton(
-                                icon: Icons.lock_outline_rounded,
-                                semanticLabel: 'Lock controls',
-                                onTap: _lock,
-                              ),
-                              if (widget.item.type == 'series' &&
-                                  _episodes.isNotEmpty)
-                                PlayerRailButton(
-                                  icon: Icons.format_list_bulleted_rounded,
-                                  semanticLabel: 'Episodes',
-                                  onTap: _openEpisodesSheet,
+                              Expanded(
+                                child: PlayerPrimaryAction(
+                                  label: english ? 'Resume' : 'استئناف',
+                                  onPressed: () =>
+                                      unawaited(_resumeFromSaved()),
                                 ),
-                              PlayerSpeedPill(
-                                label: _speedLabel,
-                                semanticLabel: 'Playback speed',
-                                onTap: _openSettings,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: PlayerSecondaryAction(
+                                  label: english ? 'Start over' : 'من البداية',
+                                  onPressed: () async {
+                                    setState(() {
+                                      _resuming = false;
+                                      _resumePositionMs = 0;
+                                    });
+                                    await _engine?.seekTo(Duration.zero);
+                                    await _engine?.play();
+                                  },
+                                ),
                               ),
                             ],
-                          ),
-                          PlayerBottomCluster(
-                            durationMs: duration,
-                            positionMs: position,
-                            bufferedMs: engine.bufferedEnd.inMilliseconds,
-                            isPlaying: engine.playing,
-                            volume: engine.volume,
-                            muted: engine.muted,
-                            backStepSec: _backStepSec,
-                            forwardStepSec: _forwardStepSec,
-                            fullscreen: _fullscreen,
-                            showRemaining: _showRemaining,
-                            canPrev: prevEpisode != null,
-                            canNext: nextEpisode != null,
-                            scale: scale,
-                            onPlayPause: () => unawaited(_togglePlay()),
-                            onSkip: (s) => unawaited(_seekBy(s)),
-                            onPrev: prevEpisode == null
-                                ? null
-                                : () => unawaited(_switchEpisode(prevEpisode)),
-                            onNext: nextEpisode == null
-                                ? null
-                                : () => unawaited(_switchEpisode(nextEpisode)),
-                            onVolumeChanged: (value) async {
-                              await engine.setVolume(value);
-                            },
-                            onVolumeDragEnd: () => _bumpControls(),
-                            onMuteToggle: () async {
-                              await engine.toggleMute();
-                              _bumpControls();
-                            },
-                            onToggleFullscreen: () =>
-                                unawaited(_toggleFullscreen()),
-                            onOpenStreams: widget.onSwitchStream == null ||
-                                    widget.streams.isEmpty
-                                ? null
-                                : _openStreamsSheet,
-                            onOpenSubtitles: _openSubtitlesSheet,
-                            onOpenAudio: _openAudioSheet,
-                            onToggleRemaining: () => setState(
-                                () => _showRemaining = !_showRemaining),
-                            onScrubStart: () {
-                              _hideTimer?.cancel();
-                              setState(() => _controlsVisible = true);
-                            },
-                            onScrubUpdate: (seconds) {},
-                            onScrubEnd: (seconds) async {
-                              await engine.seekTo(
-                                Duration(
-                                    milliseconds: (seconds * 1000).round()),
-                              );
-                              _bumpControls();
-                            },
                           ),
                         ],
                       ),
                     ),
                   ),
 
-                  // Center gesture HUDs.
-                  if (_mode == _GestureMode.seek)
-                    Center(
-                      child: SeekHud(
-                        deltaSeconds: _hudDeltaSeconds,
-                        targetText: formatPlayerTime(
-                          Duration(milliseconds: _hudTargetMs),
-                        ),
-                      ),
-                    )
-                  else if (_mode == _GestureMode.brightness)
-                    Center(
-                      child: VerticalHud(
-                        icon: Icons.brightness_6_rounded,
-                        label: english ? 'Brightness' : 'السطوع',
-                        value: _hudValue,
-                      ),
-                    )
-                  else if (_mode == _GestureMode.volume)
-                    Center(
-                      child: VerticalHud(
-                        icon: Icons.volume_up_rounded,
-                        label: english ? 'Volume' : 'الصوت',
-                        value: _hudValue,
-                      ),
-                    )
-                  else if (_mode == _GestureMode.zoom && _zoom > 1.01)
-                    Center(child: ZoomHud(scale: _zoom)),
-
-                  // Reset-zoom chip.
-                  if (_zoom > 1.01 &&
-                      _mode == _GestureMode.none &&
-                      _controlsVisible)
-                    Positioned(
-                      top: railTopInset + 168,
-                      right: 14,
-                      child: Material(
-                        color: Colors.black.withValues(alpha: .55),
-                        borderRadius: BorderRadius.circular(999),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(999),
-                          onTap: () => setState(() => _zoom = 1),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.center_focus_strong_rounded,
-                                    size: 14, color: Colors.white),
-                                SizedBox(width: 6),
-                                Text(
-                                  '1×',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                // Up-Next card.
+                if (!_locked &&
+                    nextEpisode != null &&
+                    nearEnd &&
+                    !_upNextDismissed &&
+                    !_stopScrobbled &&
+                    duration > 0)
+                  Positioned(
+                    bottom: 180 * scale,
+                    right: 16,
+                    child: PlayerCardShell(
+                      width: 288,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          PlayerCardHeader(
+                            icon: Icons.skip_next_rounded,
+                            label: english ? 'UP NEXT' : 'التالي',
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: HorseTheme.canvas,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: HorseTheme.line),
+                              ),
+                              child: Text(
+                                countdown(nearEnd, duration, position),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-
-                  // Lock pill — the only chrome while locked.
-                  if (_locked)
-                    Positioned(
-                      bottom: 26,
-                      left: 16,
-                      child: Material(
-                        color: Colors.black.withValues(alpha: .45),
-                        borderRadius: BorderRadius.circular(999),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(999),
-                          onTap: _unlock,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 9,
-                            ),
-                            child: Icon(
-                              Icons.lock_rounded,
+                          const SizedBox(height: 9),
+                          Text(
+                            (nextEpisode['name'] ??
+                                    nextEpisode['title'] ??
+                                    'Episode')
+                                .toString(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
                               color: Colors.white,
-                              size: 18,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-
-                  // Hint pill.
-                  if (_hintVisible)
-                    Center(child: LockHintHud(message: _lastHint)),
-
-                  // Double-tap seek ripple (Task 124: animated ±N feedback),
-                  // anchored to the tapped third of the screen.
-                  if (_rippleVisible && !_locked)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Align(
-                          alignment: _rippleForward
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 56,
+                          if (nextEpisode['season'] != null &&
+                              nextEpisode['episode'] != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(
+                                'S${(nextEpisode['season'] as num).toInt()}:E${(nextEpisode['episode'] as num).toInt()}',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: .54),
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
-                            child: DoubleTapRipple(
-                              key: ValueKey(_rippleKey),
-                              forward: _rippleForward,
-                              seconds: _rippleSeconds,
-                              english: english,
-                            ),
+                          const SizedBox(height: 11),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: PlayerPrimaryAction(
+                                  label: english
+                                      ? 'Next episode'
+                                      : 'الحلقة التالية',
+                                  onPressed: () => unawaited(
+                                    _switchEpisode(nextEpisode),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              PlayerSecondaryAction(
+                                label: english ? 'Cancel' : 'إلغاء',
+                                onPressed: () =>
+                                    setState(() => _upNextDismissed = true),
+                              ),
+                            ],
                           ),
-                        ),
+                        ],
                       ),
                     ),
-
-                  // Resume card.
-                  if (!_locked && _resuming && (_resumePositionMs ?? 0) > 30000)
-                    Positioned(
-                      bottom: 180 * scale,
-                      left: 16,
-                      child: PlayerCardShell(
-                        width: 340,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            PlayerCardHeader(
-                              icon: Icons.history_rounded,
-                              label: english ? 'RESUME' : 'استئناف',
-                              trailing: InkWell(
-                                onTap: () => setState(() => _resuming = false),
-                                child: const Icon(Icons.close_rounded,
-                                    size: 17, color: Colors.white38),
-                              ),
-                            ),
-                            const SizedBox(height: 7),
-                            Text(
-                              english
-                                  ? 'Resume from ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}?'
-                                  : 'استئناف من ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}؟',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 11),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: PlayerPrimaryAction(
-                                    label: english ? 'Resume' : 'استئناف',
-                                    onPressed: () =>
-                                        unawaited(_resumeFromSaved()),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: PlayerSecondaryAction(
-                                    label:
-                                        english ? 'Start over' : 'من البداية',
-                                    onPressed: () async {
-                                      setState(() {
-                                        _resuming = false;
-                                        _resumePositionMs = 0;
-                                      });
-                                      await _engine?.seekTo(Duration.zero);
-                                      await _engine?.play();
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                  // Up-Next card.
-                  if (!_locked &&
-                      nextEpisode != null &&
-                      nearEnd &&
-                      !_upNextDismissed &&
-                      !_stopScrobbled &&
-                      duration > 0)
-                    Positioned(
-                      bottom: 180 * scale,
-                      right: 16,
-                      child: PlayerCardShell(
-                        width: 288,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            PlayerCardHeader(
-                              icon: Icons.skip_next_rounded,
-                              label: english ? 'UP NEXT' : 'التالي',
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: HorseTheme.canvas,
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(color: HorseTheme.line),
-                                ),
-                                child: Text(
-                                  countdown(nearEnd, duration, position),
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 9),
-                            Text(
-                              (nextEpisode['name'] ??
-                                      nextEpisode['title'] ??
-                                      'Episode')
-                                  .toString(),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (nextEpisode['season'] != null &&
-                                nextEpisode['episode'] != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 3),
-                                child: Text(
-                                  'S${(nextEpisode['season'] as num).toInt()}:E${(nextEpisode['episode'] as num).toInt()}',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: .54),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            const SizedBox(height: 11),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: PlayerPrimaryAction(
-                                    label: english
-                                        ? 'Next episode'
-                                        : 'الحلقة التالية',
-                                    onPressed: () => unawaited(
-                                      _switchEpisode(nextEpisode),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                PlayerSecondaryAction(
-                                  label: english ? 'Cancel' : 'إلغاء',
-                                  onPressed: () =>
-                                      setState(() => _upNextDismissed = true),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
+                  ),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -1462,17 +1477,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     return seconds > 0
         ? (english ? 'in $s$unit' : 'بعد $s$unit')
         : (english ? 'now' : 'الآن');
-  }
-
-  IconData get _orientationIcon {
-    switch (_orientation) {
-      case _OrientationMode.auto:
-        return Icons.screen_rotation_rounded;
-      case _OrientationMode.landscape:
-        return Icons.screen_lock_landscape_rounded;
-      case _OrientationMode.portrait:
-        return Icons.screen_lock_portrait_rounded;
-    }
   }
 }
 

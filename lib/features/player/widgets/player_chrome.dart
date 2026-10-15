@@ -6,14 +6,16 @@ import '../../../core/theme/horse_theme.dart';
 /// white controls over the video, a teal→blue gradient timeline, a large
 /// outlined central play control and slim translucent scrims.
 ///
-/// Task 124 layout mandate (user spec):
-///  · top bar — exit arrow at the far LEFT, title at the far RIGHT with a
+/// Task 124/125 layout mandate:
+///  · top bar — exit at the directional END, title at the START, with a
 ///    zero-padded `S01E12` tag underneath for series;
-///  · progress row (current · timeline · total) sits ABOVE every control;
-///  · bottom-left: volume icon (tap = mute) + persistent volume slider +
-///    fullscreen toggle; bottom-CENTER exactly [rewind][play][forward] with
-///    the step seconds from settings; bottom-RIGHT: source / subtitles /
-///    audio (plus prev/next episode for series).
+///  · progress row (current · timeline · total) sits ABOVE every control and
+///    is NEVER mirrored (always LTR fill);
+///  · bottom row: fullscreen+volume at the directional END, source /
+///    subtitles / audio at the START; the [rewind][play][forward] trio is
+///    dead CENTER and NEVER mirrored (rewind always left);
+///  · gestures are side-fixed: left = brightness, right = volume.
+/// Mirroring follows the inherited Directionality (Arabic RTL / English LTR).
 class PlayerPalette {
   static const Color gradientStart = Color(0xFF2FE3B4);
   static const Color gradientEnd = Color(0xFF3B82F6);
@@ -51,6 +53,7 @@ class PlayerTopBar extends StatelessWidget {
     required this.title,
     required this.episodeTag,
     required this.onClose,
+    this.wide = false,
   });
 
   final String title;
@@ -59,8 +62,13 @@ class PlayerTopBar extends StatelessWidget {
   final String episodeTag;
   final VoidCallback onClose;
 
+  /// Tablet sizing (larger title font).
+  final bool wide;
+
   @override
   Widget build(BuildContext context) {
+    // Directional mirror (spec §0): RTL → title right / exit left;
+    // LTR → title left / exit right. START = title, END = exit.
     return Positioned(
       top: 0,
       left: 0,
@@ -76,55 +84,62 @@ class PlayerTopBar extends StatelessWidget {
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 16, 26),
+            padding: EdgeInsets.fromLTRB(12, 6, wide ? 24 : 12, 26),
             child: Row(
               children: [
-                PlayerBackButton(onTap: onClose),
-                const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        shadows: PlayerPalette.iconShadow,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: wide ? 16.5 : 14,
+                          fontWeight: FontWeight.w600,
+                          shadows: PlayerPalette.iconShadow,
+                        ),
                       ),
-                    ),
-                    if (episodeTag.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 1.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: .35),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: Text(
-                            episodeTag,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: .8,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                              shadows: PlayerPalette.iconShadow,
+                      if (episodeTag.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Directionality(
+                            // Mixed-script mandate: the tag is always LTR.
+                            textDirection: TextDirection.ltr,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: .35),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Text(
+                                episodeTag,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: .92),
+                                  fontSize: wide ? 12 : 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: .8,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                  shadows: PlayerPalette.iconShadow,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 10),
+                PlayerBackButton(onTap: onClose),
               ],
             ),
           ),
@@ -286,11 +301,15 @@ class GradientTimeline extends StatefulWidget {
     required this.onScrubStart,
     required this.onScrubUpdate,
     required this.onScrubEnd,
+    this.thickness = 4.0,
   });
 
   final int durationMs;
   final int positionMs;
   final int bufferedMs;
+
+  /// Bar thickness — slightly thicker on tablets (spec §0-ب).
+  final double thickness;
 
   /// Called when a scrub gesture starts (hold controls visible).
   final VoidCallback onScrubStart;
@@ -320,6 +339,8 @@ class _GradientTimelineState extends State<GradientTimeline> {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final duration = widget.durationMs;
+        final thickness = widget.thickness;
+        final thumbSize = thickness + 10;
         final buffered =
             duration > 0 ? (widget.bufferedMs / duration).clamp(0.0, 1.0) : 0.0;
         final progress = _progress;
@@ -370,17 +391,17 @@ class _GradientTimelineState extends State<GradientTimeline> {
               children: [
                 // Remaining track.
                 Container(
-                  height: 4,
+                  height: thickness,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: .22),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-                // Buffered portion.
+                // Buffered portion — second color per spec §2.
                 FractionallySizedBox(
                   widthFactor: buffered,
                   child: Container(
-                    height: 4,
+                    height: thickness,
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: .38),
                       borderRadius: BorderRadius.circular(999),
@@ -391,7 +412,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                 FractionallySizedBox(
                   widthFactor: progress,
                   child: Container(
-                    height: 4,
+                    height: thickness,
                     decoration: BoxDecoration(
                       gradient: PlayerPalette.played,
                       borderRadius: BorderRadius.circular(999),
@@ -400,12 +421,12 @@ class _GradientTimelineState extends State<GradientTimeline> {
                 ),
                 // Thumb + scrub bubble.
                 Positioned(
-                  left: (progress * width - 9)
-                      .clamp(0.0, (width - 18).clamp(0.0, width)),
+                  left: (progress * width - thumbSize / 2)
+                      .clamp(0.0, (width - thumbSize).clamp(0.0, width)),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 120),
-                    width: _dragging ? 18 : 14,
-                    height: _dragging ? 18 : 14,
+                    width: _dragging ? thumbSize + 4 : thumbSize,
+                    height: _dragging ? thumbSize + 4 : thumbSize,
                     decoration: BoxDecoration(
                       color: PlayerPalette.thumb,
                       shape: BoxShape.circle,
@@ -425,7 +446,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                         .clamp(0.0, (width - 88).clamp(0.0, width)),
                     bottom: 26,
                     child: Container(
-                      width: 88,
+                      width: thickness > 4 ? 120 : 88,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 5,
@@ -459,9 +480,10 @@ class _GradientTimelineState extends State<GradientTimeline> {
 
 // ── Bottom cluster ─────────────────────────────────────────────────────────
 
-/// Spec-exact bottom block (Task 124): progress row above ALL controls;
-/// volume + fullscreen on the LEFT, the [rewind][play][forward] trio dead
-/// CENTER, and source / subtitles / audio (+ episode skips) on the RIGHT.
+/// Spec-exact bottom block (Task 124/125): progress row above ALL controls;
+/// fullscreen+volume at the directional END, the [rewind][play][forward]
+/// trio dead center (never mirrored), source / subtitles / audio at the
+/// directional START. On tablets (wide) side icons gain small labels.
 class PlayerBottomCluster extends StatelessWidget {
   const PlayerBottomCluster({
     super.key,
@@ -478,6 +500,8 @@ class PlayerBottomCluster extends StatelessWidget {
     required this.canPrev,
     required this.canNext,
     required this.scale,
+    required this.wide,
+    required this.english,
     required this.onPlayPause,
     required this.onSkip,
     required this.onPrev,
@@ -514,7 +538,11 @@ class PlayerBottomCluster extends StatelessWidget {
 
   final bool canPrev;
   final bool canNext;
-  final double scale; // 1.0 phone · ~1.15 tablet
+  final double scale; // 1.0 phone · ~1.28 tablet
+
+  /// Tablet mode: wider margins, labels under side icons, thicker bar.
+  final bool wide;
+  final bool english;
   final VoidCallback onPlayPause;
   final ValueChanged<int> onSkip;
   final VoidCallback? onPrev;
@@ -533,8 +561,10 @@ class PlayerBottomCluster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final big = 64.0 * scale;
+    final big = wide ? 76.0 : 64.0;
     final controlSize = 44.0 * scale;
+    final margin = wide ? 28.0 : 14.0;
+    final thickness = wide ? 6.0 : 4.0;
     return Positioned(
       left: 0,
       right: 0,
@@ -554,12 +584,12 @@ class PlayerBottomCluster extends StatelessWidget {
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(14, 30, 14, 8 * scale),
+            padding: EdgeInsets.fromLTRB(margin, 30, margin, 8 * scale),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Progress row — bar always LTR (media convention); the full
-                // duration sits at the far right, current time to its left.
+                // Progress row — NEVER mirrored: full duration at the far
+                // right, current time to its left, fill left→right always.
                 Directionality(
                   textDirection: TextDirection.ltr,
                   child: Row(
@@ -568,6 +598,7 @@ class PlayerBottomCluster extends StatelessWidget {
                         text: formatPlayerTime(
                           Duration(milliseconds: positionMs),
                         ),
+                        wide: wide,
                         onTap: onToggleRemaining,
                       ),
                       Expanded(
@@ -575,6 +606,7 @@ class PlayerBottomCluster extends StatelessWidget {
                           durationMs: durationMs,
                           positionMs: positionMs,
                           bufferedMs: bufferedMs,
+                          thickness: thickness,
                           onScrubStart: onScrubStart,
                           onScrubUpdate: onScrubUpdate,
                           onScrubEnd: onScrubEnd,
@@ -585,6 +617,7 @@ class PlayerBottomCluster extends StatelessWidget {
                             ? '-${formatPlayerTime(Duration(milliseconds: durationMs - positionMs))}'
                             : formatPlayerTime(
                                 Duration(milliseconds: durationMs)),
+                        wide: wide,
                         onTap: onToggleRemaining,
                       ),
                     ],
@@ -592,19 +625,29 @@ class PlayerBottomCluster extends StatelessWidget {
                 ),
                 SizedBox(height: 2 * scale),
                 // Control row: a Stack keeps the mandated center trio dead
-                // center regardless of side-cluster widths.
+                // center; the side groups mirror with the direction.
                 SizedBox(
-                  height: big + 8,
+                  height: big + (wide ? 34 : 8),
                   child: Stack(
                     children: [
+                      // END side (RTL: left · LTR: right):
+                      // fullscreen + volume.
                       Align(
-                        alignment: Alignment.centerLeft,
-                        child: _leftGroup(controlSize),
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: _mediaGroup(controlSize),
                       ),
-                      Center(child: _centerGroup(big, controlSize)),
+                      // CENTER — never mirrored (rewind always left).
+                      Center(
+                        child: Directionality(
+                          textDirection: TextDirection.ltr,
+                          child: _centerGroup(big, controlSize),
+                        ),
+                      ),
+                      // START side (RTL: right · LTR: left):
+                      // source / subtitles / audio.
                       Align(
-                        alignment: Alignment.centerRight,
-                        child: _rightGroup(controlSize),
+                        alignment: AlignmentDirectional.centerStart,
+                        child: _trackGroup(controlSize),
                       ),
                     ],
                   ),
@@ -617,8 +660,9 @@ class PlayerBottomCluster extends StatelessWidget {
     );
   }
 
-  // LEFT: volume icon (tap = mute) + slider + fullscreen.
-  Widget _leftGroup(double controlSize) => Row(
+  // END side: volume icon (tap = mute) + slider + fullscreen, with small
+  // labels underneath on tablets (spec §0-ب).
+  Widget _mediaGroup(double controlSize) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           _RaillessControl(
@@ -628,12 +672,13 @@ class PlayerBottomCluster extends StatelessWidget {
                     ? Icons.volume_down_rounded
                     : Icons.volume_up_rounded,
             semanticLabel: muted ? 'Unmute' : 'Mute',
+            label: wide ? (english ? 'Sound' : 'الصوت') : null,
             scale: scale,
             onTap: onMuteToggle,
           ),
           _VolumeSlider(
             value: muted ? 0 : volume,
-            width: 84 * scale,
+            width: (wide ? 130 : 84) * scale,
             onChanged: onVolumeChanged,
             onChangeEnd: (_) => onVolumeDragEnd(),
           ),
@@ -642,6 +687,7 @@ class PlayerBottomCluster extends StatelessWidget {
                 ? Icons.fullscreen_rounded
                 : Icons.fullscreen_exit_rounded,
             semanticLabel: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            label: wide ? (english ? 'Full screen' : 'ملء الشاشة') : null,
             scale: scale,
             onTap: onToggleFullscreen,
           ),
@@ -701,8 +747,9 @@ class PlayerBottomCluster extends StatelessWidget {
         ],
       );
 
-  // RIGHT: source / subtitles / audio (+ prev & next episode for series).
-  Widget _rightGroup(double controlSize) => Row(
+  // START side: source / subtitles / audio (+ prev & next episode for
+  // series), with small labels underneath on tablets.
+  Widget _trackGroup(double controlSize) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (canPrev)
@@ -717,6 +764,7 @@ class PlayerBottomCluster extends StatelessWidget {
             _RaillessControl(
               icon: Icons.swap_horiz_rounded,
               semanticLabel: 'Change source',
+              label: wide ? (english ? 'Source' : 'المصدر') : null,
               scale: scale,
               onTap: onOpenStreams!,
             ),
@@ -724,6 +772,7 @@ class PlayerBottomCluster extends StatelessWidget {
             _RaillessControl(
               icon: Icons.subtitles_outlined,
               semanticLabel: 'Subtitles',
+              label: wide ? (english ? 'Subs' : 'الترجمة') : null,
               scale: scale,
               onTap: onOpenSubtitles!,
             ),
@@ -731,6 +780,7 @@ class PlayerBottomCluster extends StatelessWidget {
             _RaillessControl(
               icon: Icons.graphic_eq_rounded,
               semanticLabel: 'Audio track / dub',
+              label: wide ? (english ? 'Audio' : 'الدبلاج') : null,
               scale: scale,
               onTap: onOpenAudio!,
             ),
@@ -839,8 +889,10 @@ class _SkipButton extends StatelessWidget {
 }
 
 class _TimeLabel extends StatelessWidget {
-  const _TimeLabel({required this.text, required this.onTap});
+  const _TimeLabel(
+      {required this.text, required this.onTap, this.wide = false});
   final String text;
+  final bool wide;
   final VoidCallback onTap;
 
   @override
@@ -851,10 +903,10 @@ class _TimeLabel extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
           child: Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white70,
-              fontSize: 12,
-              fontFeatures: [FontFeature.tabularFigures()],
+              fontSize: wide ? 13.5 : 12,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ),
@@ -868,6 +920,7 @@ class _RaillessControl extends StatelessWidget {
     required this.onTap,
     required this.scale,
     this.iconSize = 25,
+    this.label,
   });
 
   final IconData icon;
@@ -876,25 +929,58 @@ class _RaillessControl extends StatelessWidget {
   final double scale;
   final double iconSize;
 
+  /// Small caption under the icon — tablet only (spec §0-ب).
+  final String? label;
+
   @override
-  Widget build(BuildContext context) => Semantics(
-        button: true,
-        label: semanticLabel,
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final iconWidget = Icon(
+      icon,
+      color: enabled ? Colors.white : Colors.white30,
+      size: iconSize * scale,
+      shadows: enabled ? PlayerPalette.iconShadow : null,
+    );
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: Opacity(
+        opacity: enabled ? 1.0 : .55,
         child: InkWell(
-          customBorder: const CircleBorder(),
+          borderRadius: BorderRadius.circular(12),
           onTap: onTap,
-          child: SizedBox(
-            width: 44 * scale,
-            height: 44 * scale,
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: iconSize * scale,
-              shadows: PlayerPalette.iconShadow,
-            ),
-          ),
+          child: label == null
+              ? SizedBox(
+                  width: 44 * scale,
+                  height: 44 * scale,
+                  child: Center(child: iconWidget),
+                )
+              : Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 44 * scale,
+                        height: 44 * scale,
+                        child: Center(child: iconWidget),
+                      ),
+                      Text(
+                        label!,
+                        style: TextStyle(
+                          color: enabled ? Colors.white70 : Colors.white24,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 // ── Double-tap ripple (user mandate: animated ±N feedback) ────────────────
@@ -922,7 +1008,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 750),
+    duration: const Duration(milliseconds: 850),
   )..forward();
 
   late final Animation<double> _scale = TweenSequence<double>([
@@ -960,38 +1046,54 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
         child: ScaleTransition(
           scale: _scale,
           child: Container(
-            width: 96,
-            height: 96,
+            width: 190,
+            height: 190,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: .16),
               shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  Colors.white.withValues(alpha: .20),
+                  Colors.white.withValues(alpha: .06),
+                  Colors.white.withValues(alpha: 0),
+                ],
+              ),
             ),
             alignment: Alignment.center,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  widget.forward
-                      ? Icons.fast_forward_rounded
-                      : Icons.fast_rewind_rounded,
-                  color: Colors.white,
-                  size: 30,
-                  shadows: PlayerPalette.iconShadow,
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  widget.english
-                      ? '${widget.forward ? '+' : '-'}${widget.seconds}s'
-                      : '${widget.forward ? '+' : '-'}${widget.seconds}ث',
-                  style: const TextStyle(
+            child: Container(
+              width: 118,
+              height: 118,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: .13),
+                border: Border.all(color: Colors.white24),
+              ),
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.forward
+                        ? Icons.fast_forward_rounded
+                        : Icons.fast_rewind_rounded,
                     color: Colors.white,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    size: 32,
                     shadows: PlayerPalette.iconShadow,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 3),
+                  Text(
+                    widget.english
+                        ? '${widget.forward ? '+' : '-'}${widget.seconds}s'
+                        : '${widget.forward ? '+' : '-'}${widget.seconds}ث',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                      shadows: PlayerPalette.iconShadow,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1065,53 +1167,106 @@ class VerticalHud extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.vertical = false,
   });
 
   final IconData icon;
   final String label;
   final double value; // 0..1
 
+  /// True = spec §6 side-anchored indicator (icon + vertical bar + percent);
+  /// false = legacy compact centered card.
+  final bool vertical;
+
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
+  Widget build(BuildContext context) {
+    if (vertical) {
+      return Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .72),
-          borderRadius: BorderRadius.circular(16),
+          color: Colors.black.withValues(alpha: .66),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white12),
         ),
         child: Directionality(
           textDirection: TextDirection.ltr,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 22),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: 110,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: value.clamp(0.0, 1.0),
-                    minHeight: 4,
-                    backgroundColor: Colors.white24,
-                    valueColor:
-                        const AlwaysStoppedAnimation(PlayerPalette.thumb),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
               Text(
-                '$label · ${(value * 100).round()}%',
+                '${(value * 100).round()}%',
                 style: const TextStyle(
-                  color: Colors.white70,
+                  color: Colors.white,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   fontFeatures: [FontFeature.tabularFigures()],
                 ),
               ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: 5,
+                height: 150,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: Stack(
+                    alignment: AlignmentDirectional.bottomStart,
+                    children: [
+                      Container(color: Colors.white24),
+                      FractionallySizedBox(
+                        heightFactor: value.clamp(0.0, 1.0),
+                        child: Container(color: PlayerPalette.thumb),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Icon(icon, color: Colors.white, size: 20),
             ],
           ),
         ),
       );
+    }
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .72),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 22),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: 110,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: value.clamp(0.0, 1.0),
+                  minHeight: 4,
+                  backgroundColor: Colors.white24,
+                  valueColor: const AlwaysStoppedAnimation(PlayerPalette.thumb),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$label · ${(value * 100).round()}%',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class ZoomHud extends StatelessWidget {
