@@ -78,27 +78,14 @@ const int _kMaxScrubSamples = 6;
 /// Web `--nav-radius: 9999px` (stadium capsule).
 const double _kStadiumRadius = 9999;
 
-// Glass recipe (web `--glass-*` dark values).
-const Color _kGlassTint = Color(0xFFBFE6F2); // rgb(191 230 242)
-const Color _kPanelFill = Color(0xFF10181C); // rgb(16 24 28)
+// Glass recipe (Task 120 user mandate): the OLD detail back-pill surface —
+// blur backdrop over a black/55 fill, 1px white/15 ring, soft black shadow —
+// replaced the Harbor `--glass-*` cyan-tint recipe (tint `#BFE6F2` ring +
+// sheen + panel fill `#10181C` @ .434 + saturate 1.35) so the dock, search
+// button and detail pills all wear the same neutral dark glass.
 const Color _kActiveFill = Color(0x29FFFFFF); // rgba(255,255,255,0.16)
 const Color _kIconActive = Color(0xFFF5F5F5);
 const Color _kIconInactive = Color(0xBFFFFFFF); // rgba(255,255,255,0.75)
-
-/// CSS `saturate(1.35)` as a color matrix (Skia luma coefficients) — Flutter
-/// has no saturate in `ImageFilter`, so the blur's sibling filter is composed
-/// with a `ColorFiltered` layer (REVIEW.md mapping row 32).
-final ColorFilter _kSaturate = ColorFilter.matrix(_saturationMatrix(1.35));
-
-List<double> _saturationMatrix(double s) {
-  final lr = 0.213, lg = 0.715, lb = 0.072; // luma weights
-  return <double>[
-    lr + (1 - lr) * s, lg * (1 - s), lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg + (1 - lg) * s, lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg * (1 - s), lb + (1 - lb) * s, 0, 0, //
-    0, 0, 0, 1, 0,
-  ];
-}
 
 // ---------------------------------------------------------------------------
 // Size ladder (web window classes 1890–2002 + landscape last-wins override).
@@ -207,7 +194,8 @@ GlassDockSizing glassDockSizing({
   icon *= scale;
   width *= scale;
   // Hard width guard (web `--nav-max` + safe-area caps).
-  final viewportCap = math.max(0.0, math.min(w - 16, w - safePadding.horizontal));
+  final viewportCap =
+      math.max(0.0, math.min(w - 16, w - safePadding.horizontal));
   width = math.min(width, viewportCap);
   return GlassDockSizing(
     barHeight: barH,
@@ -354,8 +342,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
       _litIndex = null;
       _pressedIndex = null;
     }
-    if (!_scrubbing &&
-        (idsChanged || oldWidget.activeId != widget.activeId)) {
+    if (!_scrubbing && (idsChanged || oldWidget.activeId != widget.activeId)) {
       // Web re-seats the pill on active change AND on tab set/order change
       // (the `tabSig` re-measure) — animate to the resolved slot.
       _startMotion(toFrac: _resolvedActiveSlot.toDouble(), toScale: 1);
@@ -383,7 +370,9 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
   }
 
   void _startMotion({required double toFrac, required double toScale}) {
-    if (_motion.isAnimating && _motionFracTo == toFrac && _motionScaleTo == toScale) {
+    if (_motion.isAnimating &&
+        _motionFracTo == toFrac &&
+        _motionScaleTo == toScale) {
       return; // already gliding there (nav + release can both ask)
     }
     _motion.stop();
@@ -436,7 +425,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     if (pending == null || event.pointer != pending.pointer) return;
     if (!_scrubbing) {
       final distance =
-          (event.localPosition - Offset(pending.startX, pending.startY)).distance;
+          (event.localPosition - Offset(pending.startX, pending.startY))
+              .distance;
       if (distance > _kScrubMovePx) {
         // >6px move in ANY direction enters scrub (cancel the hold timer).
         _holdTimer?.cancel();
@@ -458,7 +448,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
       // Plain tap: never entered scrub → exactly one selection, no snap.
       setState(() => _pressedIndex = null);
       if (widget.tabs.isNotEmpty) {
-        widget.onTabSelected(widget.tabs[_slotForLocalX(event.localPosition.dx)]);
+        widget
+            .onTabSelected(widget.tabs[_slotForLocalX(event.localPosition.dx)]);
       }
       return;
     }
@@ -538,7 +529,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
       if (dt > 0) {
         final velocity = (recent.last.x - recent.first.x) / dt; // px/ms
         if (velocity.abs() > _kFlickPxPerMs) {
-          target = _clampSlot(target + (velocity > 0 ? 1 : -1) * _dirSign, count);
+          target =
+              _clampSlot(target + (velocity > 0 ? 1 : -1) * _dirSign, count);
         }
       }
     }
@@ -595,7 +587,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
         : rtl;
     final navLabel = arabic ? 'التنقل الرئيسي' : 'Primary navigation';
 
-    final activeIndex = widget.tabs.indexWhere((tab) => tab.id == widget.activeId);
+    final activeIndex =
+        widget.tabs.indexWhere((tab) => tab.id == widget.activeId);
     final hasActive = activeIndex >= 0;
 
     return Semantics(
@@ -676,64 +669,37 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                 onPointerUp: _onPointerUp,
                 onPointerCancel: _onPointerCancel,
                 child: DecoratedBox(
-                  // 1px tint border painted above the clipped glass.
+                  // 1px white/15 ring painted above the clipped glass + the
+                  // old back-pill soft shadow (Task 120 recipe swap).
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(_kStadiumRadius),
-                    border: Border.all(color: _kGlassTint.withValues(alpha: 0.35)),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: .15)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .35),
+                        blurRadius: 14,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(_kStadiumRadius),
                     child: Stack(
                       children: [
-                        // Glass backdrop: blur(sigma) + saturate(1.35), then
-                        // the panel fill (web backdrop-filter + color-mix).
+                        // Glass backdrop: blur over the black/55 fill — the
+                        // pre-118 back-pill recipe verbatim (no tint sheen,
+                        // no saturate, no inset hairlines).
                         Positioned.fill(
-                          child: ColorFiltered(
-                            colorFilter: _kSaturate,
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(
-                                sigmaX: sizing.blurSigma,
-                                sigmaY: sizing.blurSigma,
-                              ),
-                              child: ColoredBox(
-                                // color-mix(panel-fill 70%, transparent) =
-                                // alpha 0.62 × 0.7.
-                                color: _kPanelFill.withValues(alpha: 0.434),
-                              ),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX: sizing.blurSigma,
+                              sigmaY: sizing.blurSigma,
+                            ),
+                            child: ColoredBox(
+                              color: Colors.black.withValues(alpha: .55),
                             ),
                           ),
-                        ),
-                        // Tint sheen — web linear-gradient(160deg, …).
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment(-0.34, -1),
-                                end: Alignment(0.34, 1),
-                                stops: [0, 0.6],
-                                colors: [
-                                  Color(0x1FBFE6F2), // tint 0.12
-                                  Color(0x0DBFE6F2), // tint 0.05
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Inset specular top highlight + dark bottom hairline
-                        // (web inset box edges; NO drop shadow by design).
-                        const Positioned(
-                          left: 0,
-                          right: 0,
-                          top: 0,
-                          height: 1,
-                          child: ColoredBox(color: Color(0x80BFE6F2)),
-                        ),
-                        const Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          height: 1,
-                          child: ColoredBox(color: Color(0x24000000)),
                         ),
                         // Track: pill BEHIND equal-flex tabs (web .dock-track).
                         Center(
@@ -772,11 +738,13 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                                 0,
                                                 1,
                                               )
-                                              ..scaleByDouble(_scale, _scale, 1, 1),
+                                              ..scaleByDouble(
+                                                  _scale, _scale, 1, 1),
                                             child: DecoratedBox(
                                               decoration: BoxDecoration(
                                                 color: _kActiveFill,
-                                                borderRadius: BorderRadius.circular(
+                                                borderRadius:
+                                                    BorderRadius.circular(
                                                   _kStadiumRadius,
                                                 ),
                                               ),
@@ -787,7 +755,9 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                     ),
                                   Row(
                                     children: [
-                                      for (var i = 0; i < widget.tabs.length; i++)
+                                      for (var i = 0;
+                                          i < widget.tabs.length;
+                                          i++)
                                         Expanded(
                                           child: _DockTabButton(
                                             tab: widget.tabs[i],
@@ -797,13 +767,14 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                             highlighted: _scrubbing
                                                 ? _litIndex == i
                                                 : i == activeIndex,
-                                            selected: hasActive && i == activeIndex,
+                                            selected:
+                                                hasActive && i == activeIndex,
                                             pressed: _pressedIndex == i,
                                             arabic: arabic,
                                             iconSize: sizing.iconSize,
                                             reduceMotion: _reduceMotion,
-                                            onActivate: () =>
-                                                widget.onTabSelected(widget.tabs[i]),
+                                            onActivate: () => widget
+                                                .onTabSelected(widget.tabs[i]),
                                           ),
                                         ),
                                     ],
@@ -882,8 +853,7 @@ class _DockTabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final duration =
-        reduceMotion ? Duration.zero : _kIconCrossfadeDuration;
+    final duration = reduceMotion ? Duration.zero : _kIconCrossfadeDuration;
     return Semantics(
       button: true,
       selected: selected,

@@ -617,7 +617,9 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
 }
 
 /// Sort pill: 'الأحدث أولاً'/'الأقدم أولاً' — the label states the CURRENT
-/// order (web contract); tapping flips it.
+/// order (web contract); tapping flips it. Task 120: wears the same
+/// GlassPillSurface as its toolbar siblings (season dropdown + view
+/// toggle) — the old back-pill glass recipe.
 class _SortChip extends StatelessWidget {
   const _SortChip({
     required this.english,
@@ -631,37 +633,34 @@ class _SortChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: .08)),
-        color: HorseTheme.raised.withValues(alpha: .70),
-      ),
+    return GlassPillSurface(
       child: Material(
         type: MaterialType.transparency,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
-          child: Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 16, 0),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.swap_vert_rounded,
-                    size: 16, color: HorseTheme.muted),
-                const SizedBox(width: 8),
-                Text(
-                  sortDesc
-                      ? (english ? 'Newest first' : 'الأحدث أولاً')
-                      : (english ? 'Oldest first' : 'الأقدم أولاً'),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: HorseTheme.ink,
+          child: SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 16, 0),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.swap_vert_rounded,
+                      size: 16, color: HorseTheme.muted),
+                  const SizedBox(width: 8),
+                  Text(
+                    sortDesc
+                        ? (english ? 'Newest first' : 'الأحدث أولاً')
+                        : (english ? 'Oldest first' : 'الأقدم أولاً'),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: HorseTheme.ink,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

@@ -1,11 +1,14 @@
 /// Liquid-glass primitives shared by the detail page's floating controls:
-/// the season dropdown pill, the view toggle and the expandable action menu.
+/// the season dropdown pill, the sort chip, the view toggle and the
+/// expandable action menu.
 ///
-/// The pill surface mirrors `shared/widgets/glass_navigation.dart` (which
-/// mirrors `features/shell/glass_dock.dart`) VERBATIM: saturate(1.35) +
-/// blur backdrop, panel fill `#10181C` at alpha 0.434, the 160° tint sheen
-/// and the 1px `#BFE6F2` ring at 0.35 — only the shape changes (rounded
-/// pill instead of circle).
+/// The pill surface wears the OLD detail back-pill recipe (user mandate,
+/// Task 120: the pre-118 glow background for the search button, the
+/// navigation bar and the episode toolbar): blur backdrop over a black/55
+/// fill with a 1px white/15 ring and a soft black drop shadow — mirroring
+/// `shared/widgets/glass_navigation.dart` and `features/shell/glass_dock.dart`
+/// which swapped the same day. Only the shape changes (rounded pill instead
+/// of circle).
 ///
 /// [showGlassMenu] is the Flutter idiom replacing the web's Radix
 /// DropdownMenu portal: a root overlay with an outside-tap barrier, Escape
@@ -19,22 +22,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/theme/horse_theme.dart';
-
-// glass_dock.dart's private recipe constants, mirrored verbatim.
-const Color _kGlassTint = Color(0xFFBFE6F2); // rgb(191 230 242)
-const Color _kPanelFill = Color(0xFF10181C); // rgb(16 24 28)
-
-final ColorFilter _kSaturate = ColorFilter.matrix(_saturationMatrix(1.35));
-
-List<double> _saturationMatrix(double s) {
-  final lr = 0.213, lg = 0.715, lb = 0.072; // luma weights
-  return <double>[
-    lr + (1 - lr) * s, lg * (1 - s), lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg + (1 - lg) * s, lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg * (1 - s), lb + (1 - lb) * s, 0, 0, //
-    0, 0, 0, 1, 0,
-  ];
-}
 
 /// The glass-dock recipe as a pill/rounded-rect surface. Children paint on
 /// top of the blurred backdrop; the caller supplies ink/labels.
@@ -58,15 +45,16 @@ class GlassPillSurface extends StatelessWidget {
         blurSigma ?? (MediaQuery.sizeOf(context).width < 600 ? 12.0 : 14.0);
     final radius = BorderRadius.circular(borderRadius);
     return DecoratedBox(
-      // 1px tint ring painted above the clipped glass + ambient shadow.
+      // 1px white/15 ring painted above the clipped glass + the old
+      // back-pill soft shadow — the pre-118 decoration verbatim.
       decoration: BoxDecoration(
         borderRadius: radius,
-        border: Border.all(color: _kGlassTint.withValues(alpha: 0.35)),
+        border: Border.all(color: Colors.white.withValues(alpha: .15)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: .34),
-            blurRadius: 16,
-            offset: const Offset(0, 5),
+            color: Colors.black.withValues(alpha: .35),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -74,59 +62,13 @@ class GlassPillSurface extends StatelessWidget {
         borderRadius: radius,
         child: Stack(
           children: [
-            // Glass backdrop: blur(sigma) + saturate(1.35), then the panel
-            // fill — dock recipe 1:1 (search-button layering: the tint
-            // decorations below sit OUTSIDE the saturation filter).
+            // Glass backdrop: blur over the black/55 fill — the old
+            // back-pill recipe verbatim (no tint sheen, no saturate, no
+            // inset hairlines).
             Positioned.fill(
-              child: ColorFiltered(
-                colorFilter: _kSaturate,
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-                  child: ColoredBox(
-                    color: _kPanelFill.withValues(alpha: 0.434),
-                  ),
-                ),
-              ),
-            ),
-            // 160° tint sheen — the layer the pill surface was missing so
-            // every glass pill matches the dock/search buttons verbatim.
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment(-0.34, -1),
-                    end: Alignment(0.34, 1),
-                    stops: [0, 0.6],
-                    colors: [
-                      Color(0x1FBFE6F2), // tint 0.12
-                      Color(0x0DBFE6F2), // tint 0.05
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            // Inset edges: tinted specular at the top, dark shading at the
-            // bottom (the dock's straight hairlines on the pill form).
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment(0, 0.55),
-                    colors: [Color(0x80BFE6F2), Color(0x00BFE6F2)],
-                  ),
-                ),
-              ),
-            ),
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment(0, 0.8),
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x00000000), Color(0x24000000)],
-                  ),
-                ),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+                child: ColoredBox(color: Colors.black.withValues(alpha: .55)),
               ),
             ),
             // Content on top of the glass stack — the NON-positioned child

@@ -9,13 +9,14 @@ import '../../core/theme/horse_theme.dart';
 // `features/shell/noor_dock_tabs.dart` (Task 107-d). Page-content bottom
 // clearance moved with it (`glassDockContentClearance`).
 
-/// Circular floating glass button wearing the SAME liquid-glass recipe as
-/// the glass dock (user mandate, Task 115: "same liquid glass as the bottom
-/// navigation"): saturate(1.35) + blur(12/14) backdrop, panel fill at
-/// alpha 0.434, the 160° tint sheen, and the 1px tint ring. The only
-/// adaptations for the circular form: the dock's straight 1px inset edges
-/// become curved specular (top) / dark (bottom) gradients, plus a soft drop
-/// shadow so the floating circle separates from scrolling content.
+/// Circular floating glass button wearing the OLD detail back-pill recipe
+/// (user mandate, Task 120: "the pre-118 back-button glow background for
+/// the search button AND the navigation bar"): a blur-12 backdrop over a
+/// black/55 fill with a 1px white/15 ring and a soft black drop shadow.
+/// This neutral dark glass replaces the previous dock's cyan-tint recipe
+/// (saturate(1.35) + `#BFE6F2` sheen/ring) across the whole floating-glass
+/// family — search button, detail back, sources back, glass dock and the
+/// detail page's pill toolbar all render the exact same surface now.
 ///
 /// Task 118: parameterized with [icon] and [size] so the detail page's back
 /// button (and any future floating chrome) wears the exact same surface —
@@ -39,27 +40,19 @@ class GlassSearchButton extends StatelessWidget {
   /// every recipe layer proportionally (they are all fill-relative).
   final double size;
 
-  // glass_dock.dart's private recipe constants, mirrored verbatim.
-  static const Color _kGlassTint = Color(0xFFBFE6F2); // rgb(191 230 242)
-  static const Color _kPanelFill = Color(0xFF10181C); // rgb(16 24 28)
-
-  static final ColorFilter _kSaturate =
-      ColorFilter.matrix(_saturationMatrix(1.35));
-
   @override
   Widget build(BuildContext context) {
-    // Same blur ladder as the dock (web window classes → phone/desktop).
-    final blur = MediaQuery.sizeOf(context).width < 600 ? 12.0 : 14.0;
     return DecoratedBox(
-      // 1px tint ring painted above the clipped glass + ambient shadow.
+      // 1px white/15 ring painted above the clipped glass + soft shadow —
+      // the pre-118 back-pill decoration verbatim.
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: _kGlassTint.withValues(alpha: 0.35)),
+        border: Border.all(color: Colors.white.withValues(alpha: .15)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: .34),
-            blurRadius: 16,
-            offset: const Offset(0, 5),
+            color: Colors.black.withValues(alpha: .35),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -69,59 +62,12 @@ class GlassSearchButton extends StatelessWidget {
           height: size,
           child: Stack(
             children: [
-              // Glass backdrop: blur(sigma) + saturate(1.35), then the panel
-              // fill (web backdrop-filter + color-mix) — dock recipe 1:1.
+              // Glass backdrop: blur-12 over the black/55 fill — the old
+              // back-pill recipe verbatim (no tint sheen, no saturate).
               Positioned.fill(
-                child: ColorFiltered(
-                  colorFilter: _kSaturate,
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-                    child: ColoredBox(
-                      // color-mix(panel-fill 70%, transparent) =
-                      // alpha 0.62 × 0.7.
-                      color: _kPanelFill.withValues(alpha: 0.434),
-                    ),
-                  ),
-                ),
-              ),
-              // Tint sheen — web linear-gradient(160deg, …), dock verbatim.
-              const Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment(-0.34, -1),
-                      end: Alignment(0.34, 1),
-                      stops: [0, 0.6],
-                      colors: [
-                        Color(0x1FBFE6F2), // tint 0.12
-                        Color(0x0DBFE6F2), // tint 0.05
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // The dock's inset edges adapted to the circle: tinted specular
-              // at the top, dark shading at the bottom.
-              const Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment(0, 0.55),
-                      colors: [Color(0x80BFE6F2), Color(0x00BFE6F2)],
-                    ),
-                  ),
-                ),
-              ),
-              const Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment(0, 0.8),
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0x24000000)],
-                    ),
-                  ),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  child: ColoredBox(color: Colors.black.withValues(alpha: .55)),
                 ),
               ),
               // Icon layer: transparent Material INSIDE the clip so the ink
@@ -152,15 +98,4 @@ class GlassSearchButton extends StatelessWidget {
       ),
     );
   }
-}
-
-// glass_dock.dart's private saturation helper, mirrored verbatim.
-List<double> _saturationMatrix(double s) {
-  final lr = 0.213, lg = 0.715, lb = 0.072; // luma weights
-  return <double>[
-    lr + (1 - lr) * s, lg * (1 - s), lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg + (1 - lg) * s, lb * (1 - s), 0, 0, //
-    lr * (1 - s), lg * (1 - s), lb + (1 - lb) * s, 0, 0, //
-    0, 0, 0, 1, 0,
-  ];
 }
