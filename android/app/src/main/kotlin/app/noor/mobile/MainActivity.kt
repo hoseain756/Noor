@@ -413,7 +413,12 @@ class MainActivity :
      */
     private fun resolveMetadata(magnet: String): Map<String, Any> {
         val sm = ensureSession()
-        val data: ByteArray? = sm.fetchMagnet(magnet, RESOLVE_ATTEMPT_SECONDS)
+        // Declared NON-NULL on purpose: the elvis chain below ends in a
+        // throw, so `data` is provably non-null — but Kotlin 2.2 does not
+        // smart-cast an explicitly-nullable val initialized this way, and
+        // stashTorrentData (a Kotlin fun, strict null-check) rejected the
+        // ByteArray? here (broke assembleRelease since v1.2.30).
+        val data: ByteArray = sm.fetchMagnet(magnet, RESOLVE_ATTEMPT_SECONDS)
             ?: run {
                 Log.i(
                     TAG,
