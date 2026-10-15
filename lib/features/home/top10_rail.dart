@@ -177,8 +177,17 @@ class OutlinedRankNumber extends StatelessWidget {
   final int rank;
   final double fontSize;
 
+  /// The numerals are pinned to Android's system Roboto on purpose: the rank
+  /// geometry in [Top10Item] (_digitFactor .58, overlap fractions, the "10"
+  /// lockup pull) is calibrated on Roboto metrics, and the family the user
+  /// approved. The theme's cascading fontFamily (Cairo, now Tajawal) must not
+  /// restyle these digits — both the fill and the stroke layer carry the pin
+  /// so the two layers stay pixel-aligned.
+  static const String rankFontFamily = 'Roboto';
+
   /// The white outline layer (identical to the previous hollow look).
   TextStyle get _style => TextStyle(
+        fontFamily: rankFontFamily,
         fontSize: fontSize,
         height: .78,
         fontWeight: FontWeight.w900,
@@ -192,6 +201,7 @@ class OutlinedRankNumber extends StatelessWidget {
   /// The fill layer: the app background color variable (#000000), painted
   /// under the stroke so the numeral reads as cut out of the page.
   TextStyle get _fillStyle => TextStyle(
+        fontFamily: rankFontFamily,
         fontSize: fontSize,
         height: .78,
         fontWeight: FontWeight.w900,
