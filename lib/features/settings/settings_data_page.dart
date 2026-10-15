@@ -12,14 +12,22 @@ import '../../core/sync/noor_sync.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/noor_toast.dart';
+import 'widgets/settings_tiles.dart';
 
 class SettingsDataPage extends StatelessWidget {
   const SettingsDataPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: the page reads only the UI language + the two counts
+    // shown in the row subtitles; callbacks use context.read below.
+    final (english, savedCount, historyCount) =
+        context.select<AppState, (bool, int, int)>((app) => (
+              app.english,
+              app.watchlist.length,
+              app.history.length,
+            ));
+    final app = context.read<AppState>();
     return Scaffold(
       appBar: AppBar(
           title: Text(english ? 'Data and privacy' : 'البيانات والخصوصية')),
@@ -35,8 +43,8 @@ class SettingsDataPage extends StatelessWidget {
                 icon: Icons.download_outlined,
                 title: english ? 'Export backup' : 'تصدير نسخة احتياطية',
                 detail: english
-                    ? '${app.watchlist.length} saved titles · ${app.history.length} history records'
-                    : '${app.watchlist.length} عنوان محفوظ · ${app.history.length} سجل مشاهدة',
+                    ? '$savedCount saved titles · $historyCount history records'
+                    : '$savedCount عنوان محفوظ · $historyCount سجل مشاهدة',
                 onTap: () async {
                   await Clipboard.setData(
                       ClipboardData(text: await app.exportLocalData()));
@@ -60,9 +68,7 @@ class SettingsDataPage extends StatelessWidget {
               _DataRow(
                 icon: Icons.history_toggle_off_rounded,
                 title: english ? 'Clear viewing history' : 'مسح سجل المشاهدة',
-                detail: english
-                    ? '${app.history.length} records'
-                    : '${app.history.length} سجل',
+                detail: english ? '$historyCount records' : '$historyCount سجل',
                 destructive: true,
                 onTap: () => _confirm(
                   context,
@@ -201,12 +207,17 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final enabled = app.webSettings['cloudSyncEnabled'] != false;
-    final id = app.deviceId ?? '';
-    final shortId =
-        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
+    // Task 122-c F4: scoped select — the sync card reads only the UI
+    // language, the cloud-sync flag and the short device id.
+    final (english, enabled, shortId) =
+        context.select<AppState, (bool, bool, String)>((app) {
+      final id = app.deviceId ?? '';
+      return (
+        app.english,
+        app.webSettings['cloudSyncEnabled'] != false,
+        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id),
+      );
+    });
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(18),
@@ -231,10 +242,11 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              Switch(
+              SettingsOptimisticSwitch(
                 value: enabled,
-                activeThumbColor: HorseTheme.gold,
-                onChanged: (value) => app.setSetting('cloudSyncEnabled', value),
+                onChanged: (value) => context
+                    .read<AppState>()
+                    .setSetting('cloudSyncEnabled', value),
               ),
             ],
           ),
@@ -448,8 +460,9 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: this card only localizes itself — entries are local
+    // scan state, so the UI language is the only AppState read.
+    final english = context.select<AppState, bool>((app) => app.english);
     final entries = _entries;
     final total = entries?.fold<int>(0, (sum, e) => sum + e.size) ?? 0;
     return Container(
@@ -648,7 +661,7 @@ class SettingsAboutPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
+    final english = context.select<AppState, bool>((app) => app.english);
     return Scaffold(
       appBar: AppBar(title: Text(english ? 'About Noor' : 'حول Noor')),
       body: Center(

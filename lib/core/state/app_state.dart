@@ -25,6 +25,7 @@ class AppState extends ChangeNotifier {
   static final Map<String, dynamic> defaultSettings = {
     'profileId': 'default', 'region': 'US',
     'preferredLanguages': <String>['English'], 'uiLanguage': 'ar',
+    'contentLanguage': 'ar',
     'homeMode': 'harbor', 'homeShowAllAddonRows': false,
     'hideWatchedInCatalogs': false, 'tmdbKey': '',
     'opensubtitlesEnabled': true, 'tmdbEnabled': true,
@@ -108,6 +109,57 @@ class AppState extends ChangeNotifier {
       .toList();
   double get watchedHours =>
       history.fold<double>(0, (sum, entry) => sum + entry.positionMs) / 3600000;
+
+  // --- Task 122-b content-language contract (additive) ---
+
+  /// CONTENT languages (posters, synopses, episode titles) — distinct from
+  /// the UI language ([english]). The selected key persists in webSettings
+  /// as 'contentLanguage' (setSetting persists + notifies via the settings
+  /// bucket, so no dedicated setter is needed). The language governs the
+  /// TMDB locale ([contentTmdbLocale]) plus STRICTLY-GATED addon 'language'
+  /// extras — addons whose manifest declares support only (live audit
+  /// 122-a2: Cinemeta ignores language extras and provenly returns EN).
+  static const Map<String, String> kContentLanguages = {
+    'ar': 'العربية',
+    'en': 'English',
+    'es': 'Español',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'tr': 'Türkçe',
+    'hi': 'हिन्दी',
+    'pt-BR': 'Português (Brasil)',
+    'ru': 'Русский',
+    'ja': '日本語',
+    'ko': '한국어',
+  };
+
+  /// TMDB locale (their `language` query parameter) per content language.
+  static const Map<String, String> kTmdbLocale = {
+    'ar': 'ar-SA',
+    'en': 'en-US',
+    'es': 'es-ES',
+    'fr': 'fr-FR',
+    'de': 'de-DE',
+    'tr': 'tr-TR',
+    'hi': 'hi-IN',
+    'pt-BR': 'pt-BR',
+    'ru': 'ru-RU',
+    'ja': 'ja-JP',
+    'ko': 'ko-KR',
+  };
+
+  /// Selected content language ('ar' until set — [defaultSettings] seeds it).
+  String get contentLanguage =>
+      (webSettings['contentLanguage'] ?? 'ar').toString();
+
+  /// The TMDB locale matching [contentLanguage] — the single basis for
+  /// TMDB-driven artwork/synopses (home, featured hero, detail).
+  String get contentTmdbLocale => kTmdbLocale[contentLanguage] ?? 'en-US';
+
+  /// The addon `language` extra appended to strictly-gated catalog/detail/
+  /// subtitle requests only. Nullable by contract; [contentLanguage] always
+  /// resolves, so callers can treat it as a plain string today.
+  String? get catalogLanguageExtra => contentLanguage;
 
   Future<void> initialize() async {
     await api.initialize();
@@ -204,16 +256,23 @@ class AppState extends ChangeNotifier {
   Future<void> setLanguage(bool useEnglish) async {
     english = useEnglish;
     webSettings['uiLanguage'] = useEnglish ? 'en' : 'ar';
-    await _preferences?.setBool('horse.mobile.english', useEnglish);
-    await _persistSettings();
+    // Task 122-b perf fix: flip the locale FIRST so the MaterialApp repaints
+    // immediately (Task 118 pattern); the persisted values are unchanged —
+    // prefs bool + settings bucket + the settings sync push.
     notifyListeners();
+    unawaited(_preferences?.setBool('horse.mobile.english', useEnglish));
+    unawaited(_persistSettings());
     _schedulePush(NoorSyncService.bucketSettings);
   }
 
   Future<void> setSetting(String key, dynamic value) async {
+    List<Map<String, dynamic>>? playlists;
     if (key == 'iptvPlaylists') {
-      final playlists = _playlistRows(value);
-      await api.saveIptvPlaylists(playlists);
+      // Task 122-b perf fix: update state FIRST — the secure-storage round
+      // trip used to sit in front of the notify, stalling the playlists
+      // editor. The same normalized rows feed both the state copy and the
+      // background save below.
+      playlists = _playlistRows(value);
       webSettings = {...webSettings, key: playlists};
     } else {
       webSettings = {
@@ -226,6 +285,7 @@ class AppState extends ChangeNotifier {
     // because the settings JSON encode + SharedPreferences write was
     // awaited before the rebuild).
     notifyListeners();
+    if (playlists != null) unawaited(api.saveIptvPlaylists(playlists));
     unawaited(_persistSettings());
     _schedulePush(NoorSyncService.bucketSettings);
   }
@@ -1043,9 +1103,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _saveAddons() async {
-    await _persist();
-    _schedulePush(NoorSyncService.bucketAddons);
+    // Task 122-b perf fix: notify the UI FIRST — an add-on enable/disable
+    // must paint before the 5-bucket jsonEncode + disk write lands (Task 118
+    // pattern). The sync push is scheduled exactly as before.
     notifyListeners();
+    _schedulePush(NoorSyncService.bucketAddons);
+    unawaited(_persist());
   }
 
   Future<void> _persistAndSync([

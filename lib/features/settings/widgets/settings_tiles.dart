@@ -90,3 +90,141 @@ class SettingsTile extends StatelessWidget {
         ),
       );
 }
+
+/// Optimistically-painted [Switch]: a tap paints the new value INSTANTLY
+/// (local state) and only then forwards to the caller, so the slow
+/// AppState notify / persistence round trip never gates the visual.
+/// [didUpdateWidget] re-syncs from [value] whenever the external value
+/// changes (web sync, backup restore), so a remotely-reverted toggle
+/// snaps back; rapid double-taps are last-write-wins.
+class SettingsOptimisticSwitch extends StatefulWidget {
+  const SettingsOptimisticSwitch({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.activeThumbColor = HorseTheme.gold,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final Color activeThumbColor;
+
+  @override
+  State<SettingsOptimisticSwitch> createState() =>
+      _SettingsOptimisticSwitchState();
+}
+
+class _SettingsOptimisticSwitchState extends State<SettingsOptimisticSwitch> {
+  late bool _value = widget.value;
+
+  @override
+  void didUpdateWidget(SettingsOptimisticSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) _value = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) => Switch(
+        value: _value,
+        activeThumbColor: widget.activeThumbColor,
+        onChanged: widget.onChanged == null
+            ? null
+            : (next) {
+                setState(() => _value = next);
+                widget.onChanged!(next);
+              },
+      );
+}
+
+/// Optimistically-painted [SwitchListTile.adaptive] — the row idiom the
+/// settings pages use (whole row is the tap target, adaptive switch keeps
+/// its platform form, [HorseTheme.gold] thumb). Geometry is identical to a
+/// plain SwitchListTile.adaptive; only the painted value is optimistic
+/// (same local-state contract as [SettingsOptimisticSwitch]).
+class SettingsOptimisticSwitchTile extends StatefulWidget {
+  const SettingsOptimisticSwitchTile({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    required this.title,
+    this.subtitle,
+    this.contentPadding,
+    this.activeThumbColor = HorseTheme.gold,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final Widget title;
+  final Widget? subtitle;
+  final EdgeInsetsGeometry? contentPadding;
+  final Color activeThumbColor;
+
+  @override
+  State<SettingsOptimisticSwitchTile> createState() =>
+      _SettingsOptimisticSwitchTileState();
+}
+
+class _SettingsOptimisticSwitchTileState
+    extends State<SettingsOptimisticSwitchTile> {
+  late bool _value = widget.value;
+
+  @override
+  void didUpdateWidget(SettingsOptimisticSwitchTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) _value = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile.adaptive(
+        contentPadding: widget.contentPadding,
+        title: widget.title,
+        subtitle: widget.subtitle,
+        value: _value,
+        activeThumbColor: widget.activeThumbColor,
+        onChanged: widget.onChanged == null
+            ? null
+            : (next) {
+                setState(() => _value = next);
+                widget.onChanged!(next);
+              },
+      );
+}
+
+/// Compact themed dropdown for the two language rows (UI language on the
+/// settings root, content language on the display page): hidden underline,
+/// dense height so the hosting row keeps its geometry, gold selected label
+/// with a muted affordance icon, rounded menu. Labels are caller-owned and
+/// rendered natively (no language flag here, like the rest of this file).
+class SettingsLanguageDropdown extends StatelessWidget {
+  const SettingsLanguageDropdown({
+    super.key,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.expanded = false,
+  });
+
+  final String value;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String> onChanged;
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context) => DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          items: items,
+          onChanged: (next) {
+            if (next != null) onChanged(next);
+          },
+          isExpanded: expanded,
+          isDense: true,
+          borderRadius: BorderRadius.circular(14),
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(color: HorseTheme.gold),
+          iconEnabledColor: HorseTheme.muted,
+        ),
+      );
+}

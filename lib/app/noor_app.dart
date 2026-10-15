@@ -16,12 +16,17 @@ class NoorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider.value(
       value: state,
-      child: Consumer<AppState>(
-        builder: (context, app, _) => MaterialApp(
+      // Task 122-b (F2): select ONLY the UI-language flag — a plain Consumer
+      // here rebuilt the entire MaterialApp (theme, navigator, all routes)
+      // on every AppState notification. The builder reads nothing else from
+      // AppState (verified); the launch gate below keeps its own watch.
+      child: Selector<AppState, bool>(
+        selector: (_, app) => app.english,
+        builder: (context, english, _) => MaterialApp(
           title: 'Noor',
           debugShowCheckedModeBanner: false,
           theme: HorseTheme.dark,
-          locale: Locale(app.english ? 'en' : 'ar'),
+          locale: Locale(english ? 'en' : 'ar'),
           supportedLocales: const [Locale('ar'), Locale('en')],
           localizationsDelegates: GlobalMaterialLocalizations.delegates,
           home: const IncomingLinkListener(child: _LaunchGate()),
@@ -123,27 +128,27 @@ class _NoorMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(size * .28),
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFE2BF90), HorseTheme.gold, Color(0xFF8D6034)],
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: HorseTheme.gold.withValues(alpha: .18),
-          blurRadius: 24,
-          spreadRadius: 1,
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(size * .28),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFE2BF90), HorseTheme.gold, Color(0xFF8D6034)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: HorseTheme.gold.withValues(alpha: .18),
+              blurRadius: 24,
+              spreadRadius: 1,
+            ),
+          ],
         ),
-      ],
-    ),
-    child: Icon(
-      Icons.brightness_7_rounded,
-      color: const Color(0xFF1C140C),
-      size: size * .5,
-    ),
-  );
+        child: Icon(
+          Icons.brightness_7_rounded,
+          color: const Color(0xFF1C140C),
+          size: size * .5,
+        ),
+      );
 }

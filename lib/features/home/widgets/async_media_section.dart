@@ -101,8 +101,11 @@ class RailLoadingSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<AppState>().webSettings;
-    final showTitle = settings['hidePosterTitles'] != true;
+    // Task 122-b (F5): select the single setting the skeleton renders — the
+    // watch used to rebuild every loading rail on ANY AppState notification.
+    final showTitle = context.select<AppState, bool>(
+      (app) => app.webSettings['hidePosterTitles'] != true,
+    );
     final width = MediaQuery.sizeOf(context).width;
     final posterWidth = width >= 700 ? 138.0 : 122.0;
     final posterHeight = posterWidth / .72;

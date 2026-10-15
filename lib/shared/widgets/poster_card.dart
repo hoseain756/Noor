@@ -20,11 +20,19 @@ class PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<AppState>().webSettings;
-    final radius = (settings['posterRadius'] as num?)?.toDouble() ?? 14;
-    final showTitle = settings['hidePosterTitles'] != true;
-    final showRating = settings['showImdbBadge'] != false &&
-        settings['showCardBadges'] != false;
+    // Task 122-b (F5): every card on every page used to `watch` AppState and
+    // rebuild on ANY notification. Select the exact four settings this card
+    // renders as a positional record (structural equality) — the rebuild now
+    // fires only when one of them actually changes. Same values, same UI.
+    final (radius, showTitle, showRating) =
+        context.select<AppState, (double, bool, bool)>(
+      (app) => (
+        (app.webSettings['posterRadius'] as num?)?.toDouble() ?? 14,
+        app.webSettings['hidePosterTitles'] != true,
+        app.webSettings['showImdbBadge'] != false &&
+            app.webSettings['showCardBadges'] != false,
+      ),
+    );
     final ratio = MediaQuery.sizeOf(context).width >= 700 ? 0.72 : 0.72;
     return SizedBox(
       width: width,

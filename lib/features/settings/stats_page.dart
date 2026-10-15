@@ -9,8 +9,18 @@ class StatsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: record select of exactly the five fields this page
+    // renders (record equality on the history list identity — AppState
+    // replaces the list on every mutation). Types are inferred so the
+    // history-entry model import stays unnecessary.
+    final (english, watchedCount, watchedHours, activeAddons, history) =
+        context.select((AppState app) => (
+              app.english,
+              app.watchedCount,
+              app.watchedHours,
+              app.addons.where((e) => e.enabled).length,
+              app.history,
+            ));
     return Scaffold(
       appBar: AppBar(
         title: Text(english ? 'Viewing statistics' : 'إحصائيات المشاهدة'),
@@ -45,17 +55,17 @@ class StatsPage extends StatelessWidget {
                 children: [
                   _Metric(
                     icon: Icons.play_circle_outline_rounded,
-                    value: '${app.watchedCount}',
+                    value: '$watchedCount',
                     label: english ? 'Recent titles' : 'عناوين شاهدتها',
                   ),
                   _Metric(
                     icon: Icons.schedule_rounded,
-                    value: app.watchedHours.toStringAsFixed(1),
+                    value: watchedHours.toStringAsFixed(1),
                     label: english ? 'Hours played' : 'ساعات المشاهدة',
                   ),
                   _Metric(
                     icon: Icons.extension_rounded,
-                    value: '${app.addons.where((e) => e.enabled).length}',
+                    value: '$activeAddons',
                     label: english ? 'Active add-ons' : 'إضافات نشطة',
                   ),
                 ],
@@ -63,13 +73,13 @@ class StatsPage extends StatelessWidget {
             },
           ),
           const SizedBox(height: 24),
-          if (app.history.isNotEmpty) ...[
+          if (history.isNotEmpty) ...[
             Text(
               english ? 'Recent activity' : 'آخر المشاهدات',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 10),
-            for (final item in app.history.take(12))
+            for (final item in history.take(12))
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 2),
                 leading: const Icon(
@@ -90,7 +100,7 @@ class StatsPage extends StatelessWidget {
             Align(
               alignment: AlignmentDirectional.centerEnd,
               child: TextButton.icon(
-                onPressed: app.clearHistory,
+                onPressed: () => context.read<AppState>().clearHistory(),
                 icon: const Icon(Icons.delete_outline_rounded),
                 label: Text(english ? 'Clear history' : 'مسح السجل'),
               ),
@@ -109,20 +119,20 @@ class _Metric extends StatelessWidget {
   final String label;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: HorseTheme.surface,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: HorseTheme.line),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: HorseTheme.gold, size: 22),
-        const Spacer(),
-        Text(value, style: Theme.of(context).textTheme.headlineSmall),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ],
-    ),
-  );
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: HorseTheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: HorseTheme.line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: HorseTheme.gold, size: 22),
+            const Spacer(),
+            Text(value, style: Theme.of(context).textTheme.headlineSmall),
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      );
 }

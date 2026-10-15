@@ -20,8 +20,23 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: scoped selects — this overview tile list reads ONLY
+    // these six derived fields, so unrelated notifies no longer rebuild it.
+    final (
+      english,
+      addonCount,
+      serviceCount,
+      watchedCount,
+      syncOn,
+      savedCount,
+    ) = context.select<AppState, (bool, int, int, int, bool, int)>((app) => (
+          app.english,
+          app.addons.length,
+          app.linkedServices.length + (app.api.debridService == null ? 0 : 1),
+          app.watchedCount,
+          app.webSettings['cloudSyncEnabled'] != false,
+          app.watchlist.length,
+        ));
     final width = MediaQuery.sizeOf(context).width;
     return Scaffold(
       appBar: AppBar(
@@ -98,8 +113,8 @@ class SettingsPage extends StatelessWidget {
                 icon: Icons.extension_rounded,
                 title: english ? 'Installed add-ons' : 'الإضافات المثبتة',
                 subtitle: english
-                    ? '${app.addons.length} installed · catalogs and streams'
-                    : '${app.addons.length} مثبتة · كتالوجات وبث',
+                    ? '$addonCount installed · catalogs and streams'
+                    : '$addonCount مثبتة · كتالوجات وبث',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const AddonsPage()),
                 ),
@@ -108,8 +123,8 @@ class SettingsPage extends StatelessWidget {
                 icon: Icons.hub_outlined,
                 title: english ? 'Connected services' : 'الخدمات المرتبطة',
                 subtitle: english
-                    ? '${app.linkedServices.length + (app.api.debridService == null ? 0 : 1)} connected · Trakt, Simkl, Debrid'
-                    : '${app.linkedServices.length + (app.api.debridService == null ? 0 : 1)} متصلة · Trakt وSimkl وDebrid',
+                    ? '$serviceCount connected · Trakt, Simkl, Debrid'
+                    : '$serviceCount متصلة · Trakt وSimkl وDebrid',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const IntegrationsPage(),
@@ -133,15 +148,21 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
               ),
+              // Task 122-c: the hidden language Switch became an explicit
+              // dropdown — native labels in both UI languages, same tile
+              // geometry (icon/title/subtitle unchanged).
               SettingsTile(
                 icon: Icons.language_rounded,
                 title: english ? 'Language' : 'اللغة',
-                trailing: Switch(
-                  value: english,
-                  onChanged: app.setLanguage,
-                  activeThumbColor: HorseTheme.gold,
+                trailing: SettingsLanguageDropdown(
+                  value: english ? 'en' : 'ar',
+                  items: const [
+                    DropdownMenuItem(value: 'ar', child: Text('العربية')),
+                    DropdownMenuItem(value: 'en', child: Text('English')),
+                  ],
+                  onChanged: (value) =>
+                      context.read<AppState>().setLanguage(value == 'en'),
                 ),
-                onTap: () => app.setLanguage(!english),
               ),
               SettingsTile(
                 icon: Icons.palette_outlined,
@@ -162,8 +183,8 @@ class SettingsPage extends StatelessWidget {
                 icon: Icons.query_stats_rounded,
                 title: english ? 'Viewing statistics' : 'إحصائيات المشاهدة',
                 subtitle: english
-                    ? '${app.watchedCount} recent plays'
-                    : '${app.watchedCount} مشاهدة مسجلة',
+                    ? '$watchedCount recent plays'
+                    : '$watchedCount مشاهدة مسجلة',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const StatsPage()),
                 ),
@@ -175,8 +196,8 @@ class SettingsPage extends StatelessWidget {
                 icon: Icons.privacy_tip_outlined,
                 title: english ? 'Data and privacy' : 'البيانات والخصوصية',
                 subtitle: english
-                    ? 'Cloud sync ${app.webSettings['cloudSyncEnabled'] == false ? 'off' : 'on'} · ${app.watchlist.length} saved titles'
-                    : 'المزامنة ${app.webSettings['cloudSyncEnabled'] == false ? 'متوقفة' : 'مفعّلة'} · ${app.watchlist.length} عنوان محفوظ',
+                    ? 'Cloud sync ${syncOn ? 'on' : 'off'} · $savedCount saved titles'
+                    : 'المزامنة ${syncOn ? 'مفعّلة' : 'متوقفة'} · $savedCount عنوان محفوظ',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                       builder: (_) => const SettingsDataPage()),
@@ -261,11 +282,13 @@ class _SyncPanelState extends State<_SyncPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final id = app.deviceId ?? '';
-    final shortId =
-        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
+    final (english, shortId) = context.select<AppState, (bool, String)>((app) {
+      final id = app.deviceId ?? '';
+      return (
+        app.english,
+        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id),
+      );
+    });
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(

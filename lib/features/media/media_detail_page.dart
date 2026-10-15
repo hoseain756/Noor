@@ -91,9 +91,15 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       final artwork = await app.catalogs
           .featuredArtwork(
             item,
-            language: app.webSettings['tmdbLanguage']?.toString() ?? 'en-US',
+            // Task 122-d: TMDB text/genre/overview and the logo/image-language
+            // pick follow the CONTENT language (was the legacy UI-less
+            // TMDB-locale fallback + the UI language). The repository
+            // normalizes uiLanguage to its primary subtag for the
+            // include_image_language list and logo preference (en/null
+            // fallback chain unchanged).
+            language: app.contentTmdbLocale,
             region: app.webSettings['region']?.toString() ?? 'US',
-            uiLanguage: app.english ? 'en' : 'ar',
+            uiLanguage: app.contentTmdbLocale,
           )
           .timeout(const Duration(seconds: 12));
       if (!mounted) return;
@@ -1153,13 +1159,15 @@ class _SimilarTitlesState extends State<_SimilarTitles> {
       widget.item.id,
       genre,
       app.webSettings['tmdbEnabled'],
-      app.webSettings['tmdbLanguage'],
+      // Task 122-d: recommendations follow the content-language TMDB locale
+      // (was the legacy UI-less fallback, always 'en-US').
+      app.contentTmdbLocale,
       app.webSettings['region'],
     ].join('|');
     if (signature != _requestSignature) {
       _requestSignature = signature;
       _genre = genre;
-      final language = app.webSettings['tmdbLanguage']?.toString() ?? 'en-US';
+      final language = app.contentTmdbLocale;
       final region = app.webSettings['region']?.toString() ?? 'US';
       final fallback = genre == null
           ? Future.value(const <MediaItem>[])

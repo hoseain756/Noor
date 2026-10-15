@@ -103,7 +103,11 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
+    // Task 122-b (F5): the shell read exactly ONE AppState field — the UI
+    // language — yet `watch` rebuilt the whole shell (and its IndexedStack
+    // of 5 kept-alive tabs) on every notification. Selecting the flag alone
+    // keeps identical output while unrelated notifies skip the shell.
+    final english = context.select<AppState, bool>((app) => app.english);
     final size = MediaQuery.sizeOf(context);
     // EDGE-TO-EEDGE (user mandate, Task 119): the shell no longer pads EVERY
     // page away from the status bar. The stack itself is full-bleed so the
@@ -125,7 +129,7 @@ class _MainShellState extends State<MainShell> {
       // it. `hideContent.anime` only filters anime content rows on pages.
       // `kidsMode` is a dormant web-sync flag with no mobile behavior, so the
       // kids tab filter and kidsZoom are intentionally not wired.
-      rtl: !app.english,
+      rtl: !english,
     );
     final dockActiveId = noorDockTabIdForIndex(_selected);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -194,7 +198,7 @@ class _MainShellState extends State<MainShell> {
                       opacity: _chromeVisible ? 1 : 0,
                       duration: duration,
                       child: GlassSearchButton(
-                        tooltip: app.english ? 'Search' : 'بحث',
+                        tooltip: english ? 'Search' : 'بحث',
                         onPressed: _openSearch,
                       ),
                     ),
@@ -210,7 +214,7 @@ class _MainShellState extends State<MainShell> {
                   shape: const CircleBorder(
                       side: BorderSide(color: HorseTheme.line)),
                   child: IconButton(
-                    tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
+                    tooltip: english ? 'Open navigation' : 'فتح التنقل',
                     onPressed: () =>
                         setState(() => _tabletNavVisible = !_tabletNavVisible),
                     icon: Icon(_tabletNavVisible
@@ -234,7 +238,7 @@ class _MainShellState extends State<MainShell> {
                   activeId: dockActiveId,
                   onTabSelected: (DockTab tab) =>
                       _selectTab(noorDockIndexForTabId(tab.view)),
-                  languageCode: app.english ? 'en' : 'ar',
+                  languageCode: english ? 'en' : 'ar',
                   hidden: !_chromeVisible,
                 ),
               ),
@@ -255,7 +259,7 @@ class _MainShellState extends State<MainShell> {
                 width: 286,
                 child: _TabletNavigation(
                   selected: _selected,
-                  english: app.english,
+                  english: english,
                   onClose: () => setState(() => _tabletNavVisible = false),
                   onTabSelected: _selectTab,
                   onPageSelected: _openSecondary,

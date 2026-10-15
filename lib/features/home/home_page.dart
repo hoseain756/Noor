@@ -45,6 +45,9 @@ class _HomePageState extends State<HomePage> {
   List<AddonCatalogRow> _catalogRows = const [];
   final Map<String, Future<List<MediaItem>>> _catalogRowFutures = {};
   String? _addonSignature;
+  // Task 122-b (F5): previous linked-services signature — the linked
+  // refresh below fires ONLY when this changes (first call counts).
+  String? _linkedSignature;
   // AniList/MAL taps resolve to a playable Stremio identity before opening.
   final Set<String> _resolving = {};
 
@@ -61,7 +64,11 @@ class _HomePageState extends State<HomePage> {
       app.webSettings['hideWatchedInCatalogs'],
       app.webSettings['hideContent'],
       app.webSettings['tmdbEnabled'],
-      app.webSettings['tmdbLanguage'],
+      // Task 122-b (G2): the TMDB language basis is now the content-language
+      // contract getter (was the UI-less 'tmdbLanguage' fallback) — so a
+      // content-language change reloads the home rows exactly like the old
+      // key did.
+      app.contentTmdbLocale,
       app.webSettings['region'],
       app.linkedServicesSignature,
     ].join('|');
@@ -69,9 +76,17 @@ class _HomePageState extends State<HomePage> {
       _addonSignature = signature;
       _load(app);
     }
-    // Linked-service cards + rails refresh on a short TTL; a link/unlink
-    // change forces an immediate refresh from inside AppState.
-    unawaited(app.refreshLinkedContent());
+    // Task 122-b (F5): the linked refresh used to run on EVERY AppState
+    // notification — whenever the 5-minute TTL had lapsed, a mere settings
+    // toggle triggered a network refresh plus two extra notify waves. It now
+    // runs ONLY when the linked-services signature actually changes (first
+    // call counts); link/unlink still lands here AND AppState force-
+    // refreshes on link changes itself. AppState TTL behavior is untouched.
+    final linkedSignature = app.linkedServicesSignature;
+    if (linkedSignature != _linkedSignature) {
+      _linkedSignature = linkedSignature;
+      unawaited(app.refreshLinkedContent());
+    }
   }
 
   void _load(AppState app) {
@@ -132,7 +147,9 @@ class _HomePageState extends State<HomePage> {
       }
       return slides.take(8).toList(growable: false);
     });
-    final language = app.webSettings['tmdbLanguage']?.toString() ?? 'en-US';
+    // Task 122-b (G2): recommendations follow the content-language TMDB
+    // locale (was the UI-less 'tmdbLanguage' fallback, always 'en-US').
+    final language = app.contentTmdbLocale;
     final region = app.webSettings['region']?.toString() ?? 'US';
     if (app.webSettings['tmdbEnabled'] == false) {
       _recommendations = Future.value(const <MediaItem>[]);

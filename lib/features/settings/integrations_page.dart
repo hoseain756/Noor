@@ -9,13 +9,16 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/noor_toast.dart';
+import 'widgets/settings_tiles.dart';
 
 class IntegrationsPage extends StatelessWidget {
   const IntegrationsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
+    // Task 122-c F4: the page chrome reads only the UI language — the
+    // service cards select their own fields below.
+    final english = context.select<AppState, bool>((app) => app.english);
     return Scaffold(
       appBar: AppBar(
           title: Text(english ? 'Connected services' : 'الخدمات المرتبطة')),
@@ -140,9 +143,14 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final connected = app.api.hasUserTmdbKey;
+    // Task 122-c F4: scoped select — this card repaints only when the UI
+    // language, the stored-key flag, or the TMDB-features flag changes.
+    final (english, connected, tmdbEnabled) =
+        context.select<AppState, (bool, bool, bool)>((app) => (
+              app.english,
+              app.api.hasUserTmdbKey,
+              app.webSettings['tmdbEnabled'] != false,
+            ));
     return Container(
       padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
@@ -177,14 +185,15 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
                 const Icon(Icons.check_circle_rounded, color: HorseTheme.gold),
             ],
           ),
-          SwitchListTile.adaptive(
+          SettingsOptimisticSwitchTile(
             contentPadding: EdgeInsets.zero,
             title: Text(english ? 'TMDB features' : 'ميزات TMDB'),
             subtitle: Text(english
                 ? 'Use TMDB recommendations when available.'
                 : 'استخدم ترشيحات TMDB عند توفرها.'),
-            value: app.webSettings['tmdbEnabled'] != false,
-            onChanged: (value) => app.setSetting('tmdbEnabled', value),
+            value: tmdbEnabled,
+            onChanged: (value) =>
+                context.read<AppState>().setSetting('tmdbEnabled', value),
           ),
           if (connected) ...[
             Text(
@@ -344,7 +353,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       if (widget.service == 'anilist' || widget.service == 'mal') {
         unawaited(app.refreshTrackerProfile(widget.service));
       }
-      NoorToast.show(context, english ? 'Account connected.' : 'تم ربط الحساب.');
+      NoorToast.show(
+          context, english ? 'Account connected.' : 'تم ربط الحساب.');
     } else {
       NoorToast.show(
         context,
@@ -365,7 +375,9 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           ? 'That access token was rejected — copy it again from the AniList page and retry.'
           : 'رُفض رمز الوصول — انسخه من جديد من صفحة AniList وأعد المحاولة.';
     }
-    if (reason == 'state_mismatch' || reason == 'flow_expired' || reason == 'no_pending_flow') {
+    if (reason == 'state_mismatch' ||
+        reason == 'flow_expired' ||
+        reason == 'no_pending_flow') {
       return english
           ? 'This code has expired — start a new link and paste the fresh code.'
           : 'انتهت صلاحية هذا الرمز — ابدأ ربطًا جديدًا والصق الرمز الحديث.';
@@ -377,6 +389,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   Future<void> _start() async {
     final app = context.read<AppState>();
+    final english = app.english;
     _pollTimer?.cancel();
     setState(() {
       _busy = true;
@@ -392,7 +405,9 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             : await app.api.startMalLink();
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
-          throw const FormatException('تعذر بدء الربط.');
+          // Task 122-c translation sweep: surfaced through the error toast.
+          throw FormatException(
+              english ? 'Could not start the link.' : 'تعذر بدء الربط.');
         }
         if (!mounted) return;
         setState(() {
@@ -415,7 +430,10 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         final result = await app.api.startTraktLink();
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
-          throw const FormatException('تعذر بدء ربط Trakt.');
+          // Task 122-c translation sweep: surfaced through the error toast.
+          throw FormatException(english
+              ? 'Could not start the Trakt link.'
+              : 'تعذر بدء ربط Trakt.');
         }
         if (!mounted) return;
         setState(() {
@@ -440,12 +458,15 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       // Simkl's OAuth 2.0 flow names the field verification_uri(_complete);
       // accept every variant just in case.
       final verificationUrl = (result?['verification_uri_complete'] ??
-              result?['verification_uri'] ??
-              result?['verification_url'])
-          ?.toString() ??
+                  result?['verification_uri'] ??
+                  result?['verification_url'])
+              ?.toString() ??
           '';
       if (deviceCode.isEmpty || code.isEmpty || verificationUrl.isEmpty) {
-        throw const FormatException('تعذر إنشاء رمز الربط.');
+        // Task 122-c translation sweep: surfaced through the error toast.
+        throw FormatException(english
+            ? 'Could not create the link code.'
+            : 'تعذر إنشاء رمز الربط.');
       }
       if (!mounted) return;
       final interval =
@@ -458,7 +479,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           'interval': interval,
           'expiresAt': DateTime.now()
               .add(
-                Duration(seconds: (result?['expires_in'] as num?)?.toInt() ?? 600),
+                Duration(
+                    seconds: (result?['expires_in'] as num?)?.toInt() ?? 600),
               )
               .millisecondsSinceEpoch,
           'status': 'waiting',
@@ -512,8 +534,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         return;
       }
       if (status == 'pending') {
-        final retryMs = ((flow['interval'] as int? ?? 5) * 1000)
-            .clamp(3000, 30000);
+        final retryMs =
+            ((flow['interval'] as int? ?? 5) * 1000).clamp(3000, 30000);
         _schedulePoll(Duration(milliseconds: retryMs));
         return;
       }
@@ -582,9 +604,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final linked = app.linkedServices[widget.service];
+    // Task 122-c F4: scoped select — rebuilds when the UI language or THIS
+    // service's linked entry is replaced (link/unlink/profile refresh).
+    final (english, linked) =
+        context.select<AppState, (bool, Map<String, dynamic>?)>(
+            (app) => (app.english, app.linkedServices[widget.service]));
     final waiting = _flow?['status'] == 'waiting';
     return Container(
       padding: const EdgeInsets.all(17),
@@ -623,8 +647,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 if ((linked['avatar']?.toString() ?? '').isNotEmpty) ...[
                   CircleAvatar(
                     radius: 17,
-                    backgroundImage:
-                        NetworkImage(linked['avatar'].toString()),
+                    backgroundImage: NetworkImage(linked['avatar'].toString()),
                   ),
                   const SizedBox(width: 10),
                 ],
@@ -638,8 +661,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                       ),
                       if (linked['lastSyncedAt'] is num)
                         Padding(
-                          padding:
-                              const EdgeInsetsDirectional.only(top: 3),
+                          padding: const EdgeInsetsDirectional.only(top: 3),
                           child: Text(
                             '${english ? 'Last synced' : 'آخر مزامنة'} · ${_formatSyncTime(linked['lastSyncedAt'] as num)}',
                             style: Theme.of(context)
@@ -896,7 +918,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 FilledButton.tonalIcon(
                   onPressed: () async {
                     await Clipboard.setData(
-                      ClipboardData(text: _flow?['user_code']?.toString() ?? ''),
+                      ClipboardData(
+                          text: _flow?['user_code']?.toString() ?? ''),
                     );
                     if (!mounted) return;
                     NoorToast.show(
@@ -941,15 +964,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                       )
                     : const Icon(Icons.link_rounded),
                 label: Text(
-                  english
-                      ? 'Connect ${widget.title}'
-                      : 'ربط ${widget.title}',
+                  english ? 'Connect ${widget.title}' : 'ربط ${widget.title}',
                 ),
               ),
             ),
             if (widget.service == 'trakt' &&
                 linked == null &&
-                _flow?['status'] == null && _traktMethodLoaded) ...[
+                _flow?['status'] == null &&
+                _traktMethodLoaded) ...[
               const SizedBox(height: 6),
               SegmentedButton<String>(
                 segments: [
@@ -1100,20 +1122,22 @@ class _DebridCardState extends State<_DebridCard> {
     if (mounted) {
       NoorToast.show(
         context,
-        app.english
-            ? 'Debrid service disconnected.'
-            : 'تم فصل خدمة Debrid.',
+        app.english ? 'Debrid service disconnected.' : 'تم فصل خدمة Debrid.',
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final service = app.api.debridService;
-    final connected = service != null && app.api.debridApiKey != null;
-    final user = app.debridUser;
+    // Task 122-c F4: scoped select — the Debrid card reads only these four.
+    final (english, service, connected, user) =
+        context.select<AppState, (bool, String?, bool, Map<String, dynamic>?)>(
+            (app) => (
+                  app.english,
+                  app.api.debridService,
+                  app.api.debridService != null && app.api.debridApiKey != null,
+                  app.debridUser,
+                ));
     return Container(
       padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(

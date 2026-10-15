@@ -10,7 +10,14 @@ abstract final class HorseTheme {
   static const ink = Color(0xFFF3F1ED);
   static const muted = Color(0xFFA4A5A2);
 
-  static ThemeData get dark {
+  /// Built once per isolate (Task 122-b, F3): `dark` used to be a getter
+  /// that constructed the full ThemeData on EVERY access — including inside
+  /// the per-notification app builder. Repo-wide check found only reads
+  /// (no reassignment/mutation), so a lazy static final is safe and produces
+  /// the byte-identical theme via [_buildDark].
+  static final ThemeData dark = _buildDark();
+
+  static ThemeData _buildDark() {
     final scheme = const ColorScheme.dark(
       primary: gold,
       onPrimary: Color(0xFF1A1209),

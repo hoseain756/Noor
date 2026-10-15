@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/addon.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import 'widgets/settings_tiles.dart';
 
 class AddonsPage extends StatefulWidget {
   const AddonsPage({super.key});
@@ -64,8 +65,16 @@ class _AddonsPageState extends State<AddonsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: the addons list IS this page's purpose — scoped select
+    // on (english, addons identity). Every addon mutation in AppState
+    // replaces the list, so this matches the old watch's update set while
+    // skipping unrelated notifies.
+    final (english, addons) = context.select<AppState, (bool, List<Addon>)>(
+        (app) => (app.english, app.addons));
+    // Task 122-c hygiene: sort a LOCAL copy — never mutate app.addons in
+    // the middle of a build.
+    final sortedAddons = List.of(addons)
+      ..sort((a, b) => a.order.compareTo(b.order));
     return Scaffold(
       appBar: AppBar(title: Text(english ? 'Add-ons' : 'الإضافات')),
       body: Center(
@@ -168,13 +177,13 @@ class _AddonsPageState extends State<AddonsPage> {
                     ),
                   ),
                   Text(
-                    '${app.addons.length}',
+                    '${addons.length}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              if (app.addons.isEmpty)
+              if (addons.isEmpty)
                 Container(
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
@@ -190,9 +199,7 @@ class _AddonsPageState extends State<AddonsPage> {
                   ),
                 )
               else
-                for (final addon
-                    in app.addons..sort((a, b) => a.order.compareTo(b.order)))
-                  _AddonRow(addon: addon),
+                for (final addon in sortedAddons) _AddonRow(addon: addon),
               const SizedBox(height: 18),
               Container(
                 padding: const EdgeInsets.all(14),
@@ -294,9 +301,8 @@ class _AddonRow extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Switch(
+              SettingsOptimisticSwitch(
                 value: addon.enabled,
-                activeThumbColor: HorseTheme.gold,
                 onChanged: (value) => app.setAddonEnabled(addon.id, value),
               ),
               IconButton(

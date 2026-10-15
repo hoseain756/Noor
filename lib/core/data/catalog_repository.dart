@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/noor_api.dart';
 import 'content_classifier.dart';
@@ -79,7 +82,22 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     Addon? addon,
   }) async {
     final base = addon?.baseUrl ?? _cinemeta;
-    final url = _resourceUrl(base, 'catalog', type, id, extras);
+    // Task 122-d: strictly-gated content language. Only a user-installed
+    // add-on whose manifest entry for THIS catalog declares `language`
+    // support gets the extra appended; every other path — above all the
+    // Cinemeta built-in fallback (addon == null) — is requested unchanged,
+    // because Cinemeta ignores language extras entirely (live-verified in
+    // audit 122-a2) and its manifest declares no language support.
+    var requestExtras = extras;
+    if (addon != null && !extras.containsKey('language')) {
+      final definition =
+          addon.catalogs.where((c) => c.type == type && c.id == id).firstOrNull;
+      if (definition != null &&
+          _declaresLanguageExtra(addon, catalog: definition)) {
+        requestExtras = {...extras, 'language': await _contentLanguage()};
+      }
+    }
+    final url = _resourceUrl(base, 'catalog', type, id, requestExtras);
     final data = await api.proxyGet(url);
     final rows = (data['metas'] as List? ?? const [])
         .whereType<Map>()
@@ -90,11 +108,23 @@ query ($weekStart: Int!, $weekEnd: Int!) {
   }
 
   Future<MediaItem?> detail(String type, String id, List<Addon> addons) async {
+    String? languageExtra;
     for (final addon in addons.where(
       (a) => a.enabled && a.supports('meta', type, id),
     )) {
+      // Task 122-d: the `language` extra rides along ONLY when the add-on's
+      // manifest declares support (a catalog entry's extras or the legacy
+      // manifest-level extraSupported). Every provider stays in the query
+      // loop — non-declaring add-ons are requested exactly as before — and
+      // the Cinemeta fallback below NEVER gets the extra (English-only,
+      // live-verified).
       try {
-        final url = _resourceUrl(addon.baseUrl, 'meta', type, id, const {});
+        final extras = _declaresLanguageExtra(addon)
+            ? <String, dynamic>{
+                'language': languageExtra ??= await _contentLanguage(),
+              }
+            : const <String, dynamic>{};
+        final url = _resourceUrl(addon.baseUrl, 'meta', type, id, extras);
         final data = await api.proxyGet(url);
         final value = data['meta'];
         if (value is Map) {
@@ -145,6 +175,13 @@ query ($weekStart: Int!, $weekEnd: Int!) {
 
   /// Enriches the home hero with the same localized transparent logo and
   /// textless artwork that the Harbor web hero requests from TMDB.
+  ///
+  /// Task 122-d: callers pass the CONTENT-language basis — [language] is the
+  /// full TMDB locale (AppState.contentTmdbLocale) driving text/genre/
+  /// overview, and [uiLanguage] feeds the artwork-language picks: this method
+  /// normalizes it to its primary subtag for the cache key, the
+  /// include_image_language list (`<subtag>`,en,null — the en/null fallback
+  /// chain is unchanged) and the localized logo preference.
   Future<FeaturedArtwork> featuredArtwork(
     MediaItem item, {
     String language = 'en-US',
@@ -382,7 +419,12 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         'isAdult': false,
       },
     );
-    return parseAnimeResponse(response);
+    // Task 122-d: a Japanese content language flips the AniList title pick
+    // to native-first; every other language keeps the existing order.
+    return parseAnimeResponse(
+      response,
+      preferNativeTitles: await _prefersNativeAnimeTitles(),
+    );
   }
 
   Future<List<AnimeAiring>> animeAiringWeek(
@@ -396,12 +438,17 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         'weekEnd': weekEnd.toUtc().millisecondsSinceEpoch ~/ 1000,
       },
     );
-    return parseAnimeAiringResponse(response);
+    // Task 122-d: same native-title preference as [anime].
+    return parseAnimeAiringResponse(
+      response,
+      preferNativeTitles: await _prefersNativeAnimeTitles(),
+    );
   }
 
   static List<AnimeAiring> parseAnimeAiringResponse(
-    Map<String, dynamic> response,
-  ) {
+    Map<String, dynamic> response, {
+    bool preferNativeTitles = false,
+  }) {
     final page =
         response['data'] is Map ? (response['data'] as Map)['Page'] : null;
     final schedules = page is Map ? page['airingSchedules'] : null;
@@ -416,13 +463,16 @@ query ($weekStart: Int!, $weekEnd: Int!) {
       final media = schedule['media'];
       if (airingAt is! num || episode is! num || media is! Map) continue;
       if (media['isAdult'] == true) continue;
-      final parsedMedia = parseAnimeResponse({
-        'data': {
-          'Page': {
-            'media': [Map<String, dynamic>.from(media)],
+      final parsedMedia = parseAnimeResponse(
+        {
+          'data': {
+            'Page': {
+              'media': [Map<String, dynamic>.from(media)],
+            },
           },
         },
-      });
+        preferNativeTitles: preferNativeTitles,
+      );
       if (parsedMedia.isEmpty || !seen.add(parsedMedia.first.id)) continue;
       entries.add(AnimeAiring(
         airingAt: DateTime.fromMillisecondsSinceEpoch(
@@ -440,7 +490,16 @@ query ($weekStart: Int!, $weekEnd: Int!) {
   /// Converts the web app's AniList response into the shared poster-card model.
   /// AniList supplies anime-only records; the format guard excludes music and
   /// other non-episodic formats so this page contains movies and series only.
-  static List<MediaItem> parseAnimeResponse(Map<String, dynamic> response) {
+  ///
+  /// [preferNativeTitles] (Task 122-d): when the effective content language
+  /// is Japanese, callers pass true so the native title wins
+  /// (native→english→romaji); the default keeps the historical
+  /// english→romaji→native order — AniList exposes no other localized title
+  /// fields, so every other content language maps to the default order.
+  static List<MediaItem> parseAnimeResponse(
+    Map<String, dynamic> response, {
+    bool preferNativeTitles = false,
+  }) {
     final page =
         response['data'] is Map ? (response['data'] as Map)['Page'] : null;
     final rows = page is Map ? page['media'] : null;
@@ -480,9 +539,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
           return MediaItem(
             id: malSourced ? 'mal:${idNum ?? ''}' : 'anilist:${idNum ?? ''}',
             type: type,
-            name: (title['english'] ??
-                    title['romaji'] ??
-                    title['native'] ??
+            name: (_animeTitle(title, preferNative: preferNativeTitles) ??
                     '${malSourced ? 'MyAnimeList' : 'AniList'} #${idNum ?? ''}')
                 .toString(),
             poster: (cover['extraLarge'] ?? cover['large'])?.toString(),
@@ -500,6 +557,17 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         .where((item) => item.id != 'anilist:' && item.id != 'mal:')
         .toList();
   }
+
+  /// AniList title-field pick (Task 122-d): english→romaji→native by
+  /// default, native→english→romaji when the content language is Japanese
+  /// (ja is the one content language AniList has a dedicated field for).
+  static Object? _animeTitle(
+    Map<String, dynamic> title, {
+    required bool preferNative,
+  }) =>
+      preferNative
+          ? (title['native'] ?? title['english'] ?? title['romaji'])
+          : (title['english'] ?? title['romaji'] ?? title['native']);
 
   Future<MediaItem?> resolveAnime(MediaItem anime) async {
     final title = anime.name.trim();
@@ -628,6 +696,11 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     String id,
     List<Addon> addons,
   ) async {
+    // Task 122-d: NO `language` extra here. The add-on model carries extra
+    // declarations on catalog entries (plus the legacy manifest-level
+    // extraSupported) only — neither is a statement about the subtitles
+    // resource, so appending would be blind. The 122-plan contract forbids
+    // blind appends; subtitle add-ons keep receiving the unmodified request.
     final supported = addons.where(
         (addon) => addon.enabled && addon.supports('subtitles', type, id));
     final result = await Future.wait(supported.map((addon) async {
@@ -683,6 +756,60 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     return items.where((e) => e.id.isNotEmpty && seen.add(e.id)).toList();
   }
 
+  // --------------------------------------------------------------------------
+  // Content-language access (Task 122-d)
+  // --------------------------------------------------------------------------
+
+  /// Mirrors AppState.settingsStorageKey. This repository is constructed
+  /// BEFORE AppState (main.dart) and holds no AppState handle, and its
+  /// callers sit outside wave 122-d's ownership — so the persisted settings
+  /// blob that AppState._persistSettings maintains is read back here. The
+  /// blob IS the webSettings map, making 'contentLanguage' a top-level
+  /// entry. An absent/unreadable blob resolves to 'ar' — exactly the seeded
+  /// default — and AppState.initialize() re-persists the merged map on every
+  /// boot before any request can run.
+  static const _settingsStorageKey = 'harbor-web.settings';
+
+  /// The effective content language (seeded default 'ar'), read through the
+  /// persisted-settings accessor above. Never throws.
+  static Future<String> _contentLanguage() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final raw = preferences.getString(_settingsStorageKey);
+      if (raw == null || raw.isEmpty) return 'ar';
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return 'ar';
+      return decoded['contentLanguage']?.toString() ?? 'ar';
+    } catch (_) {
+      return 'ar';
+    }
+  }
+
+  /// Japanese is the only content language with a dedicated AniList title
+  /// field, so native titles are preferred for ja alone.
+  static Future<bool> _prefersNativeAnimeTitles() async =>
+      await _contentLanguage() == 'ja';
+
+  /// STRICT gate for the addon `language` extra (122-plan contract): true
+  /// only when the add-on's manifest itself declares language support —
+  /// either the modern per-catalog `extra` entries (optionally narrowed to
+  /// the exact [catalog] being fetched) or the legacy manifest-level
+  /// `extraSupported` list. Cinemeta declares neither (its extras are
+  /// search/genre/skip/...), so the built-in paths can never qualify, and an
+  /// ambiguous signal for any other add-on resolves to "no extra".
+  static bool _declaresLanguageExtra(Addon addon, {AddonCatalog? catalog}) {
+    final candidates = catalog == null ? addon.catalogs : [catalog];
+    if (candidates.any(
+      (candidate) => candidate.extra
+          .any((entry) => entry['name']?.toString() == 'language'),
+    )) {
+      return true;
+    }
+    final legacy = addon.manifest['extraSupported'];
+    return legacy is List &&
+        legacy.any((entry) => entry?.toString() == 'language');
+  }
+
   String _resourceUrl(
     String base,
     String resource,
@@ -709,9 +836,16 @@ query ($weekStart: Int!, $weekEnd: Int!) {
   static int _titleMatchScore(String candidate, String title) {
     String normalize(String value) => value
         .toLowerCase()
-        // Cinemeta and TMDB may return Arabic titles when the selected
-        // language is Arabic; retain those letters while dropping punctuation.
-        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06ff]'), '');
+        // Cinemeta and TMDB may return localized titles for the selected
+        // content language; retain those scripts while dropping punctuation.
+        // Arabic shipped first (Task 114); Cyrillic/Devanagari/kana/CJK/
+        // Hangul joined with the 11-language content switch (Task 122-d) —
+        // without them every localized title normalized to '' and scored 0,
+        // dead-ending resolveAnime and the TMDB recommendation lookup.
+        .replaceAll(
+            RegExp(r'[^a-z0-9\u0400-\u04ff\u0600-\u06ff\u0900-\u097f'
+                r'\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]'),
+            '');
     final a = normalize(candidate);
     final b = normalize(title);
     if (a.isEmpty || b.isEmpty) return 0;

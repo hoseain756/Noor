@@ -40,8 +40,12 @@ class MediaRail extends StatelessWidget {
     final viewportWidth = MediaQuery.sizeOf(context).width;
     final wide = viewportWidth >= 700;
     final textScaler = MediaQuery.textScalerOf(context);
-    final settings = context.watch<AppState>().webSettings;
-    final showTitle = settings['hidePosterTitles'] != true;
+    // Task 122-b (F5): the rail used to `watch` AppState (rebuilding the
+    // whole rail on any notification) for a single setting — select exactly
+    // that field instead (identical value, identical UI).
+    final showTitle = context.select<AppState, bool>(
+      (app) => app.webSettings['hidePosterTitles'] != true,
+    );
     final showRelease =
         showTitle && items.any((item) => item.releaseInfo != null);
     final posterWidth = wide ? 138.0 : 122.0;

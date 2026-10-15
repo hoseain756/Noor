@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/color_picker_dialog.dart';
+import 'widgets/settings_tiles.dart';
 
 enum _Control { toggle, select, multiple, slider, color }
 
@@ -269,8 +270,10 @@ class SettingsPreferencesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Task 122-c F4: the page subscribes only to the UI language — every
+    // value is selected per-tile inside [_PreferenceTile], killing the
+    // double registration (page watch + per-tile watch) from the audit.
+    final english = context.select<AppState, bool>((app) => app.english);
     final title = subtitles
         ? (english ? 'Subtitles and translation' : 'الترجمة واللغات')
         : (english ? 'Player settings' : 'إعدادات المشغّل');
@@ -320,15 +323,16 @@ class _PreferenceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final value = app.webSettings[item.key];
+    // Task 122-c F4: per-tile scoped select (english + this key's value) —
+    // one tile rebuilds per change instead of the whole page.
+    final (english, value) = context.select<AppState, (bool, dynamic)>(
+        (app) => (app.english, app.webSettings[item.key]));
     final title = english ? item.english : item.arabic;
     final trailing = switch (item.control) {
-      _Control.toggle => Switch(
+      _Control.toggle => SettingsOptimisticSwitch(
           value: value == true,
-          activeThumbColor: HorseTheme.gold,
-          onChanged: (next) => app.setSetting(item.key, next),
+          onChanged: (next) =>
+              context.read<AppState>().setSetting(item.key, next),
         ),
       _Control.select => _valueButton(context, value, english),
       _Control.multiple => _valueButton(context, value, english),
@@ -349,7 +353,7 @@ class _PreferenceTile extends StatelessWidget {
         trailing: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 150), child: trailing),
         onTap: item.control == _Control.toggle
-            ? () => app.setSetting(item.key, value != true)
+            ? () => context.read<AppState>().setSetting(item.key, value != true)
             : () => _edit(context, item, value),
       ),
     );

@@ -96,9 +96,16 @@ class _FeaturedCardState extends State<FeaturedHero>
   void _enrichSlides() {
     if (widget.items.isEmpty) return;
     final app = context.read<AppState>();
-    final language = app.webSettings['tmdbLanguage']?.toString() ?? 'en-US';
+    // Task 122-d: hero artwork, logo and overview language follow the
+    // CONTENT language (app.contentTmdbLocale — the same basis home_page
+    // reloads on) instead of the legacy UI-less TMDB-locale fallback plus
+    // the UI language. The repository normalizes uiLanguage to its primary
+    // subtag for the include_image_language list and logo pick (the
+    // '<subtag>,en,null' fallback chain is unchanged), so the full locale
+    // is safe to pass through.
+    final language = app.contentTmdbLocale;
     final region = app.webSettings['region']?.toString() ?? 'US';
-    final uiLanguage = app.english ? 'en' : 'ar';
+    final uiLanguage = language.split(RegExp('[-_]')).first.toLowerCase();
     final signature =
         '${_itemsSignature(widget.items)}:$language:$region:$uiLanguage:'
         '${app.webSettings['tmdbEnabled']}:${app.api.hasUserTmdbKey ? 'user' : 'default'}';
