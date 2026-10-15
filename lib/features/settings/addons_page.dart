@@ -149,7 +149,7 @@ class _AddonsPageState extends State<AddonsPage> {
                           _message!,
                           style: TextStyle(
                             color: _messageError
-                                ? const Color(0xFFFF8178)
+                                ? HorseTheme.danger
                                 : HorseTheme.gold,
                             fontSize: 12,
                           ),

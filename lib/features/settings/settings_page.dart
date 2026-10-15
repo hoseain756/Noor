@@ -11,6 +11,7 @@ import 'stats_page.dart';
 import 'settings_preferences_page.dart';
 import 'settings_data_page.dart';
 import 'settings_display_page.dart';
+import 'widgets/settings_tiles.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, this.onOpenLibrary});
@@ -35,9 +36,7 @@ class SettingsPage extends StatelessWidget {
               width >= 700 ? 32 : 20,
               10,
               width >= 700 ? 32 : 20,
-              onOpenLibrary == null
-                  ? 36
-                  : glassDockContentClearance(context),
+              onOpenLibrary == null ? 36 : glassDockContentClearance(context),
             ),
             children: [
               Text(
@@ -55,7 +54,7 @@ class SettingsPage extends StatelessWidget {
               ),
               if (onOpenLibrary != null) ...[
                 const SizedBox(height: 16),
-                _SettingsTile(
+                SettingsTile(
                   icon: Icons.video_library_outlined,
                   title: english ? 'My library' : 'مكتبتي',
                   subtitle: english
@@ -65,8 +64,8 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 24),
-              _SectionTitle(title: english ? 'Playback' : 'التشغيل'),
-              _SettingsTile(
+              SettingsSectionTitle(title: english ? 'Playback' : 'التشغيل'),
+              SettingsTile(
                 icon: Icons.tune_rounded,
                 title: english ? 'Player settings' : 'إعدادات المشغّل',
                 subtitle: english
@@ -79,7 +78,7 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
               ),
-              _SettingsTile(
+              SettingsTile(
                 icon: Icons.closed_caption_outlined,
                 title:
                     english ? 'Subtitles and translation' : 'الترجمة واللغات',
@@ -94,8 +93,8 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'Add-ons' : 'الإضافات'),
-              _SettingsTile(
+              SettingsSectionTitle(title: english ? 'Add-ons' : 'الإضافات'),
+              SettingsTile(
                 icon: Icons.extension_rounded,
                 title: english ? 'Installed add-ons' : 'الإضافات المثبتة',
                 subtitle: english
@@ -105,7 +104,7 @@ class SettingsPage extends StatelessWidget {
                   MaterialPageRoute<void>(builder: (_) => const AddonsPage()),
                 ),
               ),
-              _SettingsTile(
+              SettingsTile(
                 icon: Icons.hub_outlined,
                 title: english ? 'Connected services' : 'الخدمات المرتبطة',
                 subtitle: english
@@ -118,11 +117,11 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'Sync' : 'المزامنة'),
+              SettingsSectionTitle(title: english ? 'Sync' : 'المزامنة'),
               const _SyncPanel(),
               const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'App' : 'التطبيق'),
-              _SettingsTile(
+              SettingsSectionTitle(title: english ? 'App' : 'التطبيق'),
+              SettingsTile(
                 icon: Icons.dashboard_customize_outlined,
                 title: english ? 'Catalog and display' : 'الكتالوج والمظهر',
                 subtitle: english
@@ -134,7 +133,7 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
               ),
-              _SettingsTile(
+              SettingsTile(
                 icon: Icons.language_rounded,
                 title: english ? 'Language' : 'اللغة',
                 trailing: Switch(
@@ -144,7 +143,7 @@ class SettingsPage extends StatelessWidget {
                 ),
                 onTap: () => app.setLanguage(!english),
               ),
-              _SettingsTile(
+              SettingsTile(
                 icon: Icons.palette_outlined,
                 title: english ? 'Noor design' : 'تصميم Noor',
                 subtitle: english
@@ -158,8 +157,8 @@ class SettingsPage extends StatelessWidget {
                 onTap: null,
               ),
               const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'Usage' : 'الإحصائيات'),
-              _SettingsTile(
+              SettingsSectionTitle(title: english ? 'Usage' : 'الإحصائيات'),
+              SettingsTile(
                 icon: Icons.query_stats_rounded,
                 title: english ? 'Viewing statistics' : 'إحصائيات المشاهدة',
                 subtitle: english
@@ -170,9 +169,9 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              _SectionTitle(
+              SettingsSectionTitle(
                   title: english ? 'Data and privacy' : 'البيانات والخصوصية'),
-              _SettingsTile(
+              SettingsTile(
                 icon: Icons.privacy_tip_outlined,
                 title: english ? 'Data and privacy' : 'البيانات والخصوصية',
                 subtitle: english
@@ -184,8 +183,8 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              _SectionTitle(title: english ? 'About' : 'حول التطبيق'),
-              _SettingsTile(
+              SettingsSectionTitle(title: english ? 'About' : 'حول التطبيق'),
+              SettingsTile(
                 icon: Icons.info_outline_rounded,
                 title: english ? 'About Noor' : 'حول Noor',
                 subtitle: english
@@ -265,7 +264,8 @@ class _SyncPanelState extends State<_SyncPanel> {
     final app = context.watch<AppState>();
     final english = app.english;
     final id = app.deviceId ?? '';
-    final shortId = id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
+    final shortId =
+        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -319,72 +319,4 @@ class _SyncPanelState extends State<_SyncPanel> {
       ),
     );
   }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title});
-  final String title;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsetsDirectional.only(bottom: 9, start: 3),
-        child: Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: HorseTheme.gold),
-        ),
-      );
-}
-
-class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.trailing,
-    this.onTap,
-  });
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Material(
-          color: HorseTheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
-            side: const BorderSide(color: HorseTheme.line),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ListTile(
-            onTap: onTap,
-            minVerticalPadding: 12,
-            leading: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: HorseTheme.gold.withValues(alpha: .10),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: HorseTheme.gold, size: 21),
-            ),
-            title: Text(title, style: Theme.of(context).textTheme.titleMedium),
-            subtitle: subtitle == null
-                ? null
-                : Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(subtitle!,
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ),
-            trailing: trailing ??
-                Icon(
-                  Icons.chevron_left_rounded,
-                  color: onTap == null ? HorseTheme.muted : HorseTheme.gold,
-                ),
-          ),
-        ),
-      );
 }

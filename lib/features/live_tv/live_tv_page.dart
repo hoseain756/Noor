@@ -7,6 +7,7 @@ import '../../core/data/iptv_parser.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/app_state_message.dart';
 import '../player/video_player_page.dart';
 
 class LiveTvPage extends StatefulWidget {
@@ -243,25 +244,35 @@ class _LiveTvPageState extends State<LiveTvPage> {
               if (_loading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
                 child: _error != null
-                    ? _StateMessage(
+                    ? AppStateMessage(
+                        icon: Icons.live_tv_outlined,
                         message: _error!,
-                        action: english ? 'Retry' : 'إعادة المحاولة',
-                        onPressed: _reload)
+                        actionLabel: english ? 'Retry' : 'إعادة المحاولة',
+                        onAction: _reload,
+                        filledButton: true,
+                        actionIcon: Icons.add_rounded)
                     : playlists.isEmpty
-                        ? _StateMessage(
+                        ? AppStateMessage(
+                            icon: Icons.live_tv_outlined,
                             message: english
                                 ? 'Add an M3U playlist to browse live channels.'
                                 : 'أضف قائمة M3U لعرض القنوات المباشرة.',
-                            action: english ? 'Add playlist' : 'إضافة قائمة',
-                            onPressed: _addPlaylist,
+                            actionLabel:
+                                english ? 'Add playlist' : 'إضافة قائمة',
+                            onAction: _addPlaylist,
+                            filledButton: true,
+                            actionIcon: Icons.add_rounded,
                           )
                         : _channels.isEmpty && !_loading
-                            ? _StateMessage(
+                            ? AppStateMessage(
+                                icon: Icons.live_tv_outlined,
                                 message: english
                                     ? 'No channels were found in these playlists.'
                                     : 'لم يتم العثور على قنوات في هذه القوائم.',
-                                action: english ? 'Refresh' : 'تحديث',
-                                onPressed: _reload)
+                                actionLabel: english ? 'Refresh' : 'تحديث',
+                                onAction: _reload,
+                                filledButton: true,
+                                actionIcon: Icons.add_rounded)
                             : ListView.separated(
                                 padding: const EdgeInsetsDirectional.fromSTEB(
                                     16, 6, 16, 28),
@@ -462,35 +473,6 @@ class _LiveChannel {
   final String playlistId;
   final String playlistName;
   final IptvChannel channel;
-}
-
-class _StateMessage extends StatelessWidget {
-  const _StateMessage(
-      {required this.message, required this.action, required this.onPressed});
-  final String message;
-  final String action;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.live_tv_outlined,
-                  size: 44, color: HorseTheme.muted),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                  onPressed: onPressed,
-                  icon: const Icon(Icons.add_rounded),
-                  label: Text(action)),
-            ],
-          ),
-        ),
-      );
 }
 
 bool _isHttp(Uri? uri) =>

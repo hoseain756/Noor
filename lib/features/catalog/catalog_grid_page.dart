@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
 
@@ -21,8 +22,7 @@ class CatalogGridPage extends StatefulWidget {
     this.items,
     this.loader,
     this.onOpen,
-  })  : assert(items != null || loader != null,
-            'Provide items or a loader');
+  }) : assert(items != null || loader != null, 'Provide items or a loader');
 
   final String title;
 
@@ -122,24 +122,30 @@ class _CatalogGridPageState extends State<CatalogGridPage> {
           child: _loading && items.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : _failed && items.isEmpty
-                  ? _GridMessage(
+                  ? AppStateMessage(
+                      icon: Icons.movie_filter_outlined,
+                      iconSize: 42,
+                      padding: const EdgeInsets.all(24),
                       message: english
                           ? 'This catalog could not be loaded.'
                           : 'تعذر تحميل هذا الكتالوج.',
-                      action: english ? 'Try again' : 'إعادة المحاولة',
-                      onPressed: () => unawaited(_load()),
+                      actionLabel: english ? 'Try again' : 'إعادة المحاولة',
+                      onAction: () => unawaited(_load()),
                     )
                   : items.isEmpty && !_loading
-                      ? _GridMessage(
+                      ? AppStateMessage(
+                          icon: Icons.movie_filter_outlined,
+                          iconSize: 42,
+                          padding: const EdgeInsets.all(24),
                           message: english
                               ? 'No titles are available in this catalog.'
                               : 'لا توجد عناوين في هذا الكتالوج.',
-                          action: english ? 'Refresh' : 'تحديث',
-                          onPressed: () => unawaited(_load()),
+                          actionLabel: english ? 'Refresh' : 'تحديث',
+                          onAction: () => unawaited(_load()),
                         )
                       : GridView.builder(
-                          padding:
-                              const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 120),
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                              16, 8, 16, 120),
                           gridDelegate:
                               SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 185,
@@ -168,37 +174,4 @@ class _CatalogGridPageState extends State<CatalogGridPage> {
       ),
     );
   }
-}
-
-class _GridMessage extends StatelessWidget {
-  const _GridMessage({
-    required this.message,
-    required this.action,
-    required this.onPressed,
-  });
-
-  final String message;
-  final String action;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.movie_filter_outlined,
-                size: 42,
-                color: HorseTheme.muted,
-              ),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 14),
-              OutlinedButton(onPressed: onPressed, child: Text(action)),
-            ],
-          ),
-        ),
-      );
 }

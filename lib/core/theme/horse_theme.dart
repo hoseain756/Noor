@@ -128,4 +128,39 @@ abstract final class HorseTheme {
       ),
     );
   }
+
+  // --- Task 121 shared tokens (additive) ---
+
+  /// Semantic colors reused across features (evidence: audit 121-a2 §1.2 —
+  /// recurring file-local literals promoted to shared tokens). `danger`
+  /// aliases colorScheme.error; the scrims/hairline/badge hues were
+  /// duplicated as raw hexes in 5–7 files each.
+  static const Color hairline = Color(0x14FFFFFF); // white .08 borders
+  static const Color scrimPoster = Color(0xB8000000); // black .72 poster scrims
+  static const Color scrimStrong = Color(0x8C000000); // black .55 strong scrims
+  static const Color danger = Color(0xFFFF8178); // == scheme.error
+  static const Color success = Color(0xFF22C55E); // watched/positive
+  static const Color progressRed = Color(0xFFDC2626); // resume progress bars
+  static const Color imdbYellow = Color(0xFFF5C518); // IMDb badge amber
+
+  /// Shared corner radii (circular(999) alone appears ×29 across features).
+  static const double radiusPill = 999;
+  static const double radiusCard = 16;
+  static const double radiusInput = 14;
+  static const double radiusChip = 12;
+
+  /// Motion tokens — `emphasized` was defined 3× independently (detail_hero
+  /// `_cubicEmphasized`, episode_views inline, glass_dock `kDockEase`);
+  /// durations cluster at 150/220/350ms across features.
+  static const Cubic emphasized = Cubic(0.2, 0, 0, 1);
+  static const Duration durFast = Duration(milliseconds: 150);
+  static const Duration durMed = Duration(milliseconds: 220);
+  static const Duration durSlow = Duration(milliseconds: 350);
+
+  /// Page gutter used by media rails + detail skeleton geometry, and the
+  /// read-only breakpoint references (700/600/840) repeated at ~20 sites.
+  static double gutter({required bool wide}) => wide ? 34 : 20;
+  static const double bpWide = 700;
+  static const double bpHero = 600;
+  static const double bpTablet = 840;
 }

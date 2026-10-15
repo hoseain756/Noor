@@ -155,8 +155,7 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
 
   Future<void> _loadLastSync() async {
     for (final bucket in NoorSyncService.buckets) {
-      _lastSync[bucket] =
-          await NoorSyncService.instance.lastSyncAt(bucket);
+      _lastSync[bucket] = await NoorSyncService.instance.lastSyncAt(bucket);
     }
     if (mounted) setState(() {});
   }
@@ -182,13 +181,11 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
   }
 
   String _bucketLabel(String bucket, bool english) => switch (bucket) {
-        NoorSyncService.bucketSettings =>
-          english ? 'Settings' : 'الإعدادات',
+        NoorSyncService.bucketSettings => english ? 'Settings' : 'الإعدادات',
         NoorSyncService.bucketLibrary =>
           english ? 'Continue watching' : 'متابعة المشاهدة',
         NoorSyncService.bucketLists => english ? 'Lists' : 'القوائم',
-        NoorSyncService.bucketWatchlist =>
-          english ? 'Watchlist' : 'المحفوظات',
+        NoorSyncService.bucketWatchlist => english ? 'Watchlist' : 'المحفوظات',
         NoorSyncService.bucketHistory => english ? 'History' : 'السجل',
         NoorSyncService.bucketAddons => english ? 'Add-ons' : 'الإضافات',
         _ => bucket,
@@ -208,7 +205,8 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
     final english = app.english;
     final enabled = app.webSettings['cloudSyncEnabled'] != false;
     final id = app.deviceId ?? '';
-    final shortId = id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
+    final shortId =
+        id.length >= 8 ? id.substring(0, 8) : (id.isEmpty ? '—' : id);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(18),
@@ -227,15 +225,16 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  english ? 'Cloud sync (Supabase)' : 'مزامنة سحابية (Supabase)',
+                  english
+                      ? 'Cloud sync (Supabase)'
+                      : 'مزامنة سحابية (Supabase)',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
               Switch(
                 value: enabled,
                 activeThumbColor: HorseTheme.gold,
-                onChanged: (value) =>
-                    app.setSetting('cloudSyncEnabled', value),
+                onChanged: (value) => app.setSetting('cloudSyncEnabled', value),
               ),
             ],
           ),
@@ -452,8 +451,7 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
     final app = context.watch<AppState>();
     final english = app.english;
     final entries = _entries;
-    final total =
-        entries?.fold<int>(0, (sum, e) => sum + e.size) ?? 0;
+    final total = entries?.fold<int>(0, (sum, e) => sum + e.size) ?? 0;
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
@@ -632,15 +630,14 @@ class _DataRow extends StatelessWidget {
             onTap: onTap,
             minVerticalPadding: 10,
             leading: Icon(icon,
-                color: destructive ? const Color(0xFFFF8178) : HorseTheme.gold),
+                color: destructive ? HorseTheme.danger : HorseTheme.gold),
             title: Text(title,
                 style: TextStyle(
                     color: destructive ? const Color(0xFFFFA29B) : null)),
             subtitle:
                 Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(
-                Icons.chevron_left_rounded,
-                color: HorseTheme.muted),
+            trailing:
+                const Icon(Icons.chevron_left_rounded, color: HorseTheme.muted),
           ),
         ),
       );

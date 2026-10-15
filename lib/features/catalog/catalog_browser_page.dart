@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
 
@@ -270,18 +270,24 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
               if (_loading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
                 child: _error != null && _items.isEmpty
-                    ? _Message(
+                    ? AppStateMessage(
+                        icon: Icons.movie_filter_outlined,
+                        iconSize: 42,
+                        padding: const EdgeInsets.all(24),
                         message: _error!,
-                        action: english ? 'Try again' : 'إعادة المحاولة',
-                        onPressed: () =>
+                        actionLabel: english ? 'Try again' : 'إعادة المحاولة',
+                        onAction: () =>
                             unawaited(_load(query: _search.text.trim())))
                     : _items.isEmpty && !_loading
-                        ? _Message(
+                        ? AppStateMessage(
+                            icon: Icons.movie_filter_outlined,
+                            iconSize: 42,
+                            padding: const EdgeInsets.all(24),
                             message: english
                                 ? 'No titles match these filters.'
                                 : 'لا توجد عناوين تطابق عوامل التصفية.',
-                            action: english ? 'Refresh' : 'تحديث',
-                            onPressed: () =>
+                            actionLabel: english ? 'Refresh' : 'تحديث',
+                            onAction: () =>
                                 unawaited(_load(query: _search.text.trim())))
                         : GridView.builder(
                             padding: const EdgeInsetsDirectional.fromSTEB(
@@ -314,30 +320,4 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
       ),
     );
   }
-}
-
-class _Message extends StatelessWidget {
-  const _Message(
-      {required this.message, required this.action, required this.onPressed});
-  final String message;
-  final String action;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.movie_filter_outlined,
-                  size: 42, color: HorseTheme.muted),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 14),
-              OutlinedButton(onPressed: onPressed, child: Text(action)),
-            ],
-          ),
-        ),
-      );
 }

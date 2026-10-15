@@ -5,6 +5,7 @@ import '../../core/models/anime_airing.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
+import '../../shared/widgets/app_state_message.dart';
 import '../media/media_detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -197,17 +198,19 @@ class _CalendarPageState extends State<CalendarPage> {
                       );
                     }
                     if (snapshot.hasError) {
-                      return _CalendarMessage(
+                      return AppStateMessage(
+                        icon: Icons.calendar_month_outlined,
                         message: english
                             ? 'The calendar could not be loaded.'
                             : 'تعذر تحميل التقويم.',
-                        action: english ? 'Retry' : 'إعادة المحاولة',
-                        onPressed: _retry,
+                        actionLabel: english ? 'Retry' : 'إعادة المحاولة',
+                        onAction: _retry,
                       );
                     }
                     final episodes = snapshot.data ?? const [];
                     if (episodes.isEmpty) {
-                      return _CalendarMessage(
+                      return AppStateMessage(
+                        icon: Icons.calendar_month_outlined,
                         message: app.watchlist
                                     .any((item) => item.type == 'series') ||
                                 app.history
@@ -218,8 +221,8 @@ class _CalendarPageState extends State<CalendarPage> {
                             : (english
                                 ? 'Save a series or start watching one to see its new episodes here.'
                                 : 'أضف مسلسلًا إلى قائمتك أو ابدأ مشاهدته لعرض حلقاته الجديدة هنا.'),
-                        action: english ? 'Refresh' : 'تحديث',
-                        onPressed: _retry,
+                        actionLabel: english ? 'Refresh' : 'تحديث',
+                        onAction: _retry,
                       );
                     }
                     final grouped = <DateTime, List<_CalendarEpisode>>{};
@@ -322,32 +325,6 @@ class _EpisodeTile extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CalendarMessage extends StatelessWidget {
-  const _CalendarMessage(
-      {required this.message, required this.action, required this.onPressed});
-  final String message;
-  final String action;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.calendar_month_outlined,
-                  size: 44, color: HorseTheme.muted),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 14),
-              OutlinedButton(onPressed: onPressed, child: Text(action)),
-            ],
-          ),
-        ),
-      );
 }
 
 DateTime? _releaseDate(dynamic raw) {

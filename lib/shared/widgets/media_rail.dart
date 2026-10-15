@@ -63,7 +63,7 @@ class MediaRail extends StatelessWidget {
                 width: 3,
                 height: 19,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFC99C62),
+                  color: HorseTheme.gold,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
