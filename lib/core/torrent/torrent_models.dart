@@ -283,3 +283,122 @@ class ListEquality<T> {
     return true;
   }
 }
+
+// --------------------------------------------------------------------------- //
+//  Torrent source helpers (Task 129 — Torrentio reliability package)
+// --------------------------------------------------------------------------- //
+
+/// Extensions recognised as streamable video content. Shared by the torrent
+/// service and the file-selection helper so every layer agrees on what
+/// "playable" means.
+const List<String> kTorrentVideoExtensions = <String>[
+  '.mp4',
+  '.mkv',
+  '.avi',
+  '.webm',
+  '.mov',
+  '.flv',
+  '.ts',
+  '.rmvb',
+];
+
+/// Whether [name] ends with a known playable video extension.
+bool isVideoFileName(String name) {
+  final lower = name.toLowerCase();
+  return kTorrentVideoExtensions.any(lower.endsWith);
+}
+
+/// Normalizes a Stremio stream `sources` array (Task 129) into plain tracker
+/// announce URLs. Addons ship entries shaped like `tracker:<url>`,
+/// `dht:<infohash>` or a bare `udp://`/`http(s)://` announce. Non-tracker
+/// shapes (DHT is native to the engine, WSS unsupported) are dropped and the
+/// result is de-duplicated while preserving order.
+List<String> normalizeTrackerSources(Object? raw) {
+  if (raw is! List) return const <String>[];
+  final out = <String>[];
+  for (final entry in raw) {
+    if (entry is! String) continue;
+    var value = entry.trim();
+    if (value.isEmpty) continue;
+    final colon = value.indexOf(':');
+    final scheme = colon == -1 ? '' : value.substring(0, colon).toLowerCase();
+    switch (scheme) {
+      case 'tracker':
+        value = value.substring(colon + 1).trim();
+        break;
+      case 'udp':
+      case 'http':
+      case 'https':
+        break; // bare announce URL — keep as-is
+      default:
+        continue; // dht:, wss:, garbage
+    }
+    if (value.isEmpty || !value.contains('://')) continue;
+    if (!out.contains(value)) out.add(value);
+  }
+  return out;
+}
+
+/// Case-insensitive, suffix/basename-lenient torrent file-name matcher
+/// (moved from [TorrentService] so selection and the service share it).
+bool torrentFileMatches(String torrentName, String wanted) {
+  final a = _normalizeTorrentName(torrentName);
+  final b = _normalizeTorrentName(wanted);
+  return a == b || a.endsWith(b) || b.endsWith(a) || _torrentBasename(a) == b;
+}
+
+String _normalizeTorrentName(String path) =>
+    path.trim().toLowerCase().replaceAll('\\', '/');
+
+String _torrentBasename(String path) {
+  final clean = _normalizeTorrentName(path);
+  final index = clean.lastIndexOf('/');
+  return index == -1 ? clean : clean.substring(index + 1);
+}
+
+/// Picks the torrent file to stream (Task 129), in priority order:
+///
+///  1. the addon's own [fileIndex] (Torrentio `fileIdx`) when it points at a
+///     playable video — the authoritative choice for multi-episode packs;
+///  2. the [filename] hint (Stremio `behaviorHints.filename`) via lenient
+///     matching;
+///  3. the file at [fileIndex] even when it lacks a recognised video
+///     extension — the addon computed that exact file for this title, and
+///     unusual containers (.divx, extension-less) are still playable;
+///  4. the largest video file in the torrent;
+///  5. the largest file of any kind. Returns null only for an empty torrent.
+TorrentFileInfo? selectTorrentFile(
+  TorrentMetadata meta,
+  String? filename,
+  int? fileIndex,
+) {
+  final files = meta.files;
+
+  TorrentFileInfo? at(int? index) {
+    if (index == null || index < 0 || index >= files.length) return null;
+    final file = files[index];
+    return file.size > 0 ? file : null;
+  }
+
+  final indexed = at(fileIndex);
+  if (indexed != null && isVideoFileName(indexed.name)) return indexed;
+
+  final wanted = filename?.trim() ?? '';
+  if (wanted.isNotEmpty) {
+    for (final file in files) {
+      if (file.size > 0 && torrentFileMatches(file.name, wanted)) return file;
+    }
+  }
+
+  if (indexed != null) return indexed;
+
+  final videos = files
+      .where((file) => file.size > 0 && isVideoFileName(file.name))
+      .toList()
+    ..sort((a, b) => b.size.compareTo(a.size));
+  if (videos.isNotEmpty) return videos.first;
+
+  final all = files.where((file) => file.size > 0).toList()
+    ..sort((a, b) => b.size.compareTo(a.size));
+  return all.isEmpty ? null : all.first;
+}

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.util.Log
 import com.frostwire.jlibtorrent.AlertListener
 import com.frostwire.jlibtorrent.Priority
@@ -29,6 +30,8 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -116,6 +119,20 @@ class MainActivity :
 
     @Volatile
     private var manager: SessionManager? = null
+
+    /**
+     * Raw bencoded torrent bytes keyed by lowercase-hex info-hash (Task 129).
+     * Filled by [resolveMetadata] and [resolveTorrentData] so [startTorrent]
+     * can add the torrent WITH metadata (`download(TorrentInfo, dir)`) instead
+     * of re-fetching it from the swarm — on marginal mobile networks that
+     * second fetch was a second chance to time out. Bounded LRU; also
+     * invalidated on remove/stop.
+     */
+    private val torrentDataCache =
+        Collections.synchronizedMap(object : LinkedHashMap<String, ByteArray>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean =
+                size > 8
+        })
 
     @Volatile
     private var active: ActiveTorrent? = null
@@ -249,6 +266,15 @@ class MainActivity :
                     val magnet = call.argument<String>("magnet")
                         ?: throw TorrentEngineException("invalid_args", "magnet is required")
                     runAsync(result) { resolveMetadata(magnet) }
+                }
+                "resolveTorrentData" -> {
+                    // Task 129: P2P-free metadata bootstrap — Dart fetched the
+                    // raw .torrent file from a public HTTP cache; decode it
+                    // here (and cache the bytes so `start` never re-fetches
+                    // metadata from the swarm).
+                    val dataB64 = call.argument<String>("data")
+                        ?: throw TorrentEngineException("invalid_args", "data is required")
+                    runAsync(result) { resolveTorrentData(dataB64) }
                 }
                 "start" -> {
                     val magnet = call.argument<String>("magnet")
@@ -398,7 +424,35 @@ class MainActivity :
         if (!ti.isValid()) {
             throw TorrentEngineException("invalid_metadata", "Decoded torrent metadata is not valid")
         }
+        stashTorrentData(ti.infoHash().toHex(), data)
+        return metadataFromTorrentInfo(ti)
+    }
 
+    /**
+     * Task 129: decodes a raw .torrent file (base64) fetched by Dart from the
+     * HTTP torrent cache — a P2P-free metadata bootstrap for networks where
+     * the swarm is unreachable. The bytes are cached so the subsequent `start`
+     * adds the torrent with metadata already in hand.
+     */
+    private fun resolveTorrentData(dataB64: String): Map<String, Any> {
+        val bytes = try {
+            Base64.decode(dataB64, Base64.DEFAULT)
+        } catch (t: Throwable) {
+            throw TorrentEngineException("invalid_metadata", "Torrent data is not valid base64: ${t.message}")
+        }
+        val ti = try {
+            TorrentInfo.bdecode(bytes)
+        } catch (t: Throwable) {
+            throw TorrentEngineException("invalid_metadata", "Torrent data is not a bencoded torrent: ${t.message}")
+        }
+        if (!ti.isValid()) {
+            throw TorrentEngineException("invalid_metadata", "Decoded torrent metadata is not valid")
+        }
+        stashTorrentData(ti.infoHash().toHex(), bytes)
+        return metadataFromTorrentInfo(ti)
+    }
+
+    private fun metadataFromTorrentInfo(ti: TorrentInfo): Map<String, Any> {
         val files = ArrayList<Map<String, Any>>(ti.numFiles())
         val fs = ti.files()
         for (i in 0 until ti.numFiles()) {
@@ -416,6 +470,23 @@ class MainActivity :
             "files" to files,
         )
     }
+
+    private fun stashTorrentData(hashHex: String, bytes: ByteArray) {
+        if (hashHex.isBlank() || bytes.isEmpty()) return
+        try {
+            torrentDataCache[hashHex] = bytes
+        } catch (t: Throwable) {
+            Log.w(TAG, "torrent data cache stash failed: ${t.message}")
+        }
+    }
+
+    private fun cachedTorrentData(hashHex: String): ByteArray? =
+        try {
+            torrentDataCache[hashHex]
+        } catch (t: Throwable) {
+            Log.w(TAG, "torrent data cache read failed: ${t.message}")
+            null
+        }
 
     /**
      * Starts downloading [fileIndex] from [magnet] into [saveDir]. The target
@@ -436,7 +507,21 @@ class MainActivity :
         }
 
         val hashHex = infoHashOf(magnet)
-        sm.download(magnet, dir)
+        // Task 129: add the torrent WITH metadata when we already have the
+        // raw bytes (from resolveMetadata / resolveTorrentData) — the old
+        // path re-added from the magnet and waited for the swarm AGAIN inside
+        // awaitMetadata (a second 30s timeout window on marginal networks).
+        val cached = cachedTorrentData(hashHex)
+        if (cached != null) {
+            try {
+                sm.download(TorrentInfo.bdecode(cached), dir)
+            } catch (t: Throwable) {
+                Log.w(TAG, "cached torrent data unusable (${t.message}) — falling back to magnet")
+                sm.download(magnet, dir)
+            }
+        } else {
+            sm.download(magnet, dir)
+        }
 
         val th = awaitHandle(sm, hashHex)
             ?: throw TorrentEngineException(
@@ -489,6 +574,7 @@ class MainActivity :
     }
 
     private fun removeTorrent(infoHash: String, deleteFiles: Boolean) {
+        torrentDataCache.remove(infoHash.lowercase())
         synchronized(activeLock) {
             if (active?.infoHash == infoHash) active = null
         }
@@ -503,6 +589,7 @@ class MainActivity :
 
     /** Shuts the whole engine down; used on app teardown. */
     private fun stopEngine() {
+        torrentDataCache.clear()
         synchronized(activeLock) { active = null }
         val sm = synchronized(sessionLock) {
             val current = manager

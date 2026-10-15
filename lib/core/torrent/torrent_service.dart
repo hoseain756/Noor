@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -38,39 +40,42 @@ class TorrentService {
   /// Public trackers appended to every generated magnet so DHT-less swarms
   /// still find peers quickly.
   ///
-  /// Mixes UDP **and** HTTP(S) trackers: many mobile carriers throttle or
-  /// block UDP announce traffic entirely, so plain-HTTP trackers are often
-  /// the only working path on cellular networks (Task 128).
+  /// Task 129: the previous list was half-dead (liveness-probed from a real
+  /// network — DNS failures, 403s, timeouts on 7 of 16 entries) and ALL FOUR
+  /// of its HTTP fallbacks were gone, so on carriers that throttle UDP the
+  /// engine had zero trackers and metadata resolution always timed out.
+  /// Every entry below was verified alive (BitTorrent UDP connect handshake /
+  /// HTTP announce round-trip). Mixes UDP **and** HTTP(S): many mobile
+  /// carriers throttle or block UDP announce traffic entirely, so plain-HTTP
+  /// trackers are often the only working path on cellular networks.
   static const List<String> _defaultTrackers = <String>[
+    // — UDP (verified alive) —
     'udp://tracker.opentrackr.org:1337/announce',
     'udp://open.demonii.com:1337/announce',
     'udp://open.stealth.si:80/announce',
-    'udp://tracker.torrent.eu.org:451/announce',
     'udp://exodus.desync.com:6969/announce',
-    'udp://tracker.tiny-vps.com:6969/announce',
     'udp://tracker.dler.org:6969/announce',
-    'udp://opentracker.i2p.rocks:6969/announce',
     'udp://explodie.org:6969/announce',
-    'udp://tracker.moeking.me:6969/announce',
-    'udp://tracker.auctor.ws:6969/announce',
-    'udp://bt.ktrackers.com:6666/announce',
-    'http://tracker.openbittorrent.com:80/announce',
-    'http://opentracker.io:6969/announce',
-    'http://tracker.files.fm:6969/announce',
-    'https://tracker.tamersunion.org:443/announce',
+    'udp://tracker.qu.ax:6969/announce',
+    'udp://tracker.ducks.party:1984/announce',
+    'udp://tracker-udp.gbitt.info:80/announce',
+    'udp://tracker.skynetcloud.site:6969/announce',
+    'udp://tracker.nyaa.vc:6969/announce',
+    'udp://tracker.corpscorp.online:80/announce',
+    'udp://tracker.bittor.pw:1337/announce',
+    'udp://tracker.farted.net:6969/announce',
+    'udp://tracker2.dler.org:80/announce',
+    // — HTTP(S) (the lifeline on UDP-restricted networks) —
+    'http://tracker.dler.org:6969/announce',
+    'http://tracker.dler.com:6969/announce',
+    'http://tracker.renfei.net:8080/announce',
   ];
 
-  /// Extensions recognised as streamable video content.
-  static const List<String> _videoExtensions = <String>[
-    '.mp4',
-    '.mkv',
-    '.avi',
-    '.webm',
-    '.mov',
-    '.flv',
-    '.ts',
-    '.rmvb',
-  ];
+  /// Public HTTP torrent-file cache used as a P2P-free metadata bootstrap
+  /// (Task 129): when the swarm is unreachable, the .torrent file itself can
+  /// still come from this well-known mirror in ~1-2s. Keyed by UPPER-case
+  /// hex info-hash (the mirror's canonical form).
+  static const String _torrentCacheUrl = 'https://itorrents.org/torrent/';
 
   /// Metadata resolved at least once per session, keyed by info-hash.
   final Map<String, TorrentMetadata> _metadataCache =
@@ -133,12 +138,19 @@ class TorrentService {
   /// Prepares a torrent for on-device streaming:
   ///
   ///  1. resolves metadata (unless already cached) to locate the target file —
-  ///     the largest video file when [filename] is not given;
-  ///  2. starts the native engine with sequential download enabled and
+  ///     resolution order (Task 129): HTTP torrent-file cache (itorrents.org,
+  ///     no P2P needed), then the swarm itself through the staged magnet
+  ///     fetch;
+  ///  2. selects the target file — the addon's own [fileIndex] (Torrentio
+  ///     `fileIdx`) when playable, else [filename] matching, else the largest
+  ///     video file;
+  ///  3. starts the native engine with sequential download enabled and
   ///     per-file priorities (target file high, first/last pieces highest);
-  ///  3. starts a local loopback HTTP server with Range support serving the
+  ///     the magnet carries the stream's own [trackers] (Torrentio `sources`)
+  ///     merged over the verified defaults;
+  ///  4. starts a local loopback HTTP server with Range support serving the
   ///     selected file from inside `<documents>/torrents/<infoHash>/`;
-  ///  4. returns a [PreparedTorrent] exposing the player URL plus a live
+  ///  5. returns a [PreparedTorrent] exposing the player URL plus a live
   ///     status stream, and a `stop()` that closes the server and removes the
   ///     torrent from the engine while keeping its files for instant resume.
   Future<PreparedTorrent> prepare({
@@ -147,6 +159,8 @@ class TorrentService {
     String? filename,
     int? filesize,
     String? displayName,
+    List<String> trackers = const <String>[],
+    int? fileIndex,
   }) {
     return _serialized(
       () => _prepare(
@@ -155,6 +169,8 @@ class TorrentService {
         filename: filename,
         filesize: filesize,
         displayName: displayName,
+        trackers: trackers,
+        fileIndex: fileIndex,
       ),
     );
   }
@@ -180,15 +196,51 @@ class TorrentService {
     });
   }
 
-  /// Builds a magnet URI for [infoHash] with an optional display name and the
-  /// default public tracker list appended.
-  static String magnetFor(String infoHash, {String? dn}) {
-    final hash = infoHash.trim().toLowerCase();
-    final buffer = StringBuffer('magnet:?xt=urn:btih:$hash');
-    if (dn != null && dn.trim().isNotEmpty) {
-      buffer.write('&dn=${Uri.encodeComponent(dn.trim())}');
+  /// Extracts every `tr=` tracker from a magnet URI (order preserved).
+  static List<String> trackersFromMagnet(String magnetUri) {
+    final trackers = <String>[];
+    for (final match
+        in RegExp('(?:^|&)tr(?:\\[\\])?=([^&]+)').allMatches(magnetUri)) {
+      final tracker = Uri.decodeComponent(match.group(1) ?? '').trim();
+      if (tracker.isNotEmpty && !trackers.contains(tracker)) {
+        trackers.add(tracker);
+      }
     }
-    for (final tracker in _defaultTrackers) {
+    return trackers;
+  }
+
+  /// Builds a magnet URI for [infoHash], merging — in priority order — the
+  /// stream's own trackers ([extraTrackers], typically Torrentio `sources`,
+  /// fresher than anything static), the [magnetUri]'s existing `tr=` entries
+  /// and the verified default list. De-duplicated, defaults last.
+  static String magnetFor(
+    String infoHash, {
+    String? dn,
+    List<String> extraTrackers = const <String>[],
+    String? magnetUri,
+  }) {
+    final hash = infoHash.trim().toLowerCase();
+    final merged = <String>[
+      ...extraTrackers,
+      ...trackersFromMagnet(magnetUri ?? ''),
+      ..._defaultTrackers,
+    ];
+    final trackers = <String>[];
+    for (final tracker in merged) {
+      final clean = tracker.trim();
+      if (clean.isNotEmpty && !trackers.contains(clean)) trackers.add(clean);
+    }
+    var name = dn;
+    if ((name == null || name.trim().isEmpty) && magnetUri != null) {
+      final dnMatch =
+          RegExp('(?:^|&)dn=([^&]+)').firstMatch(magnetUri)?.group(1);
+      name = dnMatch == null ? null : Uri.decodeComponent(dnMatch);
+    }
+    final buffer = StringBuffer('magnet:?xt=urn:btih:$hash');
+    if (name != null && name.trim().isNotEmpty) {
+      buffer.write('&dn=${Uri.encodeComponent(name.trim())}');
+    }
+    for (final tracker in trackers) {
       buffer.write('&tr=${Uri.encodeComponent(tracker)}');
     }
     return buffer.toString();
@@ -204,6 +256,78 @@ class TorrentService {
     final result = _queue.then((_) => action());
     _queue = result.then<void>((_) {}, onError: (_) {});
     return result;
+  }
+
+  /// Metadata resolution with the Task 129 fallback chain:
+  ///
+  ///  1. HTTP torrent-file cache (itorrents.org) — a plain HTTPS GET that
+  ///     needs NO peer connectivity; when it hits, metadata arrives in
+  ///     ~1-2s and the native side also caches the raw torrent bytes so
+  ///     `start` never re-fetches metadata from the swarm;
+  ///  2. the staged P2P resolve (22s + 26s) through the engine.
+  ///
+  /// The HTTP path is best-effort by design: any failure (offline mirror,
+  /// unknown hash, slow network) silently falls through to the P2P path.
+  Future<TorrentMetadata> _resolveSmart(String hash, String magnetUri) async {
+    try {
+      final bytes = await _fetchTorrentBytes(hash);
+      if (bytes != null) {
+        final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
+            'resolveTorrentData', <String, Object?>{
+          'data': base64Encode(bytes)
+        }).timeout(const Duration(seconds: 12));
+        if (raw != null) {
+          final meta = TorrentMetadata.fromMap(raw);
+          if (meta.infoHash.toLowerCase() == hash && meta.files.isNotEmpty) {
+            return meta;
+          }
+          // Hash mismatch or empty file list — untrusted cache, ignore.
+        }
+      }
+    } on PlatformException {
+      // resolveTorrentData unsupported (older engine build) — P2P path.
+    } on TimeoutException {
+      // Native decode round-trip stalled — P2P path.
+    } on MissingPluginException {
+      // Non-Android platform — P2P path (will report unavailable).
+    } catch (_) {
+      // Network/dns/decode failure — P2P path.
+    }
+    return _resolve(magnetUri);
+  }
+
+  /// Fetches the raw .torrent bytes for [hash] from the public HTTP cache.
+  /// Returns null when the mirror doesn't know the hash or the response
+  /// doesn't look like a bencoded torrent file.
+  Future<Uint8List?> _fetchTorrentBytes(String hash) async {
+    final upper = hash.toUpperCase();
+    final uri = Uri.parse('$_torrentCacheUrl$upper.torrent');
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 6);
+      final request =
+          await client.getUrl(uri).timeout(const Duration(seconds: 8));
+      request.headers.set(HttpHeaders.userAgentHeader,
+          'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36');
+      request.followRedirects = true;
+      request.maxRedirects = 3;
+      final response =
+          await request.close().timeout(const Duration(seconds: 8));
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>().catchError((_) {});
+        return null;
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response) {
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      // Bencoded torrents start with 'd' and are never tiny.
+      if (bytes.length < 100 || bytes.first != 0x64) return null;
+      return bytes;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<TorrentMetadata> _resolve(String magnet) async {
@@ -246,6 +370,8 @@ class TorrentService {
     String? filename,
     int? filesize,
     String? displayName,
+    List<String> trackers = const <String>[],
+    int? fileIndex,
   }) async {
     await _ensureAvailable();
 
@@ -269,34 +395,33 @@ class TorrentService {
     }
 
     // 1. Storage directory: <ApplicationDocuments>/torrents/<infoHash>.
-    final saveDir = await _saveDirFor(infoHash);
+    final saveDir = await _saveDirFor(hash);
 
-    // 2. Metadata → target file. Reuse cached metadata when possible.
-    final TorrentMetadata meta = _metadataCache[infoHash] ??
-        await _resolve(
-            magnet ?? magnetFor(infoHash, dn: displayName ?? filename));
-    _metadataCache[infoHash] = meta;
+    // 2. Metadata → target file. Task 129: the magnet now carries the
+    //    stream's own trackers merged over the verified defaults, and
+    //    resolution first tries the HTTP torrent-file cache (no P2P needed
+    //    — the old path died on networks that throttle peer traffic).
+    final magnetUri = magnet ??
+        magnetFor(hash, dn: displayName ?? filename, extraTrackers: trackers);
+    final TorrentMetadata meta =
+        _metadataCache[hash] ?? await _resolveSmart(hash, magnetUri);
+    _metadataCache[hash] = meta;
 
-    final TorrentFileInfo target;
-    if (filename != null && filename.trim().isNotEmpty) {
-      target = meta.files.firstWhere(
-        (file) => _matchesName(file.name, filename),
-        orElse: () => _pickLargestVideo(meta),
-      );
-    } else {
-      target = _pickLargestVideo(meta);
+    final target = selectTorrentFile(meta, filename, fileIndex);
+    if (target == null) {
+      throw const TorrentException('no_files', 'Torrent contains no files');
     }
 
     // Stop the previous active torrent (keeping files for resume) unless the
     // engine should keep downloading the very same torrent.
     final previousHash = _activeHash;
     await _deactivate(
-      removeTorrent: previousHash != null && previousHash != infoHash,
+      removeTorrent: previousHash != null && previousHash != hash,
     );
 
     // 3. Native start: sequential download + smart per-file priorities.
     final started = await _invokeMap('start', <String, Object?>{
-      'magnet': magnet ?? magnetFor(infoHash, dn: displayName ?? target.name),
+      'magnet': magnetUri,
       'fileIndex': target.index,
       'saveDir': saveDir,
       'sequential': true,
@@ -449,45 +574,6 @@ class TorrentService {
       _broadcast = stream;
     }
     return stream;
-  }
-
-  /// Picks the largest playable video file, falling back to the largest file
-  /// of the torrent when nothing looks like video.
-  TorrentFileInfo _pickLargestVideo(TorrentMetadata meta) {
-    final videos = meta.files
-        .where(
-          (file) =>
-              file.size > 0 &&
-              _videoExtensions.any(
-                (extension) => file.name.toLowerCase().endsWith(extension),
-              ),
-        )
-        .toList()
-      ..sort((a, b) => b.size.compareTo(a.size));
-    if (videos.isNotEmpty) return videos.first;
-
-    final all = meta.files.where((file) => file.size > 0).toList()
-      ..sort((a, b) => b.size.compareTo(a.size));
-    if (all.isEmpty) {
-      throw const TorrentException('no_files', 'Torrent contains no files');
-    }
-    return all.first;
-  }
-
-  /// Lenient name match: exact, suffix or basename equality (case-insensitive).
-  bool _matchesName(String torrentName, String wanted) {
-    final a = _normalize(torrentName);
-    final b = _normalize(wanted);
-    return a == b || a.endsWith(b) || b.endsWith(a) || _basename(a) == b;
-  }
-
-  static String _normalize(String path) =>
-      path.trim().toLowerCase().replaceAll('\\', '/');
-
-  static String _basename(String path) {
-    final clean = _normalize(path);
-    final index = clean.lastIndexOf('/');
-    return index == -1 ? clean : clean.substring(index + 1);
   }
 
   /// POSIX-safe join (Android/iOS only — the torrent engine is not desktop).

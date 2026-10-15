@@ -628,12 +628,21 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         final infoHash = streamHash.isNotEmpty ? streamHash : magnetHash ?? '';
         final sizeCandidate = chosenStream['fileSize'] ?? hints['videoSize'];
         final filesize = sizeCandidate is num ? sizeCandidate.toInt() : null;
+        // Task 129: keep the addon's own knowledge — Torrentio's curated
+        // `sources` trackers (fresher than any static list) and `fileIdx`
+        // (the exact episode file inside multi-episode packs).
+        final trackers = normalizeTrackerSources(chosenStream['sources']);
+        final rawIdx = chosenStream['fileIdx'];
+        final fileIdx =
+            rawIdx is num ? rawIdx.toInt() : int.tryParse('$rawIdx'.trim());
         final resolved = await _resolveTorrentStream(
           displayName: item.name,
           infoHash: infoHash,
           filename: filename,
           filesize: filesize,
           magnet: magnetUrl,
+          trackers: trackers,
+          fileIndex: fileIdx,
         );
         if (!mounted) return;
         if (resolved == null) {
@@ -700,6 +709,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     required String? filename,
     required int? filesize,
     String? magnet,
+    List<String> trackers = const <String>[],
+    int? fileIndex,
   }) async {
     final app = context.read<AppState>();
     final api = app.api;
@@ -775,6 +786,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         filename: filename,
         filesize: filesize,
         displayName: displayName,
+        trackers: trackers,
+        fileIndex: fileIndex,
       );
       if (cancelled) {
         // The user backed out while the engine was preparing the stream.
