@@ -84,11 +84,16 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
         ? await app.api.malSearch(term, limit: 30)
         : await app.api.aniListSearch(term, perPage: 30);
     if (!mounted) return const [];
-    return CatalogRepository.parseAnimeResponse({
-      'data': {
-        'Page': {'media': rows},
+    // 122 follow-up: honor the ja native-title preference here too, matching
+    // the repository's AniList catalog/meta paths.
+    return CatalogRepository.parseAnimeResponse(
+      {
+        'data': {
+          'Page': {'media': rows},
+        },
       },
-    });
+      preferNativeTitles: await CatalogRepository.prefersNativeAnimeTitles(),
+    );
   }
 
   Future<void> _open(MediaItem item) async {
@@ -259,8 +264,7 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                                   children: [
                                     Expanded(
                                       child: ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(10),
+                                        borderRadius: BorderRadius.circular(10),
                                         child: Stack(
                                           fit: StackFit.expand,
                                           children: [
@@ -271,9 +275,8 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                                               Image.network(
                                                 item.poster!,
                                                 fit: BoxFit.cover,
-                                                errorBuilder:
-                                                    (_, __, ___) =>
-                                                        const SizedBox(),
+                                                errorBuilder: (_, __, ___) =>
+                                                    const SizedBox(),
                                               ),
                                             if (busy)
                                               const ColoredBox(
@@ -297,9 +300,8 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                                       item.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
                                     ),
                                   ],
                                 ),

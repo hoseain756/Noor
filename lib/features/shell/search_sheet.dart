@@ -92,8 +92,9 @@ class _SearchSheetState extends State<SearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    // Scoped select (122 follow-up): the sheet only needs the UI language,
+    // so AppState notifications no longer rebuild this whole modal.
+    final english = context.select<AppState, bool>((a) => a.english);
     final height = MediaQuery.sizeOf(context).height * .92;
     return SizedBox(
       height: height,

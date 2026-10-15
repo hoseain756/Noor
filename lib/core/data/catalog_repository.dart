@@ -423,7 +423,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     // to native-first; every other language keeps the existing order.
     return parseAnimeResponse(
       response,
-      preferNativeTitles: await _prefersNativeAnimeTitles(),
+      preferNativeTitles: await prefersNativeAnimeTitles(),
     );
   }
 
@@ -441,7 +441,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     // Task 122-d: same native-title preference as [anime].
     return parseAnimeAiringResponse(
       response,
-      preferNativeTitles: await _prefersNativeAnimeTitles(),
+      preferNativeTitles: await prefersNativeAnimeTitles(),
     );
   }
 
@@ -790,7 +790,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
 
   /// Japanese is the only content language with a dedicated AniList title
   /// field, so native titles are preferred for ja alone.
-  static Future<bool> _prefersNativeAnimeTitles() async =>
+  static Future<bool> prefersNativeAnimeTitles() async =>
       await _contentLanguage() == 'ja';
 
   /// STRICT gate for the addon `language` extra (122-plan contract): true
