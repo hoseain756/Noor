@@ -281,7 +281,13 @@ class MainActivity :
             result.error(e.code, e.message, null)
         } catch (t: Throwable) {
             Log.e(TAG, "method ${call.method} failed", t)
-            result.error("torrent_error", t.message ?: "torrent operation failed", null)
+            // Task 127: include the real exception class — a bare `t.message`
+            // (e.g. an obfuscated class name like "g0.d") is undiagnosable.
+            result.error(
+                "torrent_error",
+                "${t.javaClass.name}: ${t.message ?: "torrent operation failed"}",
+                null,
+            )
         }
     }
 
@@ -300,7 +306,12 @@ class MainActivity :
             } catch (t: Throwable) {
                 Log.e(TAG, "torrent operation failed", t)
                 mainHandler.post {
-                    result.error("torrent_error", t.message ?: "torrent operation failed", null)
+                    // Task 127: include the real exception class for diagnosis.
+                    result.error(
+                        "torrent_error",
+                        "${t.javaClass.name}: ${t.message ?: "torrent operation failed"}",
+                        null,
+                    )
                 }
             }
         }

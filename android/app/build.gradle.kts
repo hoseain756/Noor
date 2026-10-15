@@ -34,6 +34,13 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Task 127: R8 minification (Flutter 3.47+ enables it for release by
+            // default) obfuscates the jlibtorrent/SWIG wrappers — torrents then die
+            // with unreadable errors like `TorrentException(torrent_error): g0.d`
+            // (NoClassDefFoundError on the renamed libtorrent_jni class). Keep the
+            // engine unobfuscated until a maintained keep-rules file exists.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

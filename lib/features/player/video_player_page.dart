@@ -12,6 +12,7 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import 'engine/playback_engine.dart';
+import 'stream_headers.dart';
 import 'widgets/player_chrome.dart';
 import 'widgets/player_sheets.dart';
 
@@ -94,6 +95,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   // Resume flow.
   bool _resuming = false;
   int? _resumePositionMs;
+  // Task 127: engine-construction failure (e.g. missing native libs) — must
+  // surface through the in-page error panel instead of the release grey box.
+  String? _engineInitError;
   bool _stopScrobbled = false;
   bool _upNextDismissed = false;
   int _streamIndex = 0;
@@ -182,7 +186,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       10;
 
   void _createEngine() {
-    final engine = MediaKitEngine();
+    _engineInitError = null;
+    final MediaKitEngine engine;
+    try {
+      engine = MediaKitEngine();
+    } catch (error) {
+      // Task 127: degrade to the in-page error panel — never let a ctor
+      // throw escape into the route's first frame (release grey screen).
+      if (!mounted) return;
+      setState(() => _engineInitError = error.toString());
+      return;
+    }
     _engine = engine;
     engine.addListener(_onEngineTick);
     unawaited(
@@ -737,21 +751,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     AppState app,
     Map<String, dynamic> stream,
   ) async {
-    final url = stream['url']?.toString();
-    final headers = <String, String>{};
-    final bh = stream['behaviorHints'];
-    if (bh is Map && bh['proxyHeaders'] is Map) {
-      (bh['proxyHeaders'] as Map).forEach(
-        (k, v) => headers[k.toString()] = v.toString(),
-      );
-    }
-    if (url != null) {
+    // Task 127: normalize every header shape (pipe syntax, flat/nested
+    // proxyHeaders, legacy headers) before handing the URL to the engine.
+    final direct = parsePlaybackSource(stream);
+    if (direct != null) {
       return _PlaybackResolution(
-        url: url,
-        headers: headers,
+        url: direct.url,
+        headers: direct.headers,
         torrent: null,
       );
     }
+    // InfoHash-only stream: source headers still apply to debrid/engine URLs.
+    final headers = direct?.headers ?? const <String, String>{};
     final infoHash = stream['infoHash']?.toString();
     if (infoHash == null) return null;
     final filename =
@@ -760,14 +771,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final filesize = (stream['size'] as num?)?.toInt();
     // Premium debrid first: instant direct link, zero buffering.
     if (app.api.debridService != null) {
-      final direct = await app.api.resolveDebridTorrent(
+      final debridUrl = await app.api.resolveDebridTorrent(
         infoHash: infoHash,
         filename: filename,
         filesize: filesize,
       );
-      if (direct != null) {
+      if (debridUrl != null) {
         return _PlaybackResolution(
-            url: direct, headers: headers, torrent: null);
+            url: debridUrl, headers: headers, torrent: null);
       }
     }
     // On-device torrent engine: sequential streaming via localhost server.
@@ -972,7 +983,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Widget build(BuildContext context) {
     final engine = _engine;
     final ready = engine != null && engine.ready;
-    final failed = engine?.failed ?? false;
+    final failed = (engine?.failed ?? false) || _engineInitError != null;
     final duration = engine?.duration.inMilliseconds ?? 0;
     final position = engine?.position.inMilliseconds ?? 0;
     final nearEnd = duration > 0 && (duration - position) <= 30000 ||
@@ -1027,7 +1038,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 )
               else if (failed)
                 _ErrorPanel(
-                  message: engine?.errorMessage,
+                  message: engine?.errorMessage ?? _engineInitError,
                   english: english,
                   onRetry: () {
                     final old = _engine;

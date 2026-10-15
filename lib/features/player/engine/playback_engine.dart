@@ -82,6 +82,11 @@ abstract class PlaybackEngine extends ChangeNotifier {
 /// so no NDK/Xcode compilation happens on the app side.
 class MediaKitEngine extends PlaybackEngine {
   MediaKitEngine() {
+    // Defensive belt-and-braces (Task 127): main() calls the idempotent
+    // ensureInitialized already, but every entry point that constructs the
+    // engine (player page, magnet opener, library, live TV, next-episode)
+    // must survive even if a future boot path forgets it.
+    MediaKit.ensureInitialized();
     _player = Player();
     _controller = VideoController(_player);
     _subscriptions = [

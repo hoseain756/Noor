@@ -17,6 +17,7 @@ import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/noor_toast.dart';
 import '../anime/anime_tracker_sheet.dart';
 import '../library/custom_list_picker.dart';
+import '../player/stream_headers.dart';
 import '../player/video_player_page.dart';
 import '../shell/noor_dock_tabs.dart' show glassDockContentClearance;
 import 'detail_hero.dart';
@@ -594,19 +595,20 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     final chosenStream = stream;
     setState(() => _loadingStreams = true);
     PreparedTorrent? prepared;
+    Map<String, String>? directHeaders;
     try {
-      final rawUrl = chosenStream['url'] as String?;
       final hints =
           (chosenStream['behaviorHints'] as Map?)?.cast<String, dynamic>() ??
               const <String, dynamic>{};
-      final proxyHeaders = (hints['proxyHeaders'] as Map?)
-          ?.map((key, value) => MapEntry(key.toString(), value.toString()));
       final filename = (hints['filename'] ?? chosenStream['title'])?.toString();
       final String url;
-      if (rawUrl != null && rawUrl.startsWith('http')) {
+      final direct = parsePlaybackSource(chosenStream);
+      if (direct != null && direct.url.startsWith('http')) {
         // Direct HTTP sources play as-is; the player attaches the source's
-        // proxy headers itself. No server-side signing is involved anymore.
-        url = rawUrl;
+        // headers (pipe syntax / proxyHeaders flat or nested / legacy
+        // headers — all normalized by parsePlaybackSource, Task 127).
+        url = direct.url;
+        directHeaders = direct.headers.isEmpty ? null : direct.headers;
       } else {
         final infoHash =
             (chosenStream['infoHash'] ?? '').toString().toLowerCase();
@@ -633,7 +635,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
           builder: (_) => VideoPlayerPage(
             item: item,
             url: url,
-            headers: proxyHeaders,
+            headers: directHeaders,
             filename: filename,
             torrent: prepared,
             streamName:
