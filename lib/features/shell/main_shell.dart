@@ -105,6 +105,14 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final size = MediaQuery.sizeOf(context);
+    // EDGE-TO-EEDGE (user mandate, Task 119): the shell no longer pads EVERY
+    // page away from the status bar. The stack itself is full-bleed so the
+    // page canvas (and the Home hero's artwork) draws behind the fully
+    // transparent system bars. Only the floating chrome and the four
+    // non-home pages carry an explicit status-bar inset (`safeTop`), while
+    // HomePage handles its own safe area internally so its featured hero
+    // bleeds to y=0.
+    final safeTop = MediaQuery.paddingOf(context).top;
     // RESPONSIVE DECISION (Task 107-d): Noor already ships a distinct tablet
     // layout at ≥840px (hamburger → slide-in side panel with every primary
     // tab + secondary page). That panel plays the role the web dock's
@@ -124,11 +132,20 @@ class _MainShellState extends State<MainShell> {
     final duration =
         reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
     final pages = [
+      // Home is intentionally UNWRAPPED: its featured hero extends behind
+      // the transparent status bar (Task 119) and the page adds its own
+      // `safeTop` padding where content must stay clear of the icons.
       HomePage(active: _selected == 0),
-      const AnimePage(),
-      const KidsPage(),
-      const LibraryPage(),
-      SettingsPage(onOpenLibrary: () => _selectTab(3)),
+      // Every other tab keeps the previous top inset (identical geometry to
+      // the old shell-wide SafeArea — its content still starts below the
+      // status icons).
+      const SafeArea(bottom: false, child: AnimePage()),
+      const SafeArea(bottom: false, child: KidsPage()),
+      const SafeArea(bottom: false, child: LibraryPage()),
+      SafeArea(
+        bottom: false,
+        child: SettingsPage(onOpenLibrary: () => _selectTab(3)),
+      ),
     ];
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -140,113 +157,112 @@ class _MainShellState extends State<MainShell> {
       // theme ever ships (dark canvas today → light icons).
       value: noorSystemBarOverlayStyle(Theme.of(context).brightness),
       child: Scaffold(
-        body: SafeArea(
-          bottom: false,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Center(
-                  child: SizedBox(
-                    width: math.min(size.width, 1600),
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: _onScroll,
-                      child: IndexedStack(
-                        index: _selected,
-                        children: pages,
+        // Full-bleed body — no shell SafeArea. Pages own their insets.
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: Center(
+                child: SizedBox(
+                  width: math.min(size.width, 1600),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll,
+                    child: IndexedStack(
+                      index: _selected,
+                      children: pages,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (_selected != 4)
+              Positioned(
+                // User mandate (Task 115): the glass search button sits at
+                // the PHYSICAL top-right in both locales; on tablets it
+                // clears the hamburger button (right: 16, 48px wide).
+                // Task 119: `safeTop` keeps it clear of the status icons
+                // now that the stack is no longer inside a SafeArea.
+                right: tabletLayout ? 76 : 16,
+                top: safeTop + 12,
+                child: IgnorePointer(
+                  ignoring: !_chromeVisible,
+                  child: AnimatedSlide(
+                    offset:
+                        _chromeVisible ? Offset.zero : const Offset(0, -1.25),
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _chromeVisible ? 1 : 0,
+                      duration: duration,
+                      child: GlassSearchButton(
+                        tooltip: app.english ? 'Search' : 'بحث',
+                        onPressed: _openSearch,
                       ),
                     ),
                   ),
                 ),
               ),
-              if (_selected != 4)
-                Positioned(
-                  // User mandate (Task 115): the glass search button sits at
-                  // the PHYSICAL top-right in both locales; on tablets it
-                  // clears the hamburger button (right: 16, 48px wide).
-                  right: tabletLayout ? 76 : 16,
-                  top: 12,
-                  child: IgnorePointer(
-                    ignoring: !_chromeVisible,
-                    child: AnimatedSlide(
-                      offset:
-                          _chromeVisible ? Offset.zero : const Offset(0, -1.25),
-                      duration: duration,
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedOpacity(
-                        opacity: _chromeVisible ? 1 : 0,
-                        duration: duration,
-                        child: GlassSearchButton(
-                          tooltip: app.english ? 'Search' : 'بحث',
-                          onPressed: _openSearch,
-                        ),
-                      ),
-                    ),
+            if (tabletLayout)
+              Positioned(
+                top: safeTop + 12,
+                right: 16,
+                child: Material(
+                  color: HorseTheme.surface.withValues(alpha: .94),
+                  shape: const CircleBorder(
+                      side: BorderSide(color: HorseTheme.line)),
+                  child: IconButton(
+                    tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
+                    onPressed: () =>
+                        setState(() => _tabletNavVisible = !_tabletNavVisible),
+                    icon: Icon(_tabletNavVisible
+                        ? Icons.close_rounded
+                        : Icons.menu_rounded),
                   ),
                 ),
-              if (tabletLayout)
-                Positioned(
-                  top: 12,
-                  right: 16,
-                  child: Material(
-                    color: HorseTheme.surface.withValues(alpha: .94),
-                    shape: const CircleBorder(
-                        side: BorderSide(color: HorseTheme.line)),
-                    child: IconButton(
-                      tooltip: app.english ? 'Open navigation' : 'فتح التنقل',
-                      onPressed: () => setState(
-                          () => _tabletNavVisible = !_tabletNavVisible),
-                      icon: Icon(_tabletNavVisible
-                          ? Icons.close_rounded
-                          : Icons.menu_rounded),
-                    ),
-                  ),
+              ),
+            if (!tabletLayout)
+              // The glass dock (Harbor web port): one sliding pill, scrub
+              // gesture, size ladder, safe area and its own hidden animation
+              // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
+              // Player/detail pages are pushed as full routes on top of the
+              // shell, which unmounts the dock (the web `showChrome` rule).
+              PositionedDirectional(
+                start: 0,
+                end: 0,
+                bottom: 0,
+                child: GlassDock(
+                  tabs: dockTabs,
+                  activeId: dockActiveId,
+                  onTabSelected: (DockTab tab) =>
+                      _selectTab(noorDockIndexForTabId(tab.view)),
+                  languageCode: app.english ? 'en' : 'ar',
+                  hidden: !_chromeVisible,
                 ),
-              if (!tabletLayout)
-                // The glass dock (Harbor web port): one sliding pill, scrub
-                // gesture, size ladder, safe area and its own hidden animation
-                // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
-                // Player/detail pages are pushed as full routes on top of the
-                // shell, which unmounts the dock (the web `showChrome` rule).
-                PositionedDirectional(
-                  start: 0,
-                  end: 0,
-                  bottom: 0,
-                  child: GlassDock(
-                    tabs: dockTabs,
-                    activeId: dockActiveId,
-                    onTabSelected: (DockTab tab) =>
-                        _selectTab(noorDockIndexForTabId(tab.view)),
-                    languageCode: app.english ? 'en' : 'ar',
-                    hidden: !_chromeVisible,
-                  ),
+              ),
+            if (tabletLayout && _tabletNavVisible) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _tabletNavVisible = false),
+                  child: ColoredBox(color: Colors.black.withValues(alpha: .42)),
                 ),
-              if (tabletLayout && _tabletNavVisible) ...[
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _tabletNavVisible = false),
-                    child:
-                        ColoredBox(color: Colors.black.withValues(alpha: .42)),
-                  ),
+              ),
+              AnimatedPositionedDirectional(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                start: 12,
+                top: safeTop + 68,
+                bottom: 12,
+                width: 286,
+                child: _TabletNavigation(
+                  selected: _selected,
+                  english: app.english,
+                  onClose: () => setState(() => _tabletNavVisible = false),
+                  onTabSelected: _selectTab,
+                  onPageSelected: _openSecondary,
                 ),
-                AnimatedPositionedDirectional(
-                  duration: duration,
-                  curve: Curves.easeOutCubic,
-                  start: 12,
-                  top: 68,
-                  bottom: 12,
-                  width: 286,
-                  child: _TabletNavigation(
-                    selected: _selected,
-                    english: app.english,
-                    onClose: () => setState(() => _tabletNavVisible = false),
-                    onTabSelected: _selectTab,
-                    onPageSelected: _openSecondary,
-                  ),
-                ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );

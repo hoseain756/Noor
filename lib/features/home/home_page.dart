@@ -40,6 +40,7 @@ class _HomePageState extends State<HomePage> {
   Future<List<MediaItem>>? _animeMovies;
   Future<List<MediaItem>>? _newEpisodes;
   Future<List<MediaItem>>? _recommendations;
+
   /// Per-catalog home rows (web AddonRail parity): every eligible add-on
   /// catalog gets its own rail with its own future, deduped against the
   /// anchor rows above.
@@ -89,12 +90,10 @@ class _HomePageState extends State<HomePage> {
     _theaters = app.catalogs
         .catalog('movie', 'top')
         .then((items) => _visibleItems(app, items));
-    _anime =
-        app.catalogs.anime().then((items) => _visibleItems(app, items));
+    _anime = app.catalogs.anime().then((items) => _visibleItems(app, items));
     _animeMovies = _anime!.then(
-      (items) => items
-          .where((item) => item.type == 'movie')
-          .toList(growable: false),
+      (items) =>
+          items.where((item) => item.type == 'movie').toList(growable: false),
     );
     _newEpisodes = app.catalogs
         .catalog('series', 'last-videos')
@@ -189,12 +188,18 @@ class _HomePageState extends State<HomePage> {
     final app = context.watch<AppState>();
     final english = app.english;
     final classicHome = app.webSettings['homeMode'] == 'classic';
+    // EDGE-TO-EDGE (Task 119): the shell no longer SafeArea-pads this page,
+    // so the featured hero bleeds behind the transparent status bar. This
+    // inset is added ONLY where real content must stay clear of the status
+    // icons (classic header / service message) — the hero itself handles
+    // icon readability with its top scrim.
+    final safeTop = MediaQuery.paddingOf(context).top;
     return CustomScrollView(
       slivers: [
         if (classicHome)
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(20, 22, 20, 24),
+              padding: EdgeInsetsDirectional.fromSTEB(20, 22 + safeTop, 20, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -235,7 +240,8 @@ class _HomePageState extends State<HomePage> {
                   return const _FeaturedSkeleton();
                 }
                 return Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(20, 28, 20, 0),
+                  padding:
+                      EdgeInsetsDirectional.fromSTEB(20, 28 + safeTop, 20, 0),
                   child: _ServiceMessage(
                     english: english,
                     onRetry: () => setState(() => _load(app)),
@@ -503,9 +509,8 @@ class _HomePageState extends State<HomePage> {
     final app = context.read<AppState>();
     _anime = app.catalogs.anime().then((items) => _visibleItems(app, items));
     _animeMovies = _anime!.then(
-      (items) => items
-          .where((item) => item.type == 'movie')
-          .toList(growable: false),
+      (items) =>
+          items.where((item) => item.type == 'movie').toList(growable: false),
     );
   }
 
@@ -528,7 +533,10 @@ class _HomePageState extends State<HomePage> {
         ('mal', 'Watchlist · MyAnimeList', 'قائمة المشاهدة · MyAnimeList'),
       ])
         if (app.linkedCatalogItems[service.$1]?.isNotEmpty ?? false)
-          (english ? service.$2 : service.$3, app.linkedCatalogItems[service.$1]!),
+          (
+            english ? service.$2 : service.$3,
+            app.linkedCatalogItems[service.$1]!
+          ),
     ];
   }
 
@@ -784,9 +792,8 @@ class _ContinueRailState extends State<_ContinueRail> {
   /// lookups (`enrich: i < 6`); results land via setState, fail soft.
   void _ensureEnrichment() {
     final app = context.read<AppState>();
-    final signature = widget.entries
-        .map((e) => '${e.item.id}:${e.watchedAt}')
-        .join('|');
+    final signature =
+        widget.entries.map((e) => '${e.item.id}:${e.watchedAt}').join('|');
     if (signature == _enrichSignature) return;
     _enrichSignature = signature;
     final watched = _watchedVideoIds(app);
@@ -892,8 +899,7 @@ class _ContinueRailState extends State<_ContinueRail> {
                 progress: entry.durationMs > 0
                     ? (entry.positionMs / entry.durationMs).clamp(0.0, 1.0)
                     : 0.0,
-                epTag:
-                    isSeries ? 'S${entry.season} E${entry.episode}' : null,
+                epTag: isSeries ? 'S${entry.season} E${entry.episode}' : null,
                 subtitle: isSeries
                     ? (epName != null && epName.isNotEmpty
                         ? epName
@@ -1046,8 +1052,7 @@ class _ContinueCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding:
-                      const EdgeInsetsDirectional.fromSTEB(20, 14, 20, 2),
+                  padding: const EdgeInsetsDirectional.fromSTEB(20, 14, 20, 2),
                   child: Text(
                     item.name,
                     maxLines: 1,
@@ -1159,8 +1164,7 @@ class _ContinueCard extends StatelessWidget {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     height: 1.3,
-                                    color:
-                                        Colors.white.withValues(alpha: .95),
+                                    color: Colors.white.withValues(alpha: .95),
                                   ),
                                 ),
                               ),
@@ -1216,8 +1220,7 @@ class _ContinueCard extends StatelessWidget {
                           end: 8,
                           child: Container(
                             height: 22,
-                            constraints:
-                                BoxConstraints(maxWidth: width * .7),
+                            constraints: BoxConstraints(maxWidth: width * .7),
                             padding: const EdgeInsetsDirectional.symmetric(
                               horizontal: 7,
                             ),
@@ -1463,8 +1466,7 @@ class _LinkedContinueSkeleton extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: .06),
                 borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: .08)),
+                border: Border.all(color: Colors.white.withValues(alpha: .08)),
               ),
             ),
           ),
@@ -1738,20 +1740,40 @@ class _FeaturedScrim extends StatelessWidget {
   const _FeaturedScrim();
 
   @override
-  Widget build(BuildContext context) => const DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            stops: [0, .34, .64, .9],
-            colors: [
-              Color(0x00000000),
-              Color(0x18000000),
-              Color(0xB8000000),
-              Color(0xFF000000),
-            ],
+  Widget build(BuildContext context) => const Stack(
+        fit: StackFit.expand,
+        children: [
+          // Bottom fade into the canvas — the original hero scrim, unchanged.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0, .34, .64, .9],
+                colors: [
+                  Color(0x00000000),
+                  Color(0x18000000),
+                  Color(0xB8000000),
+                  Color(0xFF000000),
+                ],
+              ),
+            ),
           ),
-        ),
+          // EDGE-TO-EDGE readability scrim (Task 119): the hero now bleeds
+          // behind the transparent status bar, so a short dark band keeps
+          // the clock/battery/signal icons readable over bright artwork
+          // (same idea as the web home hero's top gradient).
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0, .16],
+                colors: [Color(0x66000000), Color(0x00000000)],
+              ),
+            ),
+          ),
+        ],
       );
 }
 
@@ -2034,6 +2056,18 @@ class _FeaturedSkeleton extends StatelessWidget {
                 ),
               ),
             ),
+            // Task 119: same status-bar readability band as the real hero,
+            // so the loading state matches the edge-to-edge presentation.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: [0, .16],
+                  colors: [Color(0x66000000), Color(0x00000000)],
+                ),
+              ),
+            ),
             Positioned.fill(
               child: Padding(
                 padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 12),
@@ -2133,13 +2167,13 @@ double _featuredHeroHeight(BuildContext context) {
   final size = MediaQuery.sizeOf(context);
   final viewPadding = MediaQuery.viewPaddingOf(context);
   // Task: the featured hero takes ~58% of the screen height on every
-  // device. It must never exceed the visible area under the system bars
-  // and the glass dock, and keeps a small floor for very short
-  // viewports (e.g. landscape phones).
-  final availableHeight = (size.height -
-          viewPadding.top -
-          glassDockContentClearance(context))
-      .clamp(0.0, double.infinity);
+  // device. Since Task 119 it bleeds BEHIND the transparent status bar
+  // (its top edge is y=0), but the height guard is unchanged: the hero
+  // must never extend into the glass dock zone, and keeps a small floor
+  // for very short viewports (e.g. landscape phones).
+  final availableHeight =
+      (size.height - viewPadding.top - glassDockContentClearance(context))
+          .clamp(0.0, double.infinity);
   final preferredHeight = (size.height * .58).clamp(280.0, double.infinity);
   return math.min(availableHeight, preferredHeight).toDouble();
 }
