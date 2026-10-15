@@ -603,15 +603,29 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       final filename = (hints['filename'] ?? chosenStream['title'])?.toString();
       final String url;
       final direct = parsePlaybackSource(chosenStream);
-      if (direct != null && direct.url.startsWith('http')) {
+      // Task 128: addons increasingly return magnet: URIs in the url field —
+      // they resolve through debrid/engine (trackers preserved), never mpv.
+      final magnetUrl = (direct?.url ?? '').toLowerCase().startsWith('magnet:')
+          ? direct!.url
+          : null;
+      if (direct != null &&
+          magnetUrl == null &&
+          direct.url.startsWith('http')) {
         // Direct HTTP sources play as-is; the player attaches the source's
         // headers (pipe syntax / proxyHeaders flat or nested / legacy
         // headers — all normalized by parsePlaybackSource, Task 127).
         url = direct.url;
         directHeaders = direct.headers.isEmpty ? null : direct.headers;
       } else {
-        final infoHash =
+        final streamHash =
             (chosenStream['infoHash'] ?? '').toString().toLowerCase();
+        final magnetHash = magnetUrl == null
+            ? null
+            : RegExp(
+                r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])',
+                caseSensitive: false,
+              ).firstMatch(magnetUrl.toLowerCase())?.group(1);
+        final infoHash = streamHash.isNotEmpty ? streamHash : magnetHash ?? '';
         final sizeCandidate = chosenStream['fileSize'] ?? hints['videoSize'];
         final filesize = sizeCandidate is num ? sizeCandidate.toInt() : null;
         final resolved = await _resolveTorrentStream(
@@ -619,6 +633,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
           infoHash: infoHash,
           filename: filename,
           filesize: filesize,
+          magnet: magnetUrl,
         );
         if (!mounted) return;
         if (resolved == null) {
@@ -656,9 +671,18 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     } catch (error) {
       if (mounted) setState(() => _loadingStreams = false);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        // Task 128: friendly, actionable message instead of the raw
+        // `TorrentException(metadata_timeout): …` toast.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              torrentFriendlyMessage(
+                error,
+                english: context.read<AppState>().english,
+              ),
+            ),
+          ),
+        );
       }
     }
   }
@@ -675,6 +699,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     required String infoHash,
     required String? filename,
     required int? filesize,
+    String? magnet,
   }) async {
     final app = context.read<AppState>();
     final api = app.api;
@@ -746,6 +771,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       }
       final prepared = await TorrentService.instance.prepare(
         infoHash: infoHash,
+        magnet: magnet,
         filename: filename,
         filesize: filesize,
         displayName: displayName,

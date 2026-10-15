@@ -37,6 +37,10 @@ class TorrentService {
 
   /// Public trackers appended to every generated magnet so DHT-less swarms
   /// still find peers quickly.
+  ///
+  /// Mixes UDP **and** HTTP(S) trackers: many mobile carriers throttle or
+  /// block UDP announce traffic entirely, so plain-HTTP trackers are often
+  /// the only working path on cellular networks (Task 128).
   static const List<String> _defaultTrackers = <String>[
     'udp://tracker.opentrackr.org:1337/announce',
     'udp://open.demonii.com:1337/announce',
@@ -46,6 +50,14 @@ class TorrentService {
     'udp://tracker.tiny-vps.com:6969/announce',
     'udp://tracker.dler.org:6969/announce',
     'udp://opentracker.i2p.rocks:6969/announce',
+    'udp://explodie.org:6969/announce',
+    'udp://tracker.moeking.me:6969/announce',
+    'udp://tracker.auctor.ws:6969/announce',
+    'udp://bt.ktrackers.com:6666/announce',
+    'http://tracker.openbittorrent.com:80/announce',
+    'http://opentracker.io:6969/announce',
+    'http://tracker.files.fm:6969/announce',
+    'https://tracker.tamersunion.org:443/announce',
   ];
 
   /// Extensions recognised as streamable video content.
@@ -95,10 +107,25 @@ class TorrentService {
     }
   }
 
+  /// Pre-boots the native libtorrent session (DHT bootstrap included) so the
+  /// first real metadata resolve does not pay the 10–30s cold-start cost
+  /// inside its own timeout window (Task 128). Fire-and-forget: every error
+  /// is swallowed and the call is a no-op on platforms without the engine.
+  Future<void> warmup() async {
+    try {
+      if (!await isSupported) return;
+      await _channel.invokeMethod<void>('warmup');
+    } catch (_) {
+      // Warm-up is best-effort — resolve() bootstraps the session anyway.
+    }
+  }
+
   /// Fetches metadata (name + file list) for [magnet] without downloading.
   ///
-  /// The native engine enforces a 30 second timeout; a Dart-side safety net
-  /// caps the await slightly above it and raises [TorrentException].
+  /// The native engine performs a staged retry (22s + 26s — the first attempt
+  /// warms DHT, the second rides the warmed session); the Dart-side safety
+  /// net caps the await slightly above the native budget and raises
+  /// [TorrentException].
   Future<TorrentMetadata> resolve(String magnet) {
     return _serialized(() => _resolve(magnet));
   }
@@ -186,10 +213,12 @@ class TorrentService {
           .invokeMethod<Map<Object?, Object?>>('resolve', <String, Object?>{
         'magnet': magnet,
       }).timeout(
-        const Duration(seconds: 35),
+        // Native staged budget is 22s + 26s = 48s (Task 128); keep the
+        // Dart-side safety net above it with headroom for channel hops.
+        const Duration(seconds: 55),
         onTimeout: () => throw const TorrentException(
           'timeout',
-          'Metadata resolution timed out after 35s',
+          'Metadata resolution timed out after 55s',
         ),
       );
       if (raw == null) {
@@ -220,12 +249,32 @@ class TorrentService {
   }) async {
     await _ensureAvailable();
 
+    // Fail fast on an unusable target (Task 128): an empty/garbled info-hash
+    // used to make the full round-trip into the native engine before dying
+    // with a raw error. 40-hex (v1) or 32-base32 are the playable shapes;
+    // a well-formed magnet carrying its own hash is also accepted.
+    final hash = infoHash.trim().toLowerCase();
+    final validHash = RegExp(r'^[0-9a-f]{40}$').hasMatch(hash) ||
+        RegExp(r'^[a-z2-7]{32}$').hasMatch(hash);
+    final magnetOk = magnet != null &&
+        magnet.toLowerCase().contains('urn:btih:') &&
+        RegExp(r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])', caseSensitive: false)
+                .firstMatch(magnet.toLowerCase()) !=
+            null;
+    if (!validHash && !magnetOk) {
+      throw const TorrentException(
+        'invalid_magnet',
+        'This stream has no usable torrent identifier',
+      );
+    }
+
     // 1. Storage directory: <ApplicationDocuments>/torrents/<infoHash>.
     final saveDir = await _saveDirFor(infoHash);
 
     // 2. Metadata → target file. Reuse cached metadata when possible.
     final TorrentMetadata meta = _metadataCache[infoHash] ??
-        await _resolve(magnet ?? magnetFor(infoHash, dn: displayName ?? filename));
+        await _resolve(
+            magnet ?? magnetFor(infoHash, dn: displayName ?? filename));
     _metadataCache[infoHash] = meta;
 
     final TorrentFileInfo target;
@@ -267,7 +316,8 @@ class TorrentService {
     await server.start();
     final url = server.url;
     if (url == null) {
-      throw const TorrentException('server_failed', 'Local stream server failed to start');
+      throw const TorrentException(
+          'server_failed', 'Local stream server failed to start');
     }
 
     // 5. Status stream filtered to the active torrent.
@@ -277,7 +327,8 @@ class TorrentService {
     return PreparedTorrent(
       infoHash: torrentId,
       url: url,
-      statusStream: _broadcastStream.where((status) => status.infoHash == torrentId),
+      statusStream:
+          _broadcastStream.where((status) => status.infoHash == torrentId),
       onStop: () => _stopPrepared(torrentId, server),
     );
   }
@@ -355,7 +406,8 @@ class TorrentService {
       final result =
           await _channel.invokeMethod<Map<Object?, Object?>>(method, arguments);
       if (result == null) {
-        throw TorrentException('${method}_failed', 'Native engine returned null');
+        throw TorrentException(
+            '${method}_failed', 'Native engine returned null');
       }
       return result;
     } on PlatformException catch (error) {
@@ -389,9 +441,7 @@ class TorrentService {
   Stream<TorrentStatus> get _broadcastStream {
     var stream = _broadcast;
     if (stream == null) {
-      stream = _eventChannel
-          .receiveBroadcastStream()
-          .map<TorrentStatus>(
+      stream = _eventChannel.receiveBroadcastStream().map<TorrentStatus>(
             (dynamic event) => TorrentStatus.fromMap(
               event is Map ? Map<Object?, Object?>.from(event) : const {},
             ),
@@ -431,7 +481,8 @@ class TorrentService {
     return a == b || a.endsWith(b) || b.endsWith(a) || _basename(a) == b;
   }
 
-  static String _normalize(String path) => path.trim().toLowerCase().replaceAll('\\', '/');
+  static String _normalize(String path) =>
+      path.trim().toLowerCase().replaceAll('\\', '/');
 
   static String _basename(String path) {
     final clean = _normalize(path);

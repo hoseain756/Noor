@@ -81,14 +81,24 @@ abstract class PlaybackEngine extends ChangeNotifier {
 /// prebuilt by `media_kit_libs_android_video` / `media_kit_libs_ios_video`,
 /// so no NDK/Xcode compilation happens on the app side.
 class MediaKitEngine extends PlaybackEngine {
-  MediaKitEngine() {
+  /// [hardwareAcceleration] = false builds the video controller around
+  /// software decoding — the automatic second chance the player page gives a
+  /// stream whose texture never delivers a frame on finicky GPU/driver combos
+  /// (low-end Mali devices render an eternal WHITE surface when MediaCodec
+  /// stalls — Task 128).
+  MediaKitEngine({this.hardwareAcceleration = true}) {
     // Defensive belt-and-braces (Task 127): main() calls the idempotent
     // ensureInitialized already, but every entry point that constructs the
     // engine (player page, magnet opener, library, live TV, next-episode)
     // must survive even if a future boot path forgets it.
     MediaKit.ensureInitialized();
     _player = Player();
-    _controller = VideoController(_player);
+    _controller = VideoController(
+      _player,
+      configuration: VideoControllerConfiguration(
+        enableHardwareAcceleration: hardwareAcceleration,
+      ),
+    );
     _subscriptions = [
       _player.stream.playing.listen(_onPlaying),
       _player.stream.completed.listen(_onCompleted),
@@ -108,6 +118,13 @@ class MediaKitEngine extends PlaybackEngine {
   late final VideoController _controller;
   List<StreamSubscription<dynamic>> _subscriptions = const [];
   bool _disposed = false;
+
+  /// Whether the video controller uses hardware decoding (see [ctor]).
+  final bool hardwareAcceleration;
+
+  /// True once the page's stuck-watchdog forced a software-decoding retry —
+  /// a second stall must surface as an error instead of retrying forever.
+  bool softwareRetryUsed = false;
 
   bool _playing = false;
   bool _buffering = true;

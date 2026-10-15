@@ -102,6 +102,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   bool _upNextDismissed = false;
   int _streamIndex = 0;
 
+  // Task 128: stuck-stream watchdog. Some devices (low-end Mali GPUs) render
+  // an eternal WHITE texture when MediaCodec stalls, and dead URLs leave the
+  // spinner forever — both look like "a white screen that never reaches the
+  // player". The watchdog surfaces a friendly panel, and gives streams one
+  // automatic second chance with software decoding before giving up.
+  bool _stuck = false;
+  DateTime? _openedAt;
+  DateTime? _readyAt;
+
   // Gesture state.
   _GestureMode _mode = _GestureMode.none;
   double _zoomStart = 1.0;
@@ -136,7 +145,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _progressTimer = Timer.periodic(
       const Duration(seconds: 5),
-      (_) => unawaited(_saveProgress()),
+      (_) {
+        unawaited(_saveProgress());
+        _checkStreamStuck();
+      },
     );
     _createEngine();
     _listenTorrent();
@@ -185,11 +197,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           ?.toInt() ??
       10;
 
-  void _createEngine() {
+  void _createEngine({bool softwareDecoding = false}) {
     _engineInitError = null;
+    _stuck = false;
+    _openedAt = DateTime.now();
+    _readyAt = null;
     final MediaKitEngine engine;
     try {
-      engine = MediaKitEngine();
+      engine = MediaKitEngine(hardwareAcceleration: !softwareDecoding);
     } catch (error) {
       // Task 127: degrade to the in-page error panel — never let a ctor
       // throw escape into the route's first frame (release grey screen).
@@ -208,6 +223,53 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       ),
     );
     _bumpControls();
+  }
+
+  /// Periodic stuck check (runs every 5s with the progress timer):
+  ///
+  ///  1. mpv never parsed the media and is still buffering 45s after open —
+  ///     a dead/unreachable source (the spinner would otherwise run forever);
+  ///  2. media parsed but buffering at position 0 for 45s — texture/hwdec
+  ///     stall class. A hardware-decoding engine gets ONE automatic software
+  ///     decode retry (Mali GPUs render eternal white when MediaCodec
+  ///     wedges); a software engine surfacing the same stall means the
+  ///     source/device genuinely cannot play — friendly error panel.
+  ///
+  /// Live streams (IPTV) legitimately never report a duration — the first
+  /// check requires `!playing` as well, so they pass once playback starts.
+  void _checkStreamStuck() {
+    final engine = _engine;
+    if (!mounted || _stuck || engine == null || _engineInitError != null) {
+      return;
+    }
+    final openedAt = _openedAt;
+    if (openedAt == null) return;
+    final now = DateTime.now();
+    if (!engine.ready) {
+      // `playing` flips true the moment play() is issued — even for a dead
+      // URL — so buffering is the honest "still connecting" signal here.
+      if (engine.buffering &&
+          now.difference(openedAt) > const Duration(seconds: 45)) {
+        setState(() => _stuck = true);
+      }
+      return;
+    }
+    _readyAt ??= now;
+    final readyAt = _readyAt ?? now;
+    final stalling = engine.buffering &&
+        engine.position == Duration.zero &&
+        now.difference(readyAt) > const Duration(seconds: 45);
+    if (!stalling) return;
+    if (engine.hardwareAcceleration) {
+      // One automatic second chance per engine generation: rebuild around
+      // software decoding and reopen the same source.
+      engine.removeListener(_onEngineTick);
+      engine.dispose();
+      _engine = null;
+      setState(() => _createEngine(softwareDecoding: true));
+    } else {
+      setState(() => _stuck = true);
+    }
   }
 
   void _onEngineTick() {
@@ -723,8 +785,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       );
     } catch (error) {
       if (mounted) {
+        // Task 128: actionable message instead of the raw exception string.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString())),
+          SnackBar(
+            content: Text(torrentFriendlyMessage(error, english: english)),
+          ),
         );
       }
     }
@@ -754,17 +819,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     // Task 127: normalize every header shape (pipe syntax, flat/nested
     // proxyHeaders, legacy headers) before handing the URL to the engine.
     final direct = parsePlaybackSource(stream);
-    if (direct != null) {
+    // Task 128: addons increasingly return magnet: URIs in the url field.
+    // They must resolve through debrid/engine — never reach mpv raw.
+    final magnetUrl = (direct?.url ?? '').toLowerCase().startsWith('magnet:')
+        ? direct!.url
+        : null;
+    if (direct != null && magnetUrl == null) {
       return _PlaybackResolution(
         url: direct.url,
         headers: direct.headers,
         torrent: null,
       );
     }
-    // InfoHash-only stream: source headers still apply to debrid/engine URLs.
+    // InfoHash-only stream (or magnet: URI): source headers still apply to
+    // debrid/engine URLs.
     final headers = direct?.headers ?? const <String, String>{};
-    final infoHash = stream['infoHash']?.toString();
-    if (infoHash == null) return null;
+    final streamHash = stream['infoHash']?.toString().toLowerCase() ?? '';
+    final magnetHash = magnetUrl == null
+        ? null
+        : RegExp(
+            r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])',
+            caseSensitive: false,
+          ).firstMatch(magnetUrl.toLowerCase())?.group(1);
+    final infoHash = streamHash.isNotEmpty ? streamHash : magnetHash;
+    if (infoHash == null || infoHash.isEmpty) return null;
     final filename =
         (stream['filename'] ?? stream['name'] ?? widget.filename ?? '')
             .toString();
@@ -782,9 +860,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       }
     }
     // On-device torrent engine: sequential streaming via localhost server.
+    // The addon's own magnet (when present) carries its trackers through.
     try {
       final torrent = await TorrentService.instance.prepare(
         infoHash: infoHash,
+        magnet: magnetUrl,
         filename: filename,
         filesize: filesize,
         displayName: widget.item.name,
@@ -983,7 +1063,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Widget build(BuildContext context) {
     final engine = _engine;
     final ready = engine != null && engine.ready;
-    final failed = (engine?.failed ?? false) || _engineInitError != null;
+    // Task 128: a stuck stream (dead source / wedged texture) is a first-class
+    // failure — the error panel must also WIN over the (white) video branch.
+    final failed =
+        _stuck || (engine?.failed ?? false) || _engineInitError != null;
     final duration = engine?.duration.inMilliseconds ?? 0;
     final position = engine?.position.inMilliseconds ?? 0;
     final nearEnd = duration > 0 && (duration - position) <= 30000 ||
@@ -1028,17 +1111,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Video surface (+ pinch zoom).
-              if (engine != null && engine.ready)
-                ClipRect(
-                  child: Transform.scale(
-                    scale: _zoom,
-                    child: PlayerVideoSurface(engine: engine, fit: _fit),
-                  ),
-                )
-              else if (failed)
+              // Video surface (+ pinch zoom) — only when the engine is alive;
+              // a failed/stuck stream always wins so the friendly panel shows
+              // even over a wedged (white) texture (Task 128).
+              if (failed)
                 _ErrorPanel(
-                  message: engine?.errorMessage ?? _engineInitError,
+                  message: _stuck
+                      ? (english
+                          ? 'This stream is not responding on this device — it may be offline, too slow, or undecodable. Try another source from the sources page.'
+                          : 'لا يستجيب هذا البث على هذا الجهاز — قد يكون متوقفًا أو بطيئًا أو غير قابل لفك الترميز. جرّب مصدرًا آخر من صفحة المصادر.')
+                      : (engine?.errorMessage ?? _engineInitError),
                   english: english,
                   onRetry: () {
                     final old = _engine;
@@ -1050,6 +1132,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     });
                     _createEngine();
                   },
+                )
+              else if (engine != null && engine.ready)
+                ClipRect(
+                  child: Transform.scale(
+                    scale: _zoom,
+                    child: PlayerVideoSurface(engine: engine, fit: _fit),
+                  ),
                 )
               else
                 const Center(

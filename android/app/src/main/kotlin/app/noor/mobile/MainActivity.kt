@@ -49,8 +49,12 @@ private const val TRAKT_LINK_HOST =
  */
 private const val OAUTH_SCHEME = "app.noor.mobile"
 
-/** Hard limit for magnet metadata fetches (matches the Dart-side contract). */
-private const val RESOLVE_TIMEOUT_SECONDS = 30
+/** Per-attempt budget for the staged metadata fetch (see resolveMetadata). */
+private const val RESOLVE_ATTEMPT_SECONDS = 22
+private const val RESOLVE_RETRY_SECONDS = 26
+
+/** Total budget actually reported to the user in the timeout message. */
+private const val RESOLVE_TOTAL_SECONDS = RESOLVE_ATTEMPT_SECONDS + RESOLVE_RETRY_SECONDS
 
 /** How long to wait for the torrent handle to appear after an async add. */
 private const val HANDLE_WAIT_MS = 15_000L
@@ -234,6 +238,13 @@ class MainActivity :
         try {
             when (call.method) {
                 "isSupported" -> result.success(true)
+                "warmup" -> runAsync(result) {
+                    // Pre-boot the libtorrent session (DHT bootstrap takes
+                    // 10-30s on cold mobile networks) so the first real
+                    // resolve does not pay that cost inside its own timeout.
+                    ensureSession()
+                    true
+                }
                 "resolve" -> {
                     val magnet = call.argument<String>("magnet")
                         ?: throw TorrentEngineException("invalid_args", "magnet is required")
@@ -362,16 +373,26 @@ class MainActivity :
     }
 
     /**
-     * Fetches metadata for [magnet] (blocking up to 30s). On timeout the temp
-     * metadata-only torrent is removed internally by jlibtorrent, so no manual
-     * cleanup is required here.
+     * Fetches metadata for [magnet] with a STAGED retry: the first attempt
+     * doubles as the DHT bootstrap warm-up (a cold session usually cannot
+     * beat even a 30s window on UDP-restricted mobile networks), and the
+     * second attempt rides the now-bootstrapped DHT + tracker announces.
+     * On timeout the temp metadata-only torrent is removed internally by
+     * jlibtorrent, so no manual cleanup is required here.
      */
     private fun resolveMetadata(magnet: String): Map<String, Any> {
         val sm = ensureSession()
-        val data: ByteArray = sm.fetchMagnet(magnet, RESOLVE_TIMEOUT_SECONDS)
+        val data: ByteArray? = sm.fetchMagnet(magnet, RESOLVE_ATTEMPT_SECONDS)
+            ?: run {
+                Log.i(
+                    TAG,
+                    "metadata attempt 1 timed out after ${RESOLVE_ATTEMPT_SECONDS}s — retrying on the warmed session",
+                )
+                sm.fetchMagnet(magnet, RESOLVE_RETRY_SECONDS)
+            }
             ?: throw TorrentEngineException(
                 "metadata_timeout",
-                "Timed out fetching torrent metadata after ${RESOLVE_TIMEOUT_SECONDS}s",
+                "Timed out fetching torrent metadata after ${RESOLVE_TOTAL_SECONDS}s",
             )
         val ti = TorrentInfo.bdecode(data)
         if (!ti.isValid()) {
