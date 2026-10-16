@@ -10,6 +10,14 @@
 /// preserved). The PAGE owns the data loading (spinner + refresh state live
 /// in the panel header); these bodies render lists and UI-local state.
 /// Icons are Lucide across the whole player surface.
+///
+/// Task 140 (user mandate — "لا فراغات"): the panel's LEFT edge sits at
+/// MID-SCREEN, so the screen's left system inset (a landscape camera cutout
+/// reported on the display's left edge) must NEVER be applied there — the
+/// old SafeArea injected it and opened a ~40dp phantom dead strip inside
+/// every panel. Content now stretches flush to the mid-screen edge with zero
+/// horizontal chrome padding; only the panel's REAL screen edges (top /
+/// right / bottom) keep their system insets.
 library;
 
 import 'package:flutter/material.dart';
@@ -53,57 +61,63 @@ class PlayerSidePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).height < 520;
+    final insets = MediaQuery.paddingOf(context);
     return Material(
       color: HorseTheme.raised,
       elevation: 14,
       shadowColor: Colors.black54,
-      child: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            compact ? 14 : 18,
-            compact ? 10 : 14,
-            compact ? 14 : 18,
-            compact ? 10 : 14,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: compact
-                          ? Theme.of(context).textTheme.titleMedium
-                          : Theme.of(context).textTheme.titleLarge,
-                    ),
+      child: Padding(
+        // Task 140 (user mandate): ZERO horizontal chrome padding — the body
+        // (search field, list rows, header icons) stretches flush to BOTH
+        // panel edges. The LEFT inset is always dropped (the edge is at
+        // mid-screen — a landscape camera cutout on the display's left side
+        // must never open a phantom strip here); top / right / bottom keep
+        // their real system insets so content never sits under the punch
+        // hole or gesture areas when the phone is rotated the other way.
+        padding: EdgeInsets.fromLTRB(
+          0,
+          insets.top + (compact ? 10 : 14),
+          insets.right,
+          insets.bottom + (compact ? 10 : 14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: compact
+                        ? Theme.of(context).textTheme.titleMedium
+                        : Theme.of(context).textTheme.titleLarge,
                   ),
-                  if (headerAction != null) ...[
-                    headerAction!,
-                    const SizedBox(width: 4),
-                  ],
-                  if (onRefresh != null) ...[
-                    _PanelIconButton(
-                      icon: LucideIcons.refreshCw,
-                      spinning: refreshing,
-                      semanticLabel: english ? 'Refresh' : 'تحديث',
-                      onTap: refreshing ? null : onRefresh,
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  _PanelIconButton(
-                    icon: LucideIcons.x,
-                    semanticLabel: english ? 'Close' : 'إغلاق',
-                    onTap: onClose,
-                  ),
+                ),
+                if (headerAction != null) ...[
+                  headerAction!,
+                  const SizedBox(width: 4),
                 ],
-              ),
-              SizedBox(height: compact ? 8 : 12),
-              Expanded(child: child),
-            ],
-          ),
+                if (onRefresh != null) ...[
+                  _PanelIconButton(
+                    icon: LucideIcons.refreshCw,
+                    spinning: refreshing,
+                    semanticLabel: english ? 'Refresh' : 'تحديث',
+                    onTap: refreshing ? null : onRefresh,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                _PanelIconButton(
+                  icon: LucideIcons.x,
+                  semanticLabel: english ? 'Close' : 'إغلاق',
+                  onTap: onClose,
+                ),
+              ],
+            ),
+            SizedBox(height: compact ? 8 : 12),
+            Expanded(child: child),
+          ],
         ),
       ),
     );
