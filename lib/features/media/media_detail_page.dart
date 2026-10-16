@@ -22,6 +22,7 @@ import 'detail_hero.dart';
 import 'episode_data.dart';
 import 'episode_views.dart';
 import 'sources_page.dart';
+import 'stream_loading.dart';
 
 /// Cinematic detail page — the Flutter replica of the Harbor web DetailView:
 /// fixed glass back pill over a full-bleed hero (phone card variant < 700px /
@@ -337,10 +338,11 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             resumePositionMs: resume.positionMs,
           ),
           onToggleWatchlist: () => unawaited(app.toggleWatchlist(item)),
+          // Task 139: identical to the primary CTA now — every watch path
+          // goes through the sources page (loading + refresh live there).
           onOpenStreams: () => _play(
             item,
             video: resume.video ?? defaultVideo,
-            forceSourceSheet: true,
           ),
           onTrackAnime: () => unawaited(showAnimeTrackerSheet(context, item)),
           onShare: () => unawaited(_share(item, english)),
@@ -486,88 +488,24 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   Future<void> _play(
     MediaItem item, {
     Map<String, dynamic>? video,
-    bool forceSourceSheet = false,
     int? resumePositionMs,
   }) async {
     final app = context.read<AppState>();
     final english = app.english;
     final episode = video;
+    // Task 139 (user mandate): watch / episode taps land DIRECTLY on the
+    // sources page — the streams are fetched INSIDE it (spinner + refresh
+    // button next to the search bar) and only the picked stream is
+    // resolved afterwards. The old instant-play auto-pick is gone: the
+    // user always chooses the source.
     final id = (episode?['id'] as String?) ?? item.id;
-    setState(() => _loadingStreams = true);
-    List<Map<String, dynamic>> streams;
-    try {
-      streams = await app.catalogs.streams(item.type, id, app.addons);
-    } catch (_) {
-      streams = [];
-    }
-    if (!mounted) return;
-    setState(() => _loadingStreams = false);
-    if (streams.isEmpty) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(english ? 'No streams found' : 'لم يتم العثور على مصادر'),
-          content: Text(
-            english
-                ? 'Install a stream add-on from Settings, then try again.'
-                : 'ثبّت إضافة بث من الإعدادات ثم أعد المحاولة.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(english ? 'Close' : 'إغلاق'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-    if (app.webSettings['playableOnly'] == true) {
-      streams = streams.where(_isPlayableStream).toList();
-    }
-    // Torrent sources stay available when a Debrid service is connected or
-    // the device itself can run the torrent engine.
-    final debridConfigured = app.api.debridService != null;
-    final p2pAllowed = app.webSettings['p2pEnabled'] != false;
-    var torrentSourcesAllowed = debridConfigured;
-    if (!torrentSourcesAllowed && p2pAllowed) {
-      try {
-        torrentSourcesAllowed = await TorrentService.instance.isSupported;
-      } catch (_) {
-        torrentSourcesAllowed = false;
-      }
-      if (!mounted) return;
-    }
-    if (!torrentSourcesAllowed) {
-      streams = streams.where((stream) => stream['url'] is String).toList();
-    }
-    streams = _rankStreams(streams, app.webSettings);
-    Map<String, dynamic>? selected;
-    // "Available streams" in the menu always forces the source sheet —
-    // instant-play never auto-picks from that entry (web contract).
-    if (!forceSourceSheet && app.webSettings['instantPlay'] == true) {
-      selected = streams.where(_isPlayableStream).firstOrNull;
-    }
-    if (selected != null) {
-      await _launchStream(
-        item: item,
-        episode: episode,
-        stream: selected,
-        resumePositionMs: resumePositionMs,
-      );
-      return;
-    }
-    // Full-screen sources page (Task 118 user mandate): tapping an episode —
-    // or "Available streams" — surfaces EVERY source from EVERY enabled
-    // add-on on a browsable page with a filter field, instead of the cramped
-    // bottom sheet. Picking one hands the stream back for resolution.
     final picked = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => SourcesPage(
           item: item,
           video: episode,
-          streams: streams,
           english: english,
+          loader: () => loadRankedSources(app: app, item: item, videoId: id),
         ),
       ),
     );
@@ -666,11 +604,16 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             videoId: id,
             season: (episode?['season'] as num?)?.toInt(),
             episode: (episode?['episode'] as num?)?.toInt(),
-            nextEpisode: _nextEpisode(item.videos, episode),
             initialPositionMs: resumePositionMs ??
                 (widget.resumeVideoId == episode?['id']
                     ? widget.resumePositionMs
                     : null),
+            // Task 139: hand the player the picked stream row — the
+            // skip-intro/outro + Up-Next resolver reads the CURRENT
+            // stream's metadata (behaviorHints etc.), and before this the
+            // player never saw any stream row at all.
+            streams: [chosenStream],
+            streamIndex: 0,
           ),
           fullscreenDialog: true,
         ),
@@ -843,56 +786,6 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         ),
       ),
     );
-  }
-
-  bool _isPlayableStream(Map<String, dynamic> stream) {
-    final url = stream['url'];
-    return (url is String && url.startsWith('http')) ||
-        stream['infoHash'] is String;
-  }
-
-  List<Map<String, dynamic>> _rankStreams(
-    List<Map<String, dynamic>> streams,
-    Map<String, dynamic> settings,
-  ) {
-    final preferred = (settings['preferredQuality'] ?? 'auto').toString();
-    final preferH264 = settings['preferH264'] == true;
-    if (preferred == 'auto' &&
-        settings['streamSort'] != 'score' &&
-        !preferH264) {
-      return streams;
-    }
-    final ranked = [...streams];
-    int quality(Map<String, dynamic> stream) {
-      final text = '${stream['title'] ?? ''} ${stream['name'] ?? ''}';
-      final match = RegExp(r'(2160|1080|720|480)p?', caseSensitive: false)
-          .firstMatch(text);
-      final height = int.tryParse(match?.group(1) ?? '') ?? 0;
-      final target = int.tryParse(preferred.replaceAll('p', ''));
-      final codec = text.toLowerCase();
-      final codecPreference = preferH264
-          ? (codec.contains('x265') || codec.contains('hevc')
-              ? -100000
-              : 100000)
-          : 0;
-      return target == null
-          ? codecPreference + height
-          : codecPreference + (height == target ? 10000 + height : height);
-    }
-
-    ranked.sort((a, b) => quality(b).compareTo(quality(a)));
-    return ranked;
-  }
-
-  /// Next episode in canonical (season, episode) order — the sorted list
-  /// fixes the old bug where addon order leaked into Up-Next.
-  Map<String, dynamic>? _nextEpisode(
-    List<Map<String, dynamic>> videos,
-    Map<String, dynamic>? current,
-  ) {
-    final sorted = sortEpisodes(videos);
-    final index = sorted.indexWhere((video) => video['id'] == current?['id']);
-    return index >= 0 && index + 1 < sorted.length ? sorted[index + 1] : null;
   }
 }
 

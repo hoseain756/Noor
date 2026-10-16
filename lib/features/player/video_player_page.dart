@@ -13,11 +13,13 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../media/sources_page.dart';
+import '../media/stream_loading.dart';
 import 'engine/playback_engine.dart';
 import 'gesture_math.dart';
 import 'segments/playback_segments.dart';
 import 'stream_headers.dart';
 import 'widgets/player_chrome.dart';
+import 'widgets/player_side_panel.dart';
 import 'widgets/player_sheets.dart';
 import 'widgets/subtitle_overlay.dart';
 
@@ -43,11 +45,9 @@ class VideoPlayerPage extends StatefulWidget {
     this.episode,
     this.streams = const [],
     this.streamIndex,
-    this.onSwitchStream,
     this.headers,
     this.filename,
     this.torrent,
-    this.nextEpisode,
     this.recordProgress = true,
   });
 
@@ -58,9 +58,13 @@ class VideoPlayerPage extends StatefulWidget {
   final int? initialPositionMs;
   final int? season;
   final int? episode;
+
+  /// The stream row(s) known at launch — at least the PICKED one. The
+  /// skip-intro/outro + Up-Next resolver reads the current row's metadata
+  /// (behaviorHints etc.), and the sources side-panel seeds its list from
+  /// it (refresh re-fetches the full ranked list).
   final List<Map<String, dynamic>> streams;
   final int? streamIndex;
-  final Future<void> Function(Map<String, dynamic> stream)? onSwitchStream;
 
   /// Extra HTTP headers (addon behaviorHints.proxyHeaders) for direct streams.
   final Map<String, String>? headers;
@@ -70,9 +74,6 @@ class VideoPlayerPage extends StatefulWidget {
 
   /// Prepared on-device torrent stream (when source was an infoHash).
   final PreparedTorrent? torrent;
-
-  /// Explicit next-episode map from the detail page (fallback: computed).
-  final Map<String, dynamic>? nextEpisode;
   final bool recordProgress;
 
   @override
@@ -93,6 +94,21 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   bool _controlsVisible = true;
   bool _locked = false;
   bool _sheetOpen = false;
+
+  // Task 139: the right-half picker panel (subtitles / audio / sources).
+  // `_panelWasPlaying` + `_panelEngine` reproduce the A1 pause/resume
+  // contract for the in-page overlay: pause on open, resume ONLY if it was
+  // playing, and never resume an engine that was swapped mid-panel.
+  PlayerPanelKind? _panel;
+  bool _panelWasPlaying = false;
+  MediaKitEngine? _panelEngine;
+
+  // Panel data (owned by the page so the header refresh button works):
+  // streams seed from the delivered list, addon subtitles re-fetch on open.
+  List<Map<String, dynamic>> _panelStreams = const [];
+  List<Map<String, dynamic>> _panelExternalSubs = const [];
+  bool _panelLoading = false;
+  bool _panelRefreshing = false;
   BoxFit _fit = BoxFit.contain;
   double _zoom = 1.0;
   bool _showRemaining = false;
@@ -556,13 +572,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _switchStream(Map<String, dynamic> stream) async {
-    final callback = widget.onSwitchStream;
-    if (callback == null) return;
-    await _saveProgress();
-    await callback(stream);
-  }
-
   Future<void> _resumeFromSaved() async {
     final engine = _engine;
     if (engine == null || !engine.ready) return;
@@ -589,23 +598,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   void _unlock() {
     setState(() => _locked = false);
-    _bumpControls();
-  }
-
-  Future<void> _cycleFit() async {
-    setState(() {
-      if (_fit == BoxFit.contain) {
-        _fit = BoxFit.cover;
-        _flashHint(english ? 'Fill' : 'ملء');
-      } else if (_fit == BoxFit.cover) {
-        _fit = BoxFit.fill;
-        _flashHint(english ? 'Stretch' : 'تمديد');
-      } else {
-        _fit = BoxFit.contain;
-        _zoom = 1;
-        _flashHint(english ? 'Fit' : 'احتواء');
-      }
-    });
     _bumpControls();
   }
 
@@ -677,9 +669,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     : BoxFit.contain;
           });
         } else if (next == 'audio') {
-          await _openAudioSheet();
+          _openAudioPanel();
         } else if (next == 'subtitles') {
-          await _openSubtitlesSheet();
+          _openSubtitlesPanel();
         } else if (next == 'episodes') {
           await _openEpisodesSheet();
         }
@@ -716,72 +708,191 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         .first;
   }
 
-  Future<void> _openAudioSheet() => _openSheet(() async {
-        final engine = _engine;
-        if (engine == null) return;
-        await showPlayerFullScreenSheet<void>(
-          context,
-          builder: (_) => AudioTracksSheet(
-            english: english,
-            tracks: engine.audioTracks,
-            selected: engine.selectedAudio,
-            onPick: (track) => unawaited(engine.selectAudio(track)),
-            delayMs:
-                (context.read<AppState>().webSettings['audioDelayMs'] as num?)
-                        ?.toInt() ??
-                    0,
-            onDelayChanged: (ms) async {
-              await engine.setAudioDelayMs(ms);
-              if (!mounted) return;
-              await context.read<AppState>().setSetting('audioDelayMs', ms);
-            },
-            expanded: true,
-          ),
-        );
-      }, pauseVideo: true);
+  void _openAudioPanel() => _openPanel(PlayerPanelKind.audio);
 
-  List<Map<String, dynamic>> _externalSubRows = const [];
+  void _openSubtitlesPanel() => _openPanel(PlayerPanelKind.subtitles);
 
-  Future<void> _loadExternalSubs() async {
-    if (_externalSubRows.isNotEmpty) return;
-    try {
-      final app = context.read<AppState>();
-      final subs = await app.catalogs
-          .subtitles(widget.item.type, widget.videoId, app.addons);
-      _externalSubRows = subs.where((sub) => sub['url'] is String).toList();
-    } catch (_) {
-      _externalSubRows = const [];
+  void _openStreamsPanel() => _openPanel(PlayerPanelKind.streams);
+
+  /// Opens a right-half side panel INSTANTLY (a single setState — no route,
+  /// no await): the video pauses for the panel's lifetime and resumes ONLY
+  /// if it was playing; never resumes an engine that was swapped mid-panel.
+  void _openPanel(PlayerPanelKind kind) {
+    if (_locked) return;
+    final engine = _engine;
+    if (_panel == kind) {
+      _closePanel();
+      return;
+    }
+    final wasPlaying = engine?.playing ?? false;
+    if (wasPlaying) unawaited(engine!.pause());
+    _hideTimer?.cancel();
+    setState(() {
+      _panel = kind;
+      _panelWasPlaying = wasPlaying;
+      _panelEngine = engine;
+      _sheetOpen = true;
+      _controlsVisible = false;
+    });
+    // Data loading happens in front of the user INSIDE the panel:
+    // addon subtitles always re-fetch; streams seed from the delivered
+    // list and only fetch when it is empty.
+    if (kind == PlayerPanelKind.subtitles) {
+      _panelExternalSubs = const [];
+      unawaited(_loadPanelData(refresh: false));
+    } else if (kind == PlayerPanelKind.streams) {
+      _panelStreams = widget.streams;
+      if (widget.streams.isEmpty) {
+        unawaited(_loadPanelData(refresh: false));
+      }
     }
   }
 
-  Future<void> _openSubtitlesSheet() => _openSheet(() async {
-        final engine = _engine;
-        if (engine == null) return;
-        await _loadExternalSubs();
-        if (!mounted) return;
-        final result = await showPlayerFullScreenSheet<String>(
-          context,
-          builder: (_) => SubtitleTracksSheet(
+  void _closePanel() {
+    final engine = _engine;
+    final resume = _panelWasPlaying && identical(engine, _panelEngine);
+    setState(() {
+      _panel = null;
+      _panelWasPlaying = false;
+      _panelEngine = null;
+      _sheetOpen = false;
+    });
+    if (resume && engine != null) unawaited(engine.play());
+    _bumpControls();
+  }
+
+  /// The right-half panel hosting the currently open picker (Task 139).
+  /// Rendered as an in-page overlay at the END of the build Stack — opening
+  /// is instant, loading happens INSIDE the panel in front of the user,
+  /// and the header refresh button re-fetches without leaving the player.
+  Widget _buildPanel(MediaKitEngine? engine) {
+    final kind = _panel!;
+    switch (kind) {
+      case PlayerPanelKind.audio:
+        return PlayerSidePanel(
+          title: english ? 'Audio' : 'الصوت',
+          english: english,
+          onClose: _closePanel,
+          // The engine is the audio data source — a refresh re-reads its
+          // track list (genuinely useful on slow devices where track
+          // enumeration lands after the panel opened).
+          onRefresh: () => setState(() {}),
+          refreshing: false,
+          child: AudioTracksPanelBody(
             english: english,
-            embedded: engine.subtitleTracks,
-            external: _externalSubRows,
-            selected: engine.selectedSubtitle,
-            onPick: (track) {
-              if (track.uri && track.id.isNotEmpty) {
-                unawaited(engine.setSubtitleUri(track.id, title: track.title));
-              } else {
-                unawaited(engine.selectSubtitle(track));
-              }
+            tracks: engine?.audioTracks ?? const [],
+            selected: engine?.selectedAudio ?? const AudioTrack('', null, null),
+            onPick: (track) => unawaited(engine?.selectAudio(track)),
+            delayMs: (_app.webSettings['audioDelayMs'] as num?)?.toInt() ?? 0,
+            onDelayChanged: (ms) async {
+              await engine?.setAudioDelayMs(ms);
+              if (!mounted) return;
+              await _app.setSetting('audioDelayMs', ms);
             },
-            onOpenSettings: () => Navigator.of(context).pop('style-settings'),
-            expanded: true,
           ),
         );
-        if (!mounted) return;
-        if (result == 'style-settings') {
-          await _openSubtitleStyleSheet();
-        }
-      }, pauseVideo: true);
+      case PlayerPanelKind.subtitles:
+        return PlayerSidePanel(
+          title: english ? 'Subtitles' : 'الترجمة',
+          english: english,
+          onClose: _closePanel,
+          // Refresh re-fetches the add-on subtitles in place.
+          onRefresh: () => unawaited(_loadPanelData(refresh: true)),
+          refreshing: _panelRefreshing,
+          headerAction: PanelSettingsButton(onTap: _openSubtitleStyleSheet),
+          child: SubtitleTracksPanelBody(
+            english: english,
+            embedded: engine?.subtitleTracks ?? const [],
+            selected: engine?.selectedSubtitle ?? SubtitleTrack.no(),
+            onPick: (track) {
+              if (track.uri && track.id.isNotEmpty) {
+                unawaited(engine?.setSubtitleUri(track.id, title: track.title));
+              } else {
+                unawaited(engine?.selectSubtitle(track));
+              }
+            },
+            external: _panelExternalSubs,
+            loadingExternal: _panelLoading,
+          ),
+        );
+      case PlayerPanelKind.streams:
+        final currentStream =
+            (_streamIndex >= 0 && _streamIndex < widget.streams.length)
+                ? widget.streams[_streamIndex]
+                : null;
+        return PlayerSidePanel(
+          title: english ? 'Sources' : 'المصادر',
+          english: english,
+          onClose: _closePanel,
+          // Refresh re-runs the full add-on query + ranking in place.
+          onRefresh: () => unawaited(_loadPanelData(refresh: true)),
+          refreshing: _panelRefreshing,
+          child: StreamsPanelBody(
+            english: english,
+            streams: _panelStreams,
+            currentStream: currentStream,
+            onPick: (stream) => unawaited(_switchToStream(stream)),
+          ),
+        );
+    }
+  }
+
+  /// Panel data loader — run on panel open AND on the header refresh
+  /// button. Failures surface as the in-panel empty note, never a crash.
+  Future<void> _loadPanelData({required bool refresh}) async {
+    final kind = _panel;
+    if (kind == null) return;
+    if (kind == PlayerPanelKind.streams &&
+        _panelStreams.isNotEmpty &&
+        !refresh) {
+      return; // instant content from the delivered list
+    }
+    setState(() {
+      if (refresh) {
+        _panelRefreshing = true;
+      } else {
+        _panelLoading = true;
+      }
+    });
+    try {
+      if (kind == PlayerPanelKind.streams) {
+        final streams = await loadRankedSources(
+          app: _app,
+          item: widget.item,
+          videoId: widget.videoId,
+        );
+        if (!mounted || _panel != PlayerPanelKind.streams) return;
+        _panelStreams = streams;
+      } else if (kind == PlayerPanelKind.subtitles) {
+        final subs = await _fetchExternalSubs();
+        if (!mounted || _panel != PlayerPanelKind.subtitles) return;
+        _panelExternalSubs = subs;
+      }
+    } catch (_) {
+      // The panel shows its empty/refresh note — the error itself is not
+      // actionable beyond the refresh button.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _panelLoading = false;
+          _panelRefreshing = false;
+        });
+      }
+    }
+  }
+
+  /// Addon subtitles for the panel body — refetched on every panel open and
+  /// on the header refresh button.
+  Future<List<Map<String, dynamic>>> _fetchExternalSubs() async {
+    try {
+      final app = _app;
+      final subs = await app.catalogs
+          .subtitles(widget.item.type, widget.videoId, app.addons);
+      return subs.where((sub) => sub['url'] is String).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// Live-editing subtitle style/timing sheet (user request): every change is
   /// pushed to the engine immediately and persisted through AppState.
@@ -824,19 +935,34 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         );
       });
 
-  Future<void> _openStreamsSheet() => _openSheet(() async {
-        if (widget.streams.isEmpty) return;
-        await showPlayerFullScreenSheet<void>(
-          context,
-          builder: (_) => StreamsSheet(
-            english: english,
-            streams: widget.streams,
-            selectedIndex: _streamIndex,
-            onPick: (stream) => unawaited(_switchStream(stream)),
-            expanded: true,
+  /// In-player source switching (Task 139): resolve the picked stream and
+  /// replace this player around the SAME episode. The transition latch is
+  /// shared with the episode flows against double taps.
+  Future<void> _switchToStream(Map<String, dynamic> stream) async {
+    if (_episodeTransitionBusy) return;
+    _episodeTransitionBusy = true;
+    try {
+      await _saveProgress();
+      if (!mounted) return;
+      await _replaceWithResolved(
+        videoId: widget.videoId,
+        season: widget.season,
+        episode: widget.episode,
+        stream: stream,
+        streams: [stream],
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(torrentFriendlyMessage(error, english: english)),
           ),
         );
-      }, pauseVideo: true);
+      }
+    } finally {
+      _episodeTransitionBusy = false;
+    }
+  }
 
   Future<void> _switchEpisode(Map<String, dynamic> episode) async {
     final episodeId = (episode['id'] ?? widget.item.id).toString();
@@ -859,37 +985,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return;
       }
       final stream = _bestStream(playable);
-      final resolved = await _resolveForPlayback(_app, stream);
-      if (!mounted) return;
-      if (resolved == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              english
-                  ? 'Could not resolve the source. Try another stream.'
-                  : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
-            ),
-          ),
-        );
-        return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => VideoPlayerPage(
-            item: widget.item,
-            url: resolved.url,
-            streamName:
-                (stream['title'] ?? stream['addonName'] ?? 'Noor').toString(),
-            videoId: episodeId,
-            season: (episode['season'] as num?)?.toInt(),
-            episode: (episode['episode'] as num?)?.toInt(),
-            headers: resolved.headers.isEmpty ? null : resolved.headers,
-            torrent: resolved.torrent,
-            streams: playable,
-            streamIndex: playable.indexOf(stream),
-          ),
-          fullscreenDialog: true,
-        ),
+      await _replaceWithResolved(
+        videoId: episodeId,
+        season: (episode['season'] as num?)?.toInt(),
+        episode: (episode['episode'] as num?)?.toInt(),
+        stream: stream,
+        streams: playable,
       );
     } catch (error) {
       if (mounted) {
@@ -901,6 +1002,52 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         );
       }
     }
+  }
+
+  /// Resolves [stream] (direct / debrid / on-device torrent) and replaces
+  /// this player instance with one playing it — shared by the episode
+  /// switch, the next-episode flow and the in-player source switch. The
+  /// fresh page resolves its own skip/next-episode data per instance.
+  Future<void> _replaceWithResolved({
+    required String videoId,
+    required int? season,
+    required int? episode,
+    required Map<String, dynamic> stream,
+    required List<Map<String, dynamic>> streams,
+  }) async {
+    final resolved = await _resolveForPlayback(_app, stream);
+    if (!mounted) return;
+    if (resolved == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            english
+                ? 'Could not resolve the source. Try another stream.'
+                : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
+          ),
+        ),
+      );
+      return;
+    }
+    final pickedIndex = streams.indexOf(stream);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => VideoPlayerPage(
+          item: widget.item,
+          url: resolved.url,
+          streamName:
+              (stream['title'] ?? stream['addonName'] ?? 'Noor').toString(),
+          videoId: videoId,
+          season: season,
+          episode: episode,
+          headers: resolved.headers.isEmpty ? null : resolved.headers,
+          torrent: resolved.torrent,
+          streams: streams,
+          streamIndex: pickedIndex < 0 ? null : pickedIndex,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   /// Playable-stream fetch shared by the episode-switch paths (the same
@@ -922,72 +1069,38 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   /// Next-episode flow routed through the EXISTING source-selection page
-  /// (spec B2.3: never bypass source selection). Used by the Up-Next card's
-  /// Next button AND by the auto-advance when a data-provided countdown
-  /// exists. [_episodeTransitionBusy] closes the double-tap/countdown race.
+  /// (spec B2.3: never bypass source selection). Task 139: the page loads
+  /// its own streams (spinner + refresh INSIDE the page) instead of a
+  /// blocking pre-fetch here — an empty result shows the page's refreshable
+  /// empty state, never a dead end. Used by the Up-Next card's Next button
+  /// AND by the auto-advance when a data-provided countdown exists.
   Future<void> _startEpisodeSources(Map<String, dynamic> episode) async {
     if (_episodeTransitionBusy) return;
     _episodeTransitionBusy = true;
     try {
       final episodeId = (episode['id'] ?? widget.item.id).toString();
       if (episodeId == widget.videoId) return;
-      final playable = await _fetchPlayableStreams(episodeId);
-      if (!mounted) return;
-      if (playable.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              english
-                  ? 'No playable source for the next episode.'
-                  : 'لا يوجد مصدر قابل للتشغيل للحلقة التالية.',
-            ),
-          ),
-        );
-        return;
-      }
       final picked = await Navigator.of(context).push<Map<String, dynamic>>(
         MaterialPageRoute(
           builder: (_) => SourcesPage(
             item: widget.item,
             video: episode,
-            streams: playable,
             english: english,
+            loader: () => loadRankedSources(
+              app: _app,
+              item: widget.item,
+              videoId: episodeId,
+            ),
           ),
         ),
       );
       if (!mounted || picked == null) return;
-      final resolved = await _resolveForPlayback(_app, picked);
-      if (!mounted) return;
-      if (resolved == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              english
-                  ? 'Could not resolve the source. Try another stream.'
-                  : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
-            ),
-          ),
-        );
-        return;
-      }
-      final pickedIndex = playable.indexOf(picked);
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => VideoPlayerPage(
-            item: widget.item,
-            url: resolved.url,
-            streamName:
-                (picked['title'] ?? picked['addonName'] ?? 'Noor').toString(),
-            videoId: episodeId,
-            season: (episode['season'] as num?)?.toInt(),
-            episode: (episode['episode'] as num?)?.toInt(),
-            headers: resolved.headers.isEmpty ? null : resolved.headers,
-            torrent: resolved.torrent,
-            streams: playable,
-            streamIndex: pickedIndex < 0 ? null : pickedIndex,
-          ),
-          fullscreenDialog: true,
-        ),
+      await _replaceWithResolved(
+        videoId: episodeId,
+        season: (episode['season'] as num?)?.toInt(),
+        episode: (episode['episode'] as num?)?.toInt(),
+        stream: picked,
+        streams: [picked],
       );
     } catch (error) {
       if (mounted) {
@@ -1475,23 +1588,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           side: AxisSide.left,
                           topInset: railTopInset,
                           children: [
-                            PlayerRailButton(
-                              icon: Icons.aspect_ratio_rounded,
-                              semanticLabel: 'Video fit',
-                              onTap: () => unawaited(_cycleFit()),
-                            ),
+                            // Task 139 (user mandate): the vertical rail is
+                            // LOCK + SPEED only — the video-fit and episodes
+                            // entries moved into the settings sheet.
                             PlayerRailButton(
                               icon: Icons.lock_outline_rounded,
                               semanticLabel: 'Lock controls',
                               onTap: _lock,
                             ),
-                            if (widget.item.type == 'series' &&
-                                _episodes.isNotEmpty)
-                              PlayerRailButton(
-                                icon: Icons.format_list_bulleted_rounded,
-                                semanticLabel: 'Episodes',
-                                onTap: _openEpisodesSheet,
-                              ),
                             PlayerSpeedPill(
                               label: _speedLabel,
                               semanticLabel: 'Playback speed',
@@ -1499,15 +1603,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             ),
                           ],
                         ),
+                        // Task 139 (user mandate): the transport trio
+                        // [rewind][play/pause][forward] lives in the MIDDLE
+                        // of the screen with the configured seek steps.
+                        PlayerCenterTransport(
+                          isPlaying: engine.playing,
+                          backStepSec: _backStepSec,
+                          forwardStepSec: _forwardStepSec,
+                          scale: scale,
+                          wide: wide,
+                          onPlayPause: () => unawaited(_togglePlay()),
+                          onSkip: (s) => unawaited(_seekBy(s)),
+                        ),
                         PlayerBottomCluster(
                           durationMs: duration,
                           positionMs: position,
                           bufferedMs: engine.bufferedEnd.inMilliseconds,
-                          isPlaying: engine.playing,
                           volume: engine.volume,
                           muted: engine.muted,
-                          backStepSec: _backStepSec,
-                          forwardStepSec: _forwardStepSec,
                           fullscreen: _fullscreen,
                           showRemaining: _showRemaining,
                           canPrev: prevEpisode != null,
@@ -1515,14 +1628,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           scale: scale,
                           wide: wide,
                           english: english,
-                          onPlayPause: () => unawaited(_togglePlay()),
-                          onSkip: (s) => unawaited(_seekBy(s)),
                           onPrev: prevEpisode == null
                               ? null
                               : () => unawaited(_switchEpisode(prevEpisode)),
+                          // Task 139: NEXT always routes through the sources
+                          // page (spec B2.3 — never bypass source selection),
+                          // so the next-episode flow is reachable at ANY
+                          // time, not only inside the card's last-30 s
+                          // window. Prev keeps the fast already-watched path.
                           onNext: nextEpisode == null
                               ? null
-                              : () => unawaited(_switchEpisode(nextEpisode)),
+                              : () =>
+                                  unawaited(_startEpisodeSources(nextEpisode)),
                           onVolumeChanged: (value) async {
                             await engine.setVolume(value);
                           },
@@ -1533,12 +1650,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           },
                           onToggleFullscreen: () =>
                               unawaited(_toggleFullscreen()),
-                          onOpenStreams: widget.onSwitchStream == null ||
-                                  widget.streams.isEmpty
-                              ? null
-                              : _openStreamsSheet,
-                          onOpenSubtitles: _openSubtitlesSheet,
-                          onOpenAudio: _openAudioSheet,
+                          // Task 139: the pickers open the right-half panel
+                          // INSTANTLY — always available (the panel loads
+                          // and refreshes its own data).
+                          onOpenStreams: _openStreamsPanel,
+                          onOpenSubtitles: _openSubtitlesPanel,
+                          onOpenAudio: _openAudioPanel,
                           onToggleRemaining: () =>
                               setState(() => _showRemaining = !_showRemaining),
                           onScrubStart: () {
@@ -1871,6 +1988,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     ),
                   ),
               ],
+
+              // Task 139: the right-half picker panel (subtitles / audio /
+              // sources) — an in-page overlay on the RIGHT HALF of the
+              // screen, opened with a single setState (instant), loading
+              // and refreshing its data in front of the user.
+              if (_panel != null)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: playerPanelWidth(width),
+                  child: _buildPanel(engine),
+                ),
             ],
           ),
         ),

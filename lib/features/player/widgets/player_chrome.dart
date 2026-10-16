@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/horse_theme.dart';
 
@@ -165,7 +166,7 @@ class PlayerBackButton extends StatelessWidget {
           child: const SizedBox(
             width: 44,
             height: 44,
-            child: Icon(Icons.close_rounded, color: Colors.white, size: 22),
+            child: Icon(LucideIcons.x, color: Colors.white, size: 22),
           ),
         ),
       );
@@ -208,6 +209,95 @@ class PlayerRailButton extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Task 139 (user mandate): the transport trio [rewind][play/pause][forward]
+/// lives in the MIDDLE of the screen — floating center controls — never
+/// mirrored (rewind always left), with the seek step rendered inside the
+/// circular arrows exactly as configured in settings.
+class PlayerCenterTransport extends StatelessWidget {
+  const PlayerCenterTransport({
+    super.key,
+    required this.isPlaying,
+    required this.backStepSec,
+    required this.forwardStepSec,
+    required this.scale,
+    required this.wide,
+    required this.onPlayPause,
+    required this.onSkip,
+  });
+
+  final bool isPlaying;
+  final int backStepSec;
+  final int forwardStepSec;
+  final double scale;
+  final bool wide;
+  final VoidCallback onPlayPause;
+  final ValueChanged<int> onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    final big = wide ? 76.0 : 64.0;
+    final skipSize = (wide ? 54.0 : 48.0) * scale;
+    return Positioned.fill(
+      child: Center(
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _SkipButton(
+                forward: false,
+                seconds: backStepSec,
+                size: skipSize,
+                onTap: () => onSkip(-backStepSec),
+              ),
+              SizedBox(width: 20 * scale),
+              Semantics(
+                button: true,
+                label: isPlaying ? 'Pause' : 'Play',
+                child: GestureDetector(
+                  onTap: onPlayPause,
+                  child: Container(
+                    width: big,
+                    height: big,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .14),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white,
+                        width: 2.4,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black38,
+                          blurRadius: 16,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      isPlaying ? LucideIcons.pause : LucideIcons.play,
+                      color: Colors.white,
+                      size: big * .5,
+                      shadows: PlayerPalette.iconShadow,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 20 * scale),
+              _SkipButton(
+                forward: true,
+                seconds: forwardStepSec,
+                size: skipSize,
+                onTap: () => onSkip(forwardStepSec),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PlayerSpeedPill extends StatelessWidget {
@@ -480,30 +570,26 @@ class _GradientTimelineState extends State<GradientTimeline> {
 
 // ── Bottom cluster ─────────────────────────────────────────────────────────
 
-/// Spec-exact bottom block (Task 124/125): progress row above ALL controls;
-/// fullscreen+volume at the directional END, the [rewind][play][forward]
-/// trio dead center (never mirrored), source / subtitles / audio at the
-/// directional START. On tablets (wide) side icons gain small labels.
+/// Spec-exact bottom block (Task 124/125, trimmed by Task 139): progress row
+/// above ALL controls; fullscreen+volume at the directional END, source /
+/// subtitles / audio at the directional START. The [rewind][play][forward]
+/// trio moved to the MIDDLE OF THE SCREEN (PlayerCenterTransport — Task 139
+/// user mandate), so this row is slimmer and purely positional.
 class PlayerBottomCluster extends StatelessWidget {
   const PlayerBottomCluster({
     super.key,
     required this.durationMs,
     required this.positionMs,
     required this.bufferedMs,
-    required this.isPlaying,
     required this.showRemaining,
     required this.volume,
     required this.muted,
-    required this.backStepSec,
-    required this.forwardStepSec,
     required this.fullscreen,
     required this.canPrev,
     required this.canNext,
     required this.scale,
     required this.wide,
     required this.english,
-    required this.onPlayPause,
-    required this.onSkip,
     required this.onPrev,
     required this.onNext,
     required this.onVolumeChanged,
@@ -522,16 +608,11 @@ class PlayerBottomCluster extends StatelessWidget {
   final int durationMs;
   final int positionMs;
   final int bufferedMs;
-  final bool isPlaying;
   final bool showRemaining;
 
   /// mpv volume, normalized 0..1 (drives the left slider).
   final double volume;
   final bool muted;
-
-  /// Seek steps from settings (spec: "preset seconds in the settings").
-  final int backStepSec;
-  final int forwardStepSec;
 
   /// True = system UI hidden (immersive); false = system UI visible.
   final bool fullscreen;
@@ -543,17 +624,18 @@ class PlayerBottomCluster extends StatelessWidget {
   /// Tablet mode: wider margins, labels under side icons, thicker bar.
   final bool wide;
   final bool english;
-  final VoidCallback onPlayPause;
-  final ValueChanged<int> onSkip;
   final VoidCallback? onPrev;
   final VoidCallback? onNext;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onVolumeDragEnd;
   final VoidCallback onMuteToggle;
   final VoidCallback onToggleFullscreen;
-  final VoidCallback? onOpenStreams;
-  final VoidCallback? onOpenSubtitles;
-  final VoidCallback? onOpenAudio;
+
+  /// Task 139: the pickers now open the right-half side panel — always
+  /// available (the panel loads/refreshes its own data), never null.
+  final VoidCallback onOpenStreams;
+  final VoidCallback onOpenSubtitles;
+  final VoidCallback onOpenAudio;
   final VoidCallback onToggleRemaining;
   final VoidCallback onScrubStart;
   final ValueChanged<double> onScrubUpdate;
@@ -561,7 +643,6 @@ class PlayerBottomCluster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final big = wide ? 76.0 : 64.0;
     final controlSize = 44.0 * scale;
     final margin = wide ? 28.0 : 14.0;
     final thickness = wide ? 6.0 : 4.0;
@@ -624,10 +705,10 @@ class PlayerBottomCluster extends StatelessWidget {
                   ),
                 ),
                 SizedBox(height: 2 * scale),
-                // Control row: a Stack keeps the mandated center trio dead
-                // center; the side groups mirror with the direction.
+                // Control row: side groups mirror with the direction; the
+                // transport trio lives center-screen (Task 139).
                 SizedBox(
-                  height: big + (wide ? 34 : 8),
+                  height: controlSize + (wide ? 26 : 6),
                   child: Stack(
                     children: [
                       // END side (RTL: left · LTR: right):
@@ -635,13 +716,6 @@ class PlayerBottomCluster extends StatelessWidget {
                       Align(
                         alignment: AlignmentDirectional.centerEnd,
                         child: _mediaGroup(controlSize),
-                      ),
-                      // CENTER — never mirrored (rewind always left).
-                      Center(
-                        child: Directionality(
-                          textDirection: TextDirection.ltr,
-                          child: _centerGroup(big, controlSize),
-                        ),
                       ),
                       // START side (RTL: right · LTR: left):
                       // source / subtitles / audio.
@@ -667,10 +741,10 @@ class PlayerBottomCluster extends StatelessWidget {
         children: [
           _RaillessControl(
             icon: muted
-                ? Icons.volume_off_rounded
+                ? LucideIcons.volumeX
                 : volume < .5
-                    ? Icons.volume_down_rounded
-                    : Icons.volume_up_rounded,
+                    ? LucideIcons.volume1
+                    : LucideIcons.volume2,
             semanticLabel: muted ? 'Unmute' : 'Mute',
             label: wide ? (english ? 'Sound' : 'الصوت') : null,
             scale: scale,
@@ -684,8 +758,8 @@ class PlayerBottomCluster extends StatelessWidget {
           ),
           _RaillessControl(
             icon: fullscreen
-                ? Icons.fullscreen_rounded
-                : Icons.fullscreen_exit_rounded,
+                ? LucideIcons.maximize
+                : LucideIcons.minimize,
             semanticLabel: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
             label: wide ? (english ? 'Full screen' : 'ملء الشاشة') : null,
             scale: scale,
@@ -694,99 +768,44 @@ class PlayerBottomCluster extends StatelessWidget {
         ],
       );
 
-  // CENTER: exactly [rewind][play/pause][forward].
-  Widget _centerGroup(double big, double controlSize) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SkipButton(
-            forward: false,
-            seconds: backStepSec,
-            size: controlSize,
-            onTap: () => onSkip(-backStepSec),
-          ),
-          SizedBox(width: 14 * scale),
-          Semantics(
-            button: true,
-            label: isPlaying ? 'Pause' : 'Play',
-            child: GestureDetector(
-              onTap: onPlayPause,
-              child: Container(
-                width: big,
-                height: big,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .14),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white,
-                    width: 2.4,
-                  ),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black38,
-                      blurRadius: 16,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: big * .52,
-                  shadows: PlayerPalette.iconShadow,
-                ),
-              ),
-            ),
-          ),
-          SizedBox(width: 14 * scale),
-          _SkipButton(
-            forward: true,
-            seconds: forwardStepSec,
-            size: controlSize,
-            onTap: () => onSkip(forwardStepSec),
-          ),
-        ],
-      );
-
   // START side: source / subtitles / audio (+ prev & next episode for
-  // series), with small labels underneath on tablets.
+  // series), with small labels underneath on tablets. The pickers open the
+  // right-half side panel (Task 139) — always available.
   Widget _trackGroup(double controlSize) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (canPrev)
             _RaillessControl(
-              icon: Icons.skip_previous_rounded,
+              icon: LucideIcons.skipBack,
               semanticLabel: 'Previous episode',
               scale: scale,
               iconSize: 28,
               onTap: onPrev,
             ),
-          if (onOpenStreams != null)
-            _RaillessControl(
-              icon: Icons.swap_horiz_rounded,
-              semanticLabel: 'Change source',
-              label: wide ? (english ? 'Source' : 'المصدر') : null,
-              scale: scale,
-              onTap: onOpenStreams!,
-            ),
-          if (onOpenSubtitles != null)
-            _RaillessControl(
-              icon: Icons.subtitles_outlined,
-              semanticLabel: 'Subtitles',
-              label: wide ? (english ? 'Subs' : 'الترجمة') : null,
-              scale: scale,
-              onTap: onOpenSubtitles!,
-            ),
-          if (onOpenAudio != null)
-            _RaillessControl(
-              icon: Icons.graphic_eq_rounded,
-              semanticLabel: 'Audio track / dub',
-              label: wide ? (english ? 'Audio' : 'الدبلاج') : null,
-              scale: scale,
-              onTap: onOpenAudio!,
-            ),
+          _RaillessControl(
+            icon: LucideIcons.arrowLeftRight,
+            semanticLabel: 'Change source',
+            label: wide ? (english ? 'Source' : 'المصدر') : null,
+            scale: scale,
+            onTap: onOpenStreams,
+          ),
+          _RaillessControl(
+            icon: LucideIcons.captions,
+            semanticLabel: 'Subtitles',
+            label: wide ? (english ? 'Subs' : 'الترجمة') : null,
+            scale: scale,
+            onTap: onOpenSubtitles,
+          ),
+          _RaillessControl(
+            icon: LucideIcons.audioLines,
+            semanticLabel: 'Audio track / dub',
+            label: wide ? (english ? 'Audio' : 'الدبلاج') : null,
+            scale: scale,
+            onTap: onOpenAudio,
+          ),
           if (canNext)
             _RaillessControl(
-              icon: Icons.skip_next_rounded,
+              icon: LucideIcons.skipForward,
               semanticLabel: 'Next episode',
               scale: scale,
               iconSize: 28,
@@ -860,7 +879,7 @@ class _SkipButton extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 Icon(
-                  forward ? Icons.forward_rounded : Icons.replay_rounded,
+                  forward ? LucideIcons.rotateCw : LucideIcons.rotateCcw,
                   color: Colors.white,
                   size: size * .62,
                   shadows: PlayerPalette.iconShadow,
@@ -1073,8 +1092,8 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                 children: [
                   Icon(
                     widget.forward
-                        ? Icons.fast_forward_rounded
-                        : Icons.fast_rewind_rounded,
+                        ? LucideIcons.chevronsRight
+                        : LucideIcons.chevronsLeft,
                     color: Colors.white,
                     size: 32,
                     shadows: PlayerPalette.iconShadow,
@@ -1129,8 +1148,8 @@ class SeekHud extends StatelessWidget {
                 children: [
                   Icon(
                     deltaSeconds >= 0
-                        ? Icons.fast_forward_rounded
-                        : Icons.fast_rewind_rounded,
+                        ? LucideIcons.chevronsRight
+                        : LucideIcons.chevronsLeft,
                     color: PlayerPalette.thumb,
                     size: 20,
                   ),
@@ -1306,7 +1325,7 @@ class LockHintHud extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_rounded, color: Colors.white, size: 15),
+            const Icon(LucideIcons.lock, color: Colors.white, size: 15),
             const SizedBox(width: 7),
             Text(
               message,

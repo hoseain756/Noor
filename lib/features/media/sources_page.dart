@@ -1,17 +1,12 @@
-/// Full-screen source picker (user mandate, Task 118; Task 123 upgrade):
-/// tapping an episode — or the "Available streams" action — opens a PAGE
-/// listing every stream from every enabled add-on (already fetched in
-/// parallel, deduped and ranked by the detail page), with a text filter AND
-/// a glass filter bar (quality buckets, torrent-vs-direct, per-add-on picker
-/// and sort by seeds/size/quality). Each row leads with the add-on's own
-/// icon in a rounded square (start-aligned, so it flips right/left with the
-/// UI language), the stream title beside it and a facts line below it
-/// (quality · seeds · size · codec). Picking a source hands it back to the
-/// detail page, which resolves it and drives the live prepare-progress
-/// sheet below before entering the player.
+/// Task 139 (user mandate): tapping an episode / the watch CTA opens THIS
+/// page directly — the streams are fetched INSIDE the page (spinner in
+/// front of the user) and a refresh button sits next to the search bar so
+/// the list can be re-fetched in place. A pre-fetched `streams` list is
+/// still accepted (legacy callers) — when `loader` is provided it wins.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
@@ -28,7 +23,8 @@ class SourcesPage extends StatefulWidget {
     super.key,
     required this.item,
     required this.video,
-    required this.streams,
+    this.streams = const [],
+    this.loader,
     required this.english,
   });
 
@@ -37,8 +33,13 @@ class SourcesPage extends StatefulWidget {
   /// The tapped episode (null for movies) — shown as the page subtitle.
   final Map<String, dynamic>? video;
 
-  /// All playable-considered streams for this video, already ranked.
+  /// Pre-fetched playable-considered streams (legacy feed-only callers).
   final List<Map<String, dynamic>> streams;
+
+  /// Task 139: when supplied, the page fetches its own list — the user
+  /// watches the loading happen HERE, and the header refresh button
+  /// re-runs it in place. Takes precedence over [streams].
+  final Future<List<Map<String, dynamic>>> Function()? loader;
   final bool english;
 
   @override
@@ -47,6 +48,62 @@ class SourcesPage extends StatefulWidget {
 
 class _SourcesPageState extends State<SourcesPage> {
   String _query = '';
+
+  /// The live list: seeded from [SourcesPage.streams], or fetched through
+  /// [SourcesPage.loader] (initial load + every refresh press).
+  List<Map<String, dynamic>> _streams = const [];
+
+  /// True only for the FIRST load through the loader (full-page spinner);
+  /// refreshes keep the old list visible and just spin the button.
+  bool _initialLoading = false;
+
+  /// True while a loader round-trip is in flight (spins the refresh icon).
+  bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final loader = widget.loader;
+    if (loader != null) {
+      _streams = const [];
+      _initialLoading = true;
+      _runLoader(loader);
+    } else {
+      _streams = widget.streams;
+    }
+  }
+
+  Future<void> _runLoader(
+    Future<List<Map<String, dynamic>>> Function() loader,
+  ) async {
+    setState(() => _refreshing = true);
+    List<Map<String, dynamic>> streams;
+    try {
+      streams = await loader();
+    } catch (_) {
+      streams = const []; // refreshable empty state — never a crash
+    }
+    if (!mounted) return;
+    setState(() {
+      _streams = streams;
+      _initialLoading = false;
+      _refreshing = false;
+      _facts = _parseFacts();
+      _addonStats = _computeAddonStats();
+      // A fresh list invalidates a missing add-on filter silently — keep
+      // the query/sort as-is (they re-filter the new list naturally).
+      if (_addon != null &&
+          !streams.any((s) => (s['addonName']?.toString() ?? '') == _addon)) {
+        _addon = null;
+      }
+    });
+  }
+
+  void _refresh() {
+    final loader = widget.loader;
+    if (loader == null || _refreshing) return;
+    _runLoader(loader);
+  }
 
   /// Selected quality bucket (exact parsed height): null = any.
   int? _minHeight;
@@ -61,17 +118,21 @@ class _SourcesPageState extends State<SourcesPage> {
   /// 3 = quality (then seeds).
   int _sort = 0;
 
-  /// Parsed facts per stream — [widget.streams] never mutates during the
-  /// page's lifetime (it is delivered once by the detail page), so parse
-  /// lazily once and reuse for every filter/sort pass.
-  late final List<_SourceFacts> _facts = [
-    for (final stream in widget.streams) _SourceFacts.parse(stream),
-  ];
+  /// Parsed facts per stream — recomputed whenever [_streams] is replaced
+  /// (initial loader result or a refresh), reused for every filter/sort
+  /// pass in between.
+  late List<_SourceFacts> _facts = _parseFacts();
+
+  List<_SourceFacts> _parseFacts() => [
+        for (final stream in _streams) _SourceFacts.parse(stream),
+      ];
 
   /// First-appearance-ordered add-on stats: name → (count, iconUrl).
-  late final Map<String, (int, String?)> _addonStats = () {
+  late Map<String, (int, String?)> _addonStats = _computeAddonStats();
+
+  Map<String, (int, String?)> _computeAddonStats() {
     final stats = <String, (int, String?)>{};
-    for (final stream in widget.streams) {
+    for (final stream in _streams) {
       final name = stream['addonName']?.toString() ?? '';
       if (name.isEmpty) continue;
       final current = stats[name] ?? (0, null);
@@ -81,7 +142,7 @@ class _SourcesPageState extends State<SourcesPage> {
       );
     }
     return stats;
-  }();
+  }
 
   bool _isDirect(Map<String, dynamic> stream) {
     final url = stream['url'];
@@ -91,13 +152,13 @@ class _SourcesPageState extends State<SourcesPage> {
   bool _isTorrent(Map<String, dynamic> stream) =>
       !_isDirect(stream) && stream['infoHash'] is String;
 
-  /// Indices into [widget.streams] that survive the text query + chips,
+  /// Indices into [_streams] that survive the text query + chips,
   /// ordered by the active sort (rank order = original index order kept).
   List<int> _visibleIndices(String query) {
-    var indices = List<int>.generate(widget.streams.length, (i) => i);
+    var indices = List<int>.generate(_streams.length, (i) => i);
     if (query.isNotEmpty) {
       bool matches(int i) {
-        final s = widget.streams[i];
+        final s = _streams[i];
         return '${s['title'] ?? ''} '
                 '${s['name'] ?? ''} '
                 '${s['description'] ?? ''} '
@@ -121,8 +182,7 @@ class _SourcesPageState extends State<SourcesPage> {
     }
     if (_addon != null) {
       indices = indices
-          .where((i) =>
-              (widget.streams[i]['addonName']?.toString() ?? '') == _addon)
+          .where((i) => (_streams[i]['addonName']?.toString() ?? '') == _addon)
           .toList(growable: false);
     }
     int desc(int? a, int? b) => (b ?? -1).compareTo(a ?? -1);
@@ -415,7 +475,7 @@ class _SourcesPageState extends State<SourcesPage> {
     final query = _query.trim().toLowerCase();
     final visible = _visibleIndices(query);
     final addons = <String>{
-      for (final stream in widget.streams)
+      for (final stream in _streams)
         if (stream['addonName'] is String) stream['addonName'] as String,
     };
 
@@ -473,9 +533,9 @@ class _SourcesPageState extends State<SourcesPage> {
               padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 4),
               child: Text(
                 english
-                    ? '${widget.streams.length} sources from ${addons.length} '
+                    ? '${_streams.length} sources from ${addons.length} '
                         '${addons.length == 1 ? 'add-on' : 'add-ons'}'
-                    : '${widget.streams.length} مصدر من ${addons.length} '
+                    : '${_streams.length} مصدر من ${addons.length} '
                         '${addons.length == 1 ? 'إضافة' : 'إضافات'}',
                 style: const TextStyle(
                   fontSize: 13,
@@ -492,6 +552,28 @@ class _SourcesPageState extends State<SourcesPage> {
                 decoration: InputDecoration(
                   isDense: true,
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  // Task 139 (user mandate): the refresh button lives NEXT
+                  // TO the search bar — it re-runs the loader in place and
+                  // spins while the round-trip is in flight.
+                  suffixIcon: widget.loader == null
+                      ? null
+                      : (_refreshing
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: HorseTheme.gold,
+                                ),
+                              ),
+                            )
+                          : IconButton(
+                              tooltip: english ? 'Refresh' : 'تحديث',
+                              icon: const Icon(LucideIcons.refreshCw, size: 18),
+                              onPressed: _refresh,
+                            )),
                   hintText: english ? 'Filter sources…' : 'تصفية المصادر…',
                   filled: true,
                   fillColor: HorseTheme.raised.withValues(alpha: .7),
@@ -504,42 +586,55 @@ class _SourcesPageState extends State<SourcesPage> {
                 ),
               ),
             ),
-            if (widget.streams.isNotEmpty) ...[
+            if (_streams.isNotEmpty) ...[
               const SizedBox(height: 6),
               _filterBar(english),
             ],
             Expanded(
-              child: visible.isEmpty
-                  ? AppStateMessage(
-                      icon: widget.streams.isEmpty
-                          ? Icons.cloud_off_rounded
-                          : Icons.filter_alt_off_rounded,
-                      message: widget.streams.isEmpty
-                          ? (english
-                              ? 'No sources available for this title yet'
-                              : 'لا توجد مصادر متاحة لهذا العمل بعد')
-                          : (english
-                              ? 'No matching sources'
-                              : 'لا مصادر مطابقة'),
+              // Task 139: the first loader round-trip shows a full-body
+              // spinner — loading happens HERE, in front of the user.
+              child: _initialLoading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 30,
+                        height: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: HorseTheme.gold,
+                        ),
+                      ),
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) {
-                        final i = visible[index];
-                        final stream = widget.streams[i];
-                        return _SourceRow(
-                          stream: stream,
-                          facts: _facts[i],
-                          english: english,
-                          condensed:
-                              widget.streams.length > 12, // web pickerLayout
-                          onTap: _isDirect(stream) || _isTorrent(stream)
-                              ? () => Navigator.of(context).pop(stream)
-                              : null,
-                        );
-                      },
-                    ),
+                  : visible.isEmpty
+                      ? AppStateMessage(
+                          icon: _streams.isEmpty
+                              ? Icons.cloud_off_rounded
+                              : Icons.filter_alt_off_rounded,
+                          message: _streams.isEmpty
+                              ? (english
+                                  ? 'No sources available for this title yet'
+                                  : 'لا توجد مصادر متاحة لهذا العمل بعد')
+                              : (english
+                                  ? 'No matching sources'
+                                  : 'لا مصادر مطابقة'),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                          itemCount: visible.length,
+                          itemBuilder: (context, index) {
+                            final i = visible[index];
+                            final stream = _streams[i];
+                            return _SourceRow(
+                              stream: stream,
+                              facts: _facts[i],
+                              english: english,
+                              condensed:
+                                  _streams.length > 12, // web pickerLayout
+                              onTap: _isDirect(stream) || _isTorrent(stream)
+                                  ? () => Navigator.of(context).pop(stream)
+                                  : null,
+                            );
+                          },
+                        ),
             ),
           ],
         ),

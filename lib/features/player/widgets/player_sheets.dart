@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/state/app_state.dart';
@@ -9,9 +10,11 @@ import '../../../shared/widgets/color_picker_dialog.dart';
 import '../engine/playback_engine.dart';
 import 'subtitle_overlay.dart' show SubtitleStyle;
 
-/// Dark-glass bottom sheets used by the player (settings, tracks, episodes,
-/// streams). They belong to the app's design language; only the on-video
-/// chrome follows the cinematic reference.
+/// Dark-glass bottom sheets used by the player (settings, episodes,
+/// subtitle style). They belong to the app's design language; the on-video
+/// chrome follows the cinematic reference, and the subtitle / audio /
+/// source pickers live in the RIGHT-HALF side panel
+/// (widgets/player_side_panel.dart, Task 139 user mandate).
 
 /// Common subtitle language codes → native names (Task 124 mandate: the
 /// subtitles window groups addon results by language). Unknown codes fall
@@ -120,42 +123,6 @@ Future<T?> showPlayerSheet<T>(
   );
 }
 
-/// Full-screen selection panel host (workstream A1): the subtitle, audio and
-/// source pickers fill the ENTIRE screen on every device — width and height,
-/// background extending behind the system bars while the content itself
-/// respects the safe areas (SheetScaffold's SafeArea).
-///
-/// Implemented as a modal bottom sheet at 100% height on purpose: it gives
-/// us Flutter's own drag-down-to-dismiss machinery, which already resolves
-/// the swipe-vs-list-scroll conflict (dismiss only when the inner list is at
-/// the top or the drag starts on non-scrolling chrome) — the exact behavior
-/// the spec mandates, battle-tested instead of hand-rolled. A visible close
-/// button lives in the sheet header; the video pauses for the panel's
-/// lifetime (player page side) and resumes only if it was playing.
-Future<T?> showPlayerFullScreenSheet<T>(
-  BuildContext context, {
-  required WidgetBuilder builder,
-}) {
-  final size = MediaQuery.sizeOf(context);
-  return showModalBottomSheet<T>(
-    context: context,
-    backgroundColor: HorseTheme.raised,
-    barrierColor: Colors.black54,
-    isScrollControlled: true,
-    useSafeArea: false,
-    enableDrag: true,
-    isDismissible: true,
-    // Full-bleed panel: no top radius, no height cap.
-    shape: const RoundedRectangleBorder(),
-    constraints: BoxConstraints(maxWidth: size.width, maxHeight: size.height),
-    builder: (sheetContext) => SizedBox(
-      height: size.height,
-      width: size.width,
-      child: Material(color: HorseTheme.raised, child: builder(sheetContext)),
-    ),
-  );
-}
-
 class SheetScaffold extends StatelessWidget {
   const SheetScaffold({
     super.key,
@@ -174,9 +141,9 @@ class SheetScaffold extends StatelessWidget {
   /// (e.g. the subtitle-settings shortcut inside the subtitles sheet).
   final Widget? headerAction;
 
-  /// Full-screen mode (workstream A1): the selection panels fill the whole
-  /// host — the column stretches to the panel height so long lists scroll
-  /// across the entire surface instead of stacking at the top.
+  /// Full-height mode: the selection panels stretch to the host height so
+  /// long lists scroll across the entire surface instead of stacking at
+  /// the top.
   final bool expanded;
 
   @override
@@ -212,7 +179,7 @@ class SheetScaffold extends StatelessWidget {
             width: compact && expanded ? 30 : 34,
             height: compact && expanded ? 30 : 34,
             child: Icon(
-              Icons.close_rounded,
+              LucideIcons.x,
               size: compact && expanded ? 17 : 18,
               color: Colors.white54,
             ),
@@ -282,20 +249,20 @@ class PlayerSettingsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final entries = [
       _SheetEntry(
-        icon: Icons.graphic_eq_rounded,
+        icon: LucideIcons.audioLines,
         label: english ? 'Audio track' : 'المسار الصوتي',
         value: audioLabel,
         onTap: onOpenAudio,
       ),
       _SheetEntry(
-        icon: Icons.subtitles_outlined,
+        icon: LucideIcons.captions,
         label: english ? 'Subtitles' : 'الترجمة',
         value: subtitleLabel,
         onTap: onOpenSubtitles,
       ),
       if (hasEpisodes)
         _SheetEntry(
-          icon: Icons.format_list_bulleted_rounded,
+          icon: LucideIcons.listVideo,
           label: english ? 'Episodes' : 'الحلقات',
           value: '',
           onTap: onOpenEpisodes,
@@ -465,7 +432,7 @@ class _EntryTile extends StatelessWidget {
                 style: const TextStyle(color: Colors.white38, fontSize: 12),
               ),
         trailing: const Icon(
-          Icons.chevron_right_rounded,
+          LucideIcons.chevronRight,
           size: 20,
           color: Colors.white24,
         ),
@@ -475,235 +442,28 @@ class _EntryTile extends StatelessWidget {
 
 // ── Track pickers ──────────────────────────────────────────────────────────
 
-class AudioTracksSheet extends StatefulWidget {
-  const AudioTracksSheet({
-    super.key,
-    required this.english,
-    required this.tracks,
-    required this.selected,
-    required this.onPick,
-    required this.delayMs,
-    required this.onDelayChanged,
-    this.expanded = false,
+// The audio / subtitle / stream pickers moved to the RIGHT-HALF side panel
+// (widgets/player_side_panel.dart, Task 139 user mandate): instant open,
+// in-panel loading and a header refresh button. Only the settings, episodes
+// and subtitle-style sheets remain bottom sheets here.
+
+/// A selectable subtitle row model: external addon subtitles carry their raw
+/// language code + source addon; embedded mpv tracks carry track info.
+class SubtitleChoice {
+  const SubtitleChoice({
+    required this.track,
+    required this.groupKey,
+    required this.title,
+    this.subtitle,
   });
 
-  final bool english;
-  final List<AudioTrack> tracks;
-  final AudioTrack selected;
-  final ValueChanged<AudioTrack> onPick;
-
-  /// Current audio delay (ms) — persisted via AppState.webSettings.
-  final int delayMs;
-  final ValueChanged<int> onDelayChanged;
-
-  /// Full-screen host flag (workstream A1) — stretches the panel.
-  final bool expanded;
-
-  @override
-  State<AudioTracksSheet> createState() => _AudioTracksSheetState();
+  final SubtitleTrack track;
+  final String groupKey; // language code, or 'embedded'
+  final String title;
+  final String? subtitle;
 }
 
-class _AudioTracksSheetState extends State<AudioTracksSheet> {
-  late int _delayMs = widget.delayMs;
-
-  void _shift(int delta) {
-    final next = (_delayMs + delta).clamp(-10000, 10000);
-    setState(() => _delayMs = next);
-    widget.onDelayChanged(next);
-  }
-
-  String _label(AudioTrack track) {
-    final parts = <String>[
-      if (track.title?.isNotEmpty == true) track.title!,
-    ];
-    if (parts.isEmpty) {
-      return widget.english ? 'Track ${track.id}' : 'مسار ${track.id}';
-    }
-    return parts.join(' · ');
-  }
-
-  /// Spec §5: track info line — language name · codec · channels.
-  String _info(AudioTrack track) {
-    final parts = <String>[
-      if (track.language?.isNotEmpty == true)
-        subtitleLanguageName(track.language!),
-      if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
-      if (track.channelscount != null)
-        '${track.channelscount}${widget.english ? 'ch' : ' قنوات'}',
-    ];
-    return parts.join(' · ');
-  }
-
-  /// Group the embedded tracks by their language tag (the dub window
-  /// mirrors the subtitles window's language organization).
-  Map<String, List<AudioTrack>> get _groups {
-    final groups = <String, List<AudioTrack>>{};
-    for (final track in widget.tracks) {
-      final code = (track.language ?? '').trim();
-      final key =
-          code.isEmpty ? (widget.english ? 'default' : 'افتراضي') : code;
-      groups.putIfAbsent(key, () => []).add(track);
-    }
-    return groups;
-  }
-
-  String _groupTitle(String code) {
-    if (code == 'default' || code == 'افتراضي') {
-      return widget.english ? 'Default' : 'افتراضي';
-    }
-    final name = subtitleLanguageName(code);
-    return name.isEmpty ? code : '$name · $code';
-  }
-
-  String _delayLabel(int ms) {
-    if (ms == 0) return widget.english ? 'No delay' : 'بدون تأخير';
-    final abs = ms.abs();
-    return ms < 0
-        ? (widget.english ? 'Ahead $abs ms' : 'تقديم $abs ms')
-        : (widget.english ? 'Delay $abs ms' : 'تأخير $abs ms');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final groups = _groups.entries.toList();
-    return SheetScaffold(
-      title: widget.english ? 'Audio track / dub' : 'المسار الصوتي / الدبلاج',
-      expanded: widget.expanded,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Flexible(
-            child: widget.tracks.isEmpty
-                ? _EmptyNote(
-                    widget.english
-                        ? 'No selectable audio tracks in this stream. Dubs may '
-                            'be available as separate sources.'
-                        : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر. '
-                            'قد يتوفر الدبلاج ضمن مصادر أخرى.',
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: groups.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(color: HorseTheme.line, height: 1),
-                    itemBuilder: (context, index) {
-                      final entry = groups[index];
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
-                            child: Text(
-                              _groupTitle(entry.key),
-                              style: const TextStyle(
-                                color: HorseTheme.gold,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: .5,
-                              ),
-                            ),
-                          ),
-                          for (final track in entry.value)
-                            ListTile(
-                              dense: true,
-                              selected: track.id == widget.selected.id,
-                              leading: Icon(
-                                track.id == widget.selected.id
-                                    ? Icons.radio_button_checked
-                                    : Icons.radio_button_off,
-                                size: 20,
-                                color: track.id == widget.selected.id
-                                    ? HorseTheme.gold
-                                    : Colors.white38,
-                              ),
-                              title: Text(
-                                _label(track),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              subtitle: _info(track).isEmpty
-                                  ? null
-                                  : Text(
-                                      _info(track),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          color: Colors.white38, fontSize: 12),
-                                    ),
-                              onTap: () {
-                                widget.onPick(track);
-                                Navigator.of(context).pop();
-                              },
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-          // Audio delay (spec §5): ±100 ms buttons, like the subtitle offset.
-          const Divider(color: HorseTheme.line, height: 1),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.timer_outlined,
-                  size: 18,
-                  color: Colors.white54,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  widget.english ? 'Audio delay' : 'تأخير الصوت',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-                _DelayButton(
-                  icon: Icons.remove_rounded,
-                  english: widget.english,
-                  onTap: () => _shift(-100),
-                ),
-                Container(
-                  constraints: const BoxConstraints(minWidth: 96),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: .05),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: HorseTheme.line),
-                  ),
-                  child: Text(
-                    _delayLabel(_delayMs),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: HorseTheme.gold,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                _DelayButton(
-                  icon: Icons.add_rounded,
-                  english: widget.english,
-                  onTap: () => _shift(100),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Round ± stepper button shared by the audio/subtitle delay controls.
+/// Round ± stepper button shared by the subtitle style sheet's delay row.
 class _DelayButton extends StatelessWidget {
   const _DelayButton({
     required this.icon,
@@ -726,399 +486,6 @@ class _DelayButton extends StatelessWidget {
             height: 36,
             child: Icon(icon, size: 20, color: Colors.white70),
           ),
-        ),
-      );
-}
-
-/// A selectable subtitle row model: external addon subtitles carry their raw
-/// language code + source addon; embedded mpv tracks carry track info.
-class SubtitleChoice {
-  const SubtitleChoice({
-    required this.track,
-    required this.groupKey,
-    required this.title,
-    this.subtitle,
-  });
-
-  final SubtitleTrack track;
-  final String groupKey; // language code, or 'embedded'
-  final String title;
-  final String? subtitle;
-}
-
-/// Task 124 mandate: the subtitles window fetches from every addon across
-/// ALL languages (done lazily by the page), then presents them grouped by
-/// language — tapping a language chip shows only that language's results —
-/// with a live search field on top.
-class SubtitleTracksSheet extends StatefulWidget {
-  const SubtitleTracksSheet({
-    super.key,
-    required this.english,
-    required this.embedded,
-    required this.external,
-    required this.selected,
-    required this.onPick,
-    this.onOpenSettings,
-    this.expanded = false,
-  });
-
-  final bool english;
-
-  /// mpv-embedded subtitle tracks (inside the file itself).
-  final List<SubtitleTrack> embedded;
-
-  /// Raw addon subtitle rows: url / lang / label / addonName.
-  final List<Map<String, dynamic>> external;
-
-  final SubtitleTrack selected;
-  final ValueChanged<SubtitleTrack> onPick;
-
-  /// When set, a tuning icon appears at the top of the sheet (user request:
-  /// subtitle style/timing settings reachable from the player subtitles
-  /// section, not only from the app settings page).
-  final VoidCallback? onOpenSettings;
-
-  /// Full-screen host flag (workstream A1) — stretches the panel.
-  final bool expanded;
-
-  @override
-  State<SubtitleTracksSheet> createState() => _SubtitleTracksSheetState();
-}
-
-class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
-  final _search = TextEditingController();
-  final Set<String> _expanded = {};
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
-  List<SubtitleChoice> get _choices {
-    final choices = <SubtitleChoice>[];
-    for (final track in widget.embedded) {
-      if (track.id == 'no' || track.id == 'auto') continue;
-      choices.add(SubtitleChoice(
-        track: track,
-        groupKey: 'embedded',
-        title: (track.title?.isNotEmpty == true
-                ? track.title!
-                : track.language?.isNotEmpty == true
-                    ? subtitleLanguageName(track.language!)
-                    : (widget.english
-                        ? 'Track ${track.id}'
-                        : 'مسار ${track.id}'))
-            .split('\n')
-            .first,
-        subtitle: [
-          if (track.language?.isNotEmpty == true)
-            subtitleLanguageName(track.language!),
-          if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
-        ].join(' · '),
-      ));
-    }
-    for (final row in widget.external) {
-      final url = row['url']?.toString() ?? '';
-      if (url.isEmpty) continue;
-      final lang = (row['lang'] ?? '').toString().trim();
-      final label = (row['label'] ?? '').toString().trim();
-      final addon = (row['addonName'] ?? '').toString().trim();
-      final name = subtitleLanguageName(lang);
-      choices.add(SubtitleChoice(
-        track: SubtitleTrack.uri(url, title: label.isEmpty ? lang : label),
-        groupKey: lang.isEmpty ? 'all' : lang,
-        title: label.isEmpty
-            ? (lang.isEmpty
-                ? (widget.english ? 'Addon subtitle' : 'ترجمة إضافة')
-                : name)
-            : label,
-        subtitle: [
-          if (addon.isNotEmpty) addon,
-          if (lang.isNotEmpty) name,
-        ].join(' · '),
-      ));
-    }
-    return choices;
-  }
-
-  Map<String, List<SubtitleChoice>> get _groups {
-    final groups = <String, List<SubtitleChoice>>{};
-    for (final choice in _choices) {
-      groups.putIfAbsent(choice.groupKey, () => []).add(choice);
-    }
-    // Arabic first (the app's primary language), then alphabetical by
-    // native name, embedded section last.
-    int rank(String key) {
-      if (key == 'ar') return 0;
-      if (key == 'embedded') return 2;
-      return 1;
-    }
-
-    final keys = groups.keys.toList()
-      ..sort((a, b) {
-        final byRank = rank(a).compareTo(rank(b));
-        if (byRank != 0) return byRank;
-        return subtitleLanguageName(a)
-            .toLowerCase()
-            .compareTo(subtitleLanguageName(b).toLowerCase());
-      });
-    return {for (final key in keys) key: groups[key]!};
-  }
-
-  bool _matches(SubtitleChoice choice, String query) {
-    if (query.isEmpty) return true;
-    final q = query.toLowerCase();
-    return choice.title.toLowerCase().contains(q) ||
-        (choice.subtitle ?? '').toLowerCase().contains(q) ||
-        choice.groupKey.toLowerCase().contains(q) ||
-        subtitleLanguageName(choice.groupKey).toLowerCase().contains(q);
-  }
-
-  String _groupTitle(String key) {
-    if (key == 'embedded') {
-      return widget.english ? 'In this file' : 'داخل الملف';
-    }
-    if (key == 'all') {
-      return widget.english ? 'Unknown language' : 'لغة غير معروفة';
-    }
-    final name = subtitleLanguageName(key);
-    return name.isEmpty ? key : '$name · $key';
-  }
-
-  /// Spec §4: expandable language list. While searching, all matching
-  /// groups auto-expand; otherwise the default group (Arabic when present)
-  /// starts open until the user toggles sections themselves.
-  bool _isOpen(String key, Map<String, List<SubtitleChoice>> groups) {
-    if (_search.text.trim().isNotEmpty) return true;
-    if (_expanded.contains(key)) return true;
-    return _expanded.isEmpty &&
-        groups.keys.isNotEmpty &&
-        key == groups.keys.first;
-  }
-
-  Widget _languageHeader(String key, int count) {
-    final open = _search.text.trim().isNotEmpty || _expanded.contains(key);
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: () => setState(() {
-        open ? _expanded.remove(key) : _expanded.add(key);
-      }),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(6, 9, 6, 7),
-        child: Row(
-          children: [
-            AnimatedRotation(
-              turns: open ? 0 : -.25,
-              duration: const Duration(milliseconds: 160),
-              child: const Icon(
-                Icons.expand_more_rounded,
-                size: 18,
-                color: HorseTheme.gold,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _groupTitle(key),
-                style: const TextStyle(
-                  color: HorseTheme.gold,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: .4,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .06),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: HorseTheme.line),
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _choiceRow(SubtitleChoice choice) {
-    final isSelected = choice.track.id == widget.selected.id;
-    return ListTile(
-      dense: true,
-      selected: isSelected,
-      leading: Icon(
-        isSelected
-            ? Icons.radio_button_checked
-            : (choice.track.uri
-                ? Icons.cloud_download_outlined
-                : Icons.radio_button_off),
-        size: 20,
-        color: isSelected ? HorseTheme.gold : Colors.white38,
-      ),
-      title: Text(
-        choice.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 14),
-      ),
-      subtitle: choice.subtitle?.isEmpty != true
-          ? Text(
-              choice.subtitle!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white38, fontSize: 12),
-            )
-          : null,
-      onTap: () {
-        widget.onPick(choice.track);
-        Navigator.of(context).pop();
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final off = SubtitleTrack.no();
-    final offSelected = widget.selected.id == off.id;
-    final groups = _groups;
-    final query = _search.text.trim();
-    final visibleGroups = <String, List<SubtitleChoice>>{};
-    for (final entry in groups.entries) {
-      final rows = entry.value.where((c) => _matches(c, query)).toList();
-      if (rows.isNotEmpty) visibleGroups[entry.key] = rows;
-    }
-    final totalVisible =
-        visibleGroups.values.fold<int>(0, (sum, rows) => sum + rows.length);
-
-    return SheetScaffold(
-      title: widget.english ? 'Subtitles' : 'الترجمة',
-      expanded: widget.expanded,
-      headerAction: widget.onOpenSettings == null
-          ? null
-          : Tooltip(
-              message: widget.english ? 'Subtitle settings' : 'إعدادات الترجمة',
-              child: IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed: widget.onOpenSettings,
-                icon: const Icon(Icons.tune_rounded,
-                    size: 22, color: HorseTheme.gold),
-              ),
-            ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Search — filters by title / language / addon instantly.
-          TextField(
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              isDense: true,
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              suffixIcon: _search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close_rounded, size: 16),
-                      onPressed: () {
-                        _search.clear();
-                        setState(() {});
-                      },
-                    ),
-              hintText:
-                  widget.english ? 'Search subtitles…' : 'ابحث في الترجمات…',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: HorseTheme.line),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: HorseTheme.line),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: HorseTheme.gold, width: 1.4),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Divider(color: HorseTheme.line, height: 14),
-          Flexible(
-            child: totalVisible == 0
-                ? _EmptyNote(
-                    query.isEmpty
-                        ? (widget.english
-                            ? 'No subtitles found for this title.'
-                            : 'لم يتم العثور على ترجمات لهذا العمل.')
-                        : (widget.english
-                            ? 'No matches for your search.'
-                            : 'لا توجد نتائج مطابقة لبحثك.'),
-                  )
-                : ListView(
-                    shrinkWrap: true,
-                    children: [
-                      // The persistent "Off" row leads the list (spec §4).
-                      ListTile(
-                        dense: true,
-                        selected: offSelected,
-                        leading: Icon(
-                          offSelected
-                              ? Icons.radio_button_checked
-                              : Icons.subtitles_off_outlined,
-                          size: 20,
-                          color: offSelected ? HorseTheme.gold : Colors.white38,
-                        ),
-                        title: Text(
-                          widget.english ? 'Off' : 'إيقاف',
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        onTap: () {
-                          widget.onPick(off);
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                      const Divider(color: HorseTheme.line, height: 1),
-                      // Expandable language sections (spec §4): tapping a
-                      // language shows only that language's subtitles.
-                      for (final entry in visibleGroups.entries) ...[
-                        _languageHeader(entry.key, entry.value.length),
-                        if (_isOpen(entry.key, visibleGroups))
-                          ...entry.value.map(_choiceRow),
-                        const Divider(color: HorseTheme.line, height: 1),
-                      ],
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyNote extends StatelessWidget {
-  const _EmptyNote(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 26),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white38, fontSize: 13),
         ),
       );
 }
@@ -1187,7 +554,7 @@ class EpisodesSheet extends StatelessWidget {
                   )
                 : null,
             trailing: isCurrent
-                ? const Icon(Icons.play_arrow_rounded,
+                ? const Icon(LucideIcons.play,
                     size: 20, color: HorseTheme.gold)
                 : null,
             onTap: isCurrent
@@ -1195,81 +562,6 @@ class EpisodesSheet extends StatelessWidget {
                 : () {
                     Navigator.of(context).pop();
                     onPick(episode);
-                  },
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ── Streams ────────────────────────────────────────────────────────────────
-
-class StreamsSheet extends StatelessWidget {
-  const StreamsSheet({
-    super.key,
-    required this.english,
-    required this.streams,
-    required this.selectedIndex,
-    required this.onPick,
-    this.expanded = false,
-  });
-
-  final bool english;
-  final List<Map<String, dynamic>> streams;
-  final int selectedIndex;
-  final ValueChanged<Map<String, dynamic>> onPick;
-
-  /// Full-screen host flag (workstream A1) — stretches the panel.
-  final bool expanded;
-
-  @override
-  Widget build(BuildContext context) {
-    return SheetScaffold(
-      title: english ? 'Choose a stream' : 'اختر مصدر التشغيل',
-      expanded: expanded,
-      child: ListView.separated(
-        shrinkWrap: true,
-        itemCount: streams.length,
-        separatorBuilder: (_, __) =>
-            const Divider(color: HorseTheme.line, height: 1),
-        itemBuilder: (context, index) {
-          final stream = streams[index];
-          final title = (stream['title'] ??
-                  stream['name'] ??
-                  stream['description'] ??
-                  'Stream')
-              .toString()
-              .split('\n')
-              .first;
-          final isSelected = index == selectedIndex;
-          return ListTile(
-            dense: true,
-            selected: isSelected,
-            leading: Icon(
-              isSelected
-                  ? Icons.radio_button_checked
-                  : Icons.play_circle_outline_rounded,
-              color: isSelected ? HorseTheme.gold : HorseTheme.muted,
-              size: 22,
-            ),
-            title: Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14),
-            ),
-            subtitle: Text(
-              stream['addonName']?.toString() ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white38, fontSize: 12),
-            ),
-            onTap: isSelected
-                ? null
-                : () {
-                    Navigator.of(context).pop();
-                    onPick(stream);
                   },
           );
         },
@@ -1401,7 +693,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _colorRow(
-          icon: Icons.format_color_text_rounded,
+          icon: LucideIcons.type,
           label: english ? 'Text color' : 'لون النص',
           hex: _v['subFontColor']! as String,
           onPick: (hex) => _commit('subFontColor', hex),
@@ -1431,7 +723,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         ),
         _styleChips(),
         _colorRow(
-          icon: Icons.format_color_fill_rounded,
+          icon: LucideIcons.paintBucket,
           label: english ? 'Outline color' : 'لون الحد',
           hex: _v['subBorderColor']! as String,
           onPick: (hex) => _commit('subBorderColor', hex),
@@ -1473,7 +765,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         Center(
           child: TextButton.icon(
             onPressed: _resetToDefaults,
-            icon: const Icon(Icons.restart_alt_rounded, size: 18),
+            icon: const Icon(LucideIcons.rotateCcw, size: 18),
             label: Text(
               english ? 'Reset to defaults' : 'إعادة للافتراضي',
               style: const TextStyle(
@@ -1557,7 +849,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
           const Spacer(),
           _DelayButton(
             english: widget.english,
-            icon: Icons.remove_rounded,
+            icon: LucideIcons.minus,
             onTap: () => _shiftDelay(-100),
           ),
           Container(
@@ -1581,7 +873,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
           ),
           _DelayButton(
             english: widget.english,
-            icon: Icons.add_rounded,
+            icon: LucideIcons.plus,
             onTap: () => _shiftDelay(100),
           ),
         ],

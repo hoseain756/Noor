@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/player/widgets/player_sheets.dart';
+import 'package:noor_mobile/features/player/widgets/player_side_panel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -20,95 +20,137 @@ void main() {
     view.devicePixelRatio = 1.0;
   });
 
-  Widget host() => MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: FilledButton(
-                onPressed: () => showPlayerFullScreenSheet<void>(
-                  context,
-                  builder: (_) => SheetScaffold(
-                    title: 'Panel',
-                    expanded: true,
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: 60,
-                      itemBuilder: (context, index) => ListTile(
-                        dense: true,
-                        title: Text('Row $index'),
-                      ),
-                    ),
+  Widget host({
+    VoidCallback? onRefresh,
+    bool refreshing = false,
+    VoidCallback? onClose,
+  }) {
+    // Mirror the page's real overlay: right-half Positioned inside a Stack.
+    return MaterialApp(
+      home: Scaffold(
+        body: Stack(
+          children: [
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: playerPanelWidth(888),
+              child: PlayerSidePanel(
+                title: 'Panel',
+                english: true,
+                onClose: onClose ?? () {},
+                onRefresh: onRefresh,
+                refreshing: refreshing,
+                child: ListView.builder(
+                  itemCount: 60,
+                  itemBuilder: (context, index) => ListTile(
+                    dense: true,
+                    title: Text('Row $index'),
                   ),
                 ),
-                child: const Text('open'),
               ),
             ),
-          ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 
-  testWidgets('full-screen selection panel fills the entire screen',
+  Finder headerButton(String label) => find.bySemanticsLabel(label);
+
+  testWidgets('panel width is exactly HALF the landscape screen',
       (tester) async {
+    // 888 / 2 = 444 — the user mandate ("نصف الشاشة الأيمن كاملاً").
+    expect(playerPanelWidth(888), 444.0);
+    // Narrow phones never go below 300dp; tablets never past 640dp.
+    expect(playerPanelWidth(560), 300.0);
+    expect(playerPanelWidth(1400), 640.0);
+  });
+
+  testWidgets('panel occupies the RIGHT half, full height', (tester) async {
     await tester.pumpWidget(host());
-    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    final box = tester.getRect(find.byType(SheetScaffold));
-    // Both dimensions — not the old 66%-height bottom sheet.
-    expect(box.topLeft, Offset.zero);
-    expect(box.size, const Size(888, 412));
+    final box = tester.getRect(find.byType(PlayerSidePanel));
+    // Full height, right half: x spans [444, 888].
+    expect(box.top, 0);
+    expect(box.bottom, 412);
+    expect(box.left, 444);
+    expect(box.right, 888);
   });
 
   testWidgets('compact geometry on a short landscape screen', (tester) async {
     await tester.pumpWidget(host());
-    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
     // <520 dp height ⇒ titleMedium + tighter paddings (no overflow errors —
     // pumpAndSettle above would have thrown on a RenderFlex overflow).
     final title = tester.widget<Text>(find.text('Panel'));
-    expect(title.style,
-        Theme.of(tester.element(find.text('Panel'))).textTheme.titleMedium);
+    expect(
+      title.style,
+      Theme.of(tester.element(find.text('Panel'))).textTheme.titleMedium,
+    );
   });
 
-  testWidgets('visible close button dismisses the panel', (tester) async {
-    await tester.pumpWidget(host());
-    await tester.tap(find.text('open'));
+  testWidgets('refresh button sits in the header and fires onRefresh',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    var refreshed = 0;
+    await tester.pumpWidget(host(onRefresh: () => refreshed++));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.close_rounded));
+    final refreshButton = headerButton('Refresh');
+    expect(refreshButton, findsOneWidget);
+    // Header zone: above the scrollable list body.
+    final center = tester.getCenter(refreshButton);
+    expect(center.dy, lessThan(120));
+    await tester.tap(refreshButton);
     await tester.pumpAndSettle();
-    expect(find.byType(SheetScaffold), findsNothing);
+    expect(refreshed, 1);
+    // The panel stays open — refreshing never dismisses it.
+    expect(find.byType(PlayerSidePanel), findsOneWidget);
+    semantics.dispose();
   });
 
-  testWidgets('swipe down from the header area dismisses the panel',
+  testWidgets('refreshing state replaces the icon with a spinner',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(host(onRefresh: () {}, refreshing: true));
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('close button fires onClose', (tester) async {
+    final semantics = tester.ensureSemantics();
+    var closed = 0;
+    await tester.pumpWidget(host(onClose: () => closed++));
+    await tester.pumpAndSettle();
+
+    final closeButton = headerButton('Close');
+    expect(closeButton, findsOneWidget);
+    await tester.tap(closeButton);
+    await tester.pumpAndSettle();
+    expect(closed, 1);
+    semantics.dispose();
+  });
+
+  testWidgets('list scrolling inside the right-half panel works',
       (tester) async {
     await tester.pumpWidget(host());
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-
-    // Drag on the non-scrollable header/title zone (the handle area).
-    final headerCenter = tester.getCenter(find.text('Panel'));
-    await tester.dragFrom(headerCenter, const Offset(0, 260));
-    await tester.pumpAndSettle();
-    expect(find.byType(SheetScaffold), findsNothing);
-  });
-
-  testWidgets('list scrolling never dismisses the panel', (tester) async {
-    await tester.pumpWidget(host());
-    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
     // Scroll the list DOWN (drag up) until a far row is visible — content
-    // moves, panel stays. dragUntilVisible handles the small viewport
-    // (~7 rows visible on the 412dp landscape surface).
+    // moves, panel stays (the panel never dismisses on scroll: it is an
+    // in-page overlay, not a drag-to-dismiss route).
     await tester.dragUntilVisible(
       find.text('Row 30'),
       find.byType(ListView),
       const Offset(0, -120),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(SheetScaffold), findsOneWidget);
+    expect(find.byType(PlayerSidePanel), findsOneWidget);
     expect(find.text('Row 30'), findsOneWidget);
   });
 }

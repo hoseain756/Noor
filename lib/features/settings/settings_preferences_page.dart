@@ -40,11 +40,8 @@ class _Preference {
 }
 
 const _playerPreferences = <_Preference>[
-  _Preference(
-      key: 'instantPlay',
-      arabic: 'التشغيل الفوري',
-      english: 'Instant play',
-      control: _Control.toggle),
+  // Task 139: 'instantPlay' removed — watching ALWAYS lands on the sources
+  // page now (user mandate); the legacy stored key stays harmless in prefs.
   _Preference(
       key: 'autoPlayNextEpisode',
       arabic: 'تشغيل الحلقة التالية تلقائيًا',
