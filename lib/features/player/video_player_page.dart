@@ -1187,25 +1187,23 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     // InfoHash-only stream (or magnet: URI): source headers still apply to
     // debrid/engine URLs.
     final headers = direct?.headers ?? const <String, String>{};
-    final streamHash = stream['infoHash']?.toString().toLowerCase() ?? '';
-    final magnetHash = magnetUrl == null
-        ? null
-        : RegExp(
-            r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])',
-            caseSensitive: false,
-          ).firstMatch(magnetUrl.toLowerCase())?.group(1);
-    final infoHash = streamHash.isNotEmpty ? streamHash : magnetHash;
-    if (infoHash == null || infoHash.isEmpty) return null;
-    final filename =
-        (stream['filename'] ?? stream['name'] ?? widget.filename ?? '')
-            .toString();
-    final filesize = (stream['size'] as num?)?.toInt();
+    // Task 142: derive every torrent argument through the SHARED helper —
+    // this path used to drop Torrentio's `sources` trackers, `fileIdx` and
+    // `behaviorHints.filename` (the media-detail path kept them), so
+    // in-player torrents ran on the static default tracker list alone and
+    // picked the wrong file inside multi-episode packs.
+    final hints = TorrentStreamHints.fromStream(
+      stream,
+      magnetUri: magnetUrl,
+      fallbackName: widget.filename,
+    );
+    if (hints.infoHash.isEmpty) return null;
     // Premium debrid first: instant direct link, zero buffering.
     if (app.api.debridService != null) {
       final debridUrl = await app.api.resolveDebridTorrent(
-        infoHash: infoHash,
-        filename: filename,
-        filesize: filesize,
+        infoHash: hints.infoHash,
+        filename: hints.filename,
+        filesize: hints.filesize,
       );
       if (debridUrl != null) {
         return _PlaybackResolution(
@@ -1213,14 +1211,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       }
     }
     // On-device torrent engine: sequential streaming via localhost server.
-    // The addon's own magnet (when present) carries its trackers through.
+    // The addon's own magnet (when present) carries its trackers through,
+    // merged with the stream `sources` and the verified defaults (Task 142).
     try {
       final torrent = await TorrentService.instance.prepare(
-        infoHash: infoHash,
+        infoHash: hints.infoHash,
         magnet: magnetUrl,
-        filename: filename,
-        filesize: filesize,
+        filename: hints.filename,
+        filesize: hints.filesize,
         displayName: widget.item.name,
+        trackers: hints.trackers,
+        fileIndex: hints.fileIndex,
       );
       return _PlaybackResolution(
           url: torrent.url, headers: headers, torrent: torrent);

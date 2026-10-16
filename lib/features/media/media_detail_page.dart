@@ -553,32 +553,23 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         url = direct.url;
         directHeaders = direct.headers.isEmpty ? null : direct.headers;
       } else {
-        final streamHash =
-            (chosenStream['infoHash'] ?? '').toString().toLowerCase();
-        final magnetHash = magnetUrl == null
-            ? null
-            : RegExp(
-                r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])',
-                caseSensitive: false,
-              ).firstMatch(magnetUrl.toLowerCase())?.group(1);
-        final infoHash = streamHash.isNotEmpty ? streamHash : magnetHash ?? '';
-        final sizeCandidate = chosenStream['fileSize'] ?? hints['videoSize'];
-        final filesize = sizeCandidate is num ? sizeCandidate.toInt() : null;
-        // Task 129: keep the addon's own knowledge — Torrentio's curated
-        // `sources` trackers (fresher than any static list) and `fileIdx`
-        // (the exact episode file inside multi-episode packs).
-        final trackers = normalizeTrackerSources(chosenStream['sources']);
-        final rawIdx = chosenStream['fileIdx'];
-        final fileIdx =
-            rawIdx is num ? rawIdx.toInt() : int.tryParse('$rawIdx'.trim());
+        // Task 142: the shared TorrentStreamHints extraction (info-hash from
+        // the stream or the magnet, Torrentio `sources` trackers, `fileIdx`,
+        // behaviorHints filename, declared size) — identical to the in-player
+        // source resolver, pinned by torrent_stream_hints_test.dart.
+        final torrentHints = TorrentStreamHints.fromStream(
+          chosenStream,
+          magnetUri: magnetUrl,
+          fallbackName: item.name,
+        );
         final resolved = await _resolveTorrentStream(
           displayName: item.name,
-          infoHash: infoHash,
-          filename: filename,
-          filesize: filesize,
+          infoHash: torrentHints.infoHash,
+          filename: torrentHints.filename,
+          filesize: torrentHints.filesize,
           magnet: magnetUrl,
-          trackers: trackers,
-          fileIndex: fileIdx,
+          trackers: torrentHints.trackers,
+          fileIndex: torrentHints.fileIndex,
         );
         if (!mounted) return;
         if (resolved == null) {

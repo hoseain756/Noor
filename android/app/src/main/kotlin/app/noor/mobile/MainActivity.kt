@@ -538,6 +538,17 @@ class MainActivity :
                 "torrent_start_failed",
                 "Torrent handle did not appear within ${HANDLE_WAIT_MS / 1000}s",
             )
+        // Task 142 ROOT FIX — "Torrentio stays at zeros forever": jlibtorrent's
+        // SessionManager.download() strips AUTO_MANAGED but keeps libtorrent
+        // 1.2's default PAUSED flag (add_torrent_params::default_flags =
+        // update_subscribe | auto_managed | paused), so EVERY torrent added
+        // through download(magnet|TorrentInfo, dir) went into the session
+        // PAUSED — no tracker announces, no peers, 0 B/s and 0.0% for as long
+        // as the user cared to wait, until the stream server gave up with
+        // "Failed to open http://127.0.0.1:<port>/stream". fetchMagnet()
+        // resumes its own internal torrent (th.resume()); download() never
+        // does. Resume the handle explicitly so the download actually starts.
+        th.resume()
         // Task 132: a torrent added from cached .torrent bytes only carries
         // the announce entries embedded in that file — the public HTTP
         // caches ship torrents with an EMPTY announce-list (verified live),

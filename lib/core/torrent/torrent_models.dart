@@ -339,6 +339,85 @@ List<String> normalizeTrackerSources(Object? raw) {
   return out;
 }
 
+/// Torrent-relevant hints extracted from a Stremio stream object (Task 142).
+///
+/// Both playback entry points — the media-detail launcher and the in-player
+/// source resolver — MUST derive their torrent arguments through this helper
+/// so Torrentio streams are treated identically everywhere. Before Task 142
+/// the in-player path dropped the addon's `sources` trackers, `fileIdx` and
+/// `behaviorHints.filename` entirely (while the detail-page path kept them),
+/// leaving in-player torrents to run on the static default tracker list alone.
+class TorrentStreamHints {
+  const TorrentStreamHints({
+    required this.infoHash,
+    required this.filename,
+    this.filesize,
+    this.trackers = const <String>[],
+    this.fileIndex,
+  });
+
+  /// Lowercase hex/base32 info-hash: the stream's own `infoHash` when
+  /// present, otherwise the `urn:btih:` hash of [magnetUri]. Empty when the
+  /// stream carries neither (not a torrent stream).
+  final String infoHash;
+
+  /// Best-effort target filename: `behaviorHints.filename` (Torrentio's
+  /// authoritative per-episode hint), then the stream's `filename`, then its
+  /// human `title`, then [fallbackName].
+  final String filename;
+
+  /// Declared byte size of the selected file, when the addon knows it.
+  final int? filesize;
+
+  /// Plain tracker announce URLs normalized from the stream `sources` array
+  /// (see [normalizeTrackerSources]).
+  final List<String> trackers;
+
+  /// The addon's chosen file position inside a multi-file torrent
+  /// (Torrentio `fileIdx`), or `null` when absent/unparseable.
+  final int? fileIndex;
+
+  factory TorrentStreamHints.fromStream(
+    Map<String, dynamic> stream, {
+    String? magnetUri,
+    String? fallbackName,
+  }) {
+    final hints = (stream['behaviorHints'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final streamHash =
+        (stream['infoHash'] ?? '').toString().trim().toLowerCase();
+    final magnetHash = magnetUri == null
+        ? null
+        : RegExp(
+            r'urn:btih:([a-z0-9]{32,40})(?![a-z0-9])',
+            caseSensitive: false,
+          ).firstMatch(magnetUri.toLowerCase())?.group(1);
+    String pickName() {
+      for (final value in [
+        hints['filename'],
+        stream['filename'],
+        stream['title'],
+      ]) {
+        final text = value?.toString().trim();
+        if (text != null && text.isNotEmpty) return value!.toString();
+      }
+      return (fallbackName ?? '').trim();
+    }
+
+    final sizeCandidate =
+        stream['size'] ?? stream['fileSize'] ?? hints['videoSize'];
+    final rawIdx = stream['fileIdx'];
+    return TorrentStreamHints(
+      infoHash: streamHash.isNotEmpty ? streamHash : (magnetHash ?? ''),
+      filename: pickName(),
+      filesize: sizeCandidate is num ? sizeCandidate.toInt() : null,
+      trackers: normalizeTrackerSources(stream['sources']),
+      fileIndex:
+          rawIdx is num ? rawIdx.toInt() : int.tryParse('$rawIdx'.trim()),
+    );
+  }
+}
+
 /// Case-insensitive, suffix/basename-lenient torrent file-name matcher
 /// (moved from [TorrentService] so selection and the service share it).
 bool torrentFileMatches(String torrentName, String wanted) {

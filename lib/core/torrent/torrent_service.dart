@@ -406,8 +406,18 @@ class TorrentService {
     //    stream's own trackers merged over the verified defaults, and
     //    resolution first tries the HTTP torrent-file cache (no P2P needed
     //    — the old path died on networks that throttle peer traffic).
-    final magnetUri = magnet ??
-        magnetFor(hash, dn: displayName ?? filename, extraTrackers: trackers);
+    //    Task 142: when the caller supplies an addon magnet the `trackers`
+    //    list used to be SILENTLY DROPPED (`magnet ?? magnetFor(...)`) —
+    //    Torrentio's freshly-scraped `sources` never reached the engine on
+    //    magnet-bearing streams. magnetFor() merges all three layers
+    //    (stream trackers → magnet `tr=` → verified defaults), so build the
+    //    URI through it on every path.
+    final magnetUri = magnetFor(
+      hash,
+      dn: displayName ?? filename,
+      extraTrackers: trackers,
+      magnetUri: (magnet != null && magnet.trim().isNotEmpty) ? magnet : null,
+    );
     final TorrentMetadata meta =
         _metadataCache[hash] ?? await _resolveSmart(hash, magnetUri);
     _metadataCache[hash] = meta;
