@@ -43,6 +43,11 @@ class AppState extends ChangeNotifier {
     'subBorderSize': 0, 'subBackgroundOpacity': 0.35,
     'subStyle': 'shadow', 'preferredSubLangs': <String>['English'],
     'subtitlesOffByDefault': false,
+    // Subtitle style keys the player sheet can write but the defaults map
+    // used to miss (parity gap): explicit defaults keep cloud-synced
+    // payloads round-trip stable. Must match SubtitleStyle.fromMap's own
+    // fallbacks (bottom position, bundled Netflix Sans).
+    'subPos': 100, 'subFontFamily': 'NetflixSans',
     'customPlaybackSpeeds': <double>[], 'showQualityInfo': false,
     'videoFill': 'fit', 'playerTheme': 'auto',
     'pickerLayout': 'stremio', 'streamSort': 'addon',

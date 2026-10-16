@@ -120,6 +120,42 @@ Future<T?> showPlayerSheet<T>(
   );
 }
 
+/// Full-screen selection panel host (workstream A1): the subtitle, audio and
+/// source pickers fill the ENTIRE screen on every device — width and height,
+/// background extending behind the system bars while the content itself
+/// respects the safe areas (SheetScaffold's SafeArea).
+///
+/// Implemented as a modal bottom sheet at 100% height on purpose: it gives
+/// us Flutter's own drag-down-to-dismiss machinery, which already resolves
+/// the swipe-vs-list-scroll conflict (dismiss only when the inner list is at
+/// the top or the drag starts on non-scrolling chrome) — the exact behavior
+/// the spec mandates, battle-tested instead of hand-rolled. A visible close
+/// button lives in the sheet header; the video pauses for the panel's
+/// lifetime (player page side) and resumes only if it was playing.
+Future<T?> showPlayerFullScreenSheet<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+}) {
+  final size = MediaQuery.sizeOf(context);
+  return showModalBottomSheet<T>(
+    context: context,
+    backgroundColor: HorseTheme.raised,
+    barrierColor: Colors.black54,
+    isScrollControlled: true,
+    useSafeArea: false,
+    enableDrag: true,
+    isDismissible: true,
+    // Full-bleed panel: no top radius, no height cap.
+    shape: const RoundedRectangleBorder(),
+    constraints: BoxConstraints(maxWidth: size.width, maxHeight: size.height),
+    builder: (sheetContext) => SizedBox(
+      height: size.height,
+      width: size.width,
+      child: Material(color: HorseTheme.raised, child: builder(sheetContext)),
+    ),
+  );
+}
+
 class SheetScaffold extends StatelessWidget {
   const SheetScaffold({
     super.key,
@@ -127,6 +163,7 @@ class SheetScaffold extends StatelessWidget {
     required this.child,
     this.footer,
     this.headerAction,
+    this.expanded = false,
   });
 
   final String title;
@@ -137,55 +174,76 @@ class SheetScaffold extends StatelessWidget {
   /// (e.g. the subtitle-settings shortcut inside the subtitles sheet).
   final Widget? headerAction;
 
+  /// Full-screen mode (workstream A1): the selection panels fill the whole
+  /// host — the column stretches to the panel height so long lists scroll
+  /// across the entire surface instead of stacking at the top.
+  final bool expanded;
+
   @override
-  Widget build(BuildContext context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * .72,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const Spacer(),
-                    if (headerAction != null) ...[
-                      headerAction!,
-                      const SizedBox(width: 8),
-                    ],
-                    InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () => Navigator.of(context).pop(),
-                      child: const SizedBox(
-                        width: 34,
-                        height: 34,
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 18,
-                          color: Colors.white54,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Flexible(child: child),
-                if (footer != null) ...[
-                  const SizedBox(height: 14),
-                  footer!,
-                ],
-              ],
+  Widget build(BuildContext context) {
+    // Compact geometry for short landscape phone screens (~360–412 dp tall):
+    // smaller paddings, header and close target leave the list usable.
+    final compact = MediaQuery.sizeOf(context).height < 520;
+    final EdgeInsets insets = expanded
+        ? EdgeInsets.fromLTRB(
+            compact ? 14 : 18,
+            compact ? 10 : 16,
+            compact ? 14 : 18,
+            compact ? 12 : 20,
+          )
+        : const EdgeInsets.fromLTRB(18, 16, 18, 20);
+    final header = Row(
+      children: [
+        Text(
+          title,
+          style: compact && expanded
+              ? Theme.of(context).textTheme.titleMedium
+              : Theme.of(context).textTheme.titleLarge,
+        ),
+        const Spacer(),
+        if (headerAction != null) ...[
+          headerAction!,
+          const SizedBox(width: 8),
+        ],
+        InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => Navigator.of(context).pop(),
+          child: SizedBox(
+            width: compact && expanded ? 30 : 34,
+            height: compact && expanded ? 30 : 34,
+            child: Icon(
+              Icons.close_rounded,
+              size: compact && expanded ? 17 : 18,
+              color: Colors.white54,
             ),
           ),
         ),
-      );
+      ],
+    );
+    final column = Column(
+      mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        SizedBox(height: compact && expanded ? 10 : 14),
+        expanded ? Expanded(child: child) : Flexible(child: child),
+        if (footer != null) ...[
+          const SizedBox(height: 14),
+          footer!,
+        ],
+      ],
+    );
+    return SafeArea(
+      child: expanded
+          ? Padding(padding: insets, child: column)
+          : ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * .72,
+              ),
+              child: Padding(padding: insets, child: column),
+            ),
+    );
+  }
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -426,6 +484,7 @@ class AudioTracksSheet extends StatefulWidget {
     required this.onPick,
     required this.delayMs,
     required this.onDelayChanged,
+    this.expanded = false,
   });
 
   final bool english;
@@ -436,6 +495,9 @@ class AudioTracksSheet extends StatefulWidget {
   /// Current audio delay (ms) — persisted via AppState.webSettings.
   final int delayMs;
   final ValueChanged<int> onDelayChanged;
+
+  /// Full-screen host flag (workstream A1) — stretches the panel.
+  final bool expanded;
 
   @override
   State<AudioTracksSheet> createState() => _AudioTracksSheetState();
@@ -506,6 +568,7 @@ class _AudioTracksSheetState extends State<AudioTracksSheet> {
     final groups = _groups.entries.toList();
     return SheetScaffold(
       title: widget.english ? 'Audio track / dub' : 'المسار الصوتي / الدبلاج',
+      expanded: widget.expanded,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -696,6 +759,7 @@ class SubtitleTracksSheet extends StatefulWidget {
     required this.selected,
     required this.onPick,
     this.onOpenSettings,
+    this.expanded = false,
   });
 
   final bool english;
@@ -713,6 +777,9 @@ class SubtitleTracksSheet extends StatefulWidget {
   /// subtitle style/timing settings reachable from the player subtitles
   /// section, not only from the app settings page).
   final VoidCallback? onOpenSettings;
+
+  /// Full-screen host flag (workstream A1) — stretches the panel.
+  final bool expanded;
 
   @override
   State<SubtitleTracksSheet> createState() => _SubtitleTracksSheetState();
@@ -936,6 +1003,7 @@ class _SubtitleTracksSheetState extends State<SubtitleTracksSheet> {
 
     return SheetScaffold(
       title: widget.english ? 'Subtitles' : 'الترجمة',
+      expanded: widget.expanded,
       headerAction: widget.onOpenSettings == null
           ? null
           : Tooltip(
@@ -1144,6 +1212,7 @@ class StreamsSheet extends StatelessWidget {
     required this.streams,
     required this.selectedIndex,
     required this.onPick,
+    this.expanded = false,
   });
 
   final bool english;
@@ -1151,10 +1220,14 @@ class StreamsSheet extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<Map<String, dynamic>> onPick;
 
+  /// Full-screen host flag (workstream A1) — stretches the panel.
+  final bool expanded;
+
   @override
   Widget build(BuildContext context) {
     return SheetScaffold(
       title: english ? 'Choose a stream' : 'اختر مصدر التشغيل',
+      expanded: expanded,
       child: ListView.separated(
         shrinkWrap: true,
         itemCount: streams.length,
@@ -1231,12 +1304,21 @@ class SubtitleStyleSheet extends StatefulWidget {
 class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   late final Map<String, Object?> _v = _fromSettings();
 
+  /// Cloud-synced settings may deliver numbers as JSON strings; the strict
+  /// `as num?` cast used to THROW and take the whole sheet down with it.
+  /// Tolerant parse mirrors SubtitleStyle's own numeric handling.
+  static num? _numOf(Object? raw) {
+    if (raw is num) return raw;
+    if (raw is String) return num.tryParse(raw.trim());
+    return null;
+  }
+
   Map<String, Object?> _fromSettings() {
     final st = context.read<AppState>().webSettings;
     int intVal(String key, int fallback) =>
-        (st[key] as num?)?.toInt() ?? fallback;
+        _numOf(st[key])?.toInt() ?? fallback;
     double doubleVal(String key, double fallback) =>
-        (st[key] as num?)?.toDouble() ?? fallback;
+        _numOf(st[key])?.toDouble() ?? fallback;
     return <String, Object?>{
       'subFontSize': intVal('subFontSize', 28),
       'subFontColor': (st['subFontColor'] as String?) ?? '#FFFFFF',

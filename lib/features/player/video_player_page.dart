@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,7 +12,10 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
+import '../media/sources_page.dart';
 import 'engine/playback_engine.dart';
+import 'gesture_math.dart';
+import 'segments/playback_segments.dart';
 import 'stream_headers.dart';
 import 'widgets/player_chrome.dart';
 import 'widgets/player_sheets.dart';
@@ -79,6 +83,7 @@ enum _GestureMode { none, seek, brightness, volume, zoom }
 
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   MediaKitEngine? _engine;
+  late final AppState _app = context.read<AppState>();
   Timer? _hideTimer;
   Timer? _progressTimer;
   StreamSubscription<TorrentStatus>? _torrentSub;
@@ -138,6 +143,27 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   // Gesture HUD linger (spec §6: fade ~1s after the drag ends).
   Timer? _hudLingerTimer;
 
+  // Workstream C: the last subtitle-values projection applied to the
+  // overlay/engine. AppState notifications diff against this, so subtitle
+  // writes from OUTSIDE the player (settings page, cloud-sync merge, backup
+  // restore) restyle a live player instantly.
+  Map<String, Object?> _lastSubValues = const {};
+
+  // Workstream B: timing segments resolved once per page instance, plus the
+  // guards against double next-episode navigation.
+  late PlaybackSegments _segments;
+  bool _episodeTransitionBusy = false;
+  bool _autoAdvanceFired = false;
+
+  // Workstream A2: the volume gesture captures the system level ONCE per
+  // drag (the old per-tick getVolume() raced the platform round-trip and
+  // let stale reads snap the level back mid-drag), and the vertical delta
+  // ACCUMULATES across ticks like the seek gesture's dx — the old code
+  // re-applied only the current tick's delta from the start value, so drags
+  // barely moved the value.
+  double? _volumeStart;
+  double _dragAccumDy = 0;
+
   @override
   void initState() {
     super.initState();
@@ -160,8 +186,53 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _subStyle = ValueNotifier<SubtitleStyle>(
       SubtitleStyle.fromMap(context.read<AppState>().webSettings),
     );
+    _lastSubValues = SubtitleStyle.valuesFrom(_app.webSettings);
+    // Workstream C: the player now listens to AppState so every subtitle
+    // write reaches the running video (see [_onAppSettingsChanged]).
+    _app.addListener(_onAppSettingsChanged);
+    _resolveSegments();
     _createEngine();
     _listenTorrent();
+  }
+
+  /// Workstream B: timing windows for skip-intro/outro + next-episode are
+  /// resolved ONCE per page instance from the current stream row + episode
+  /// row. Episode switches push a NEW page (pushReplacement), so a fresh
+  /// resolve happens naturally — no per-episode bookkeeping needed.
+  void _resolveSegments() {
+    Map<String, dynamic>? currentVideo;
+    for (final v in widget.item.videos) {
+      if (v['id'] == widget.videoId) {
+        currentVideo = v;
+        break;
+      }
+    }
+    final currentStream =
+        (_streamIndex >= 0 && _streamIndex < widget.streams.length)
+            ? widget.streams[_streamIndex]
+            : null;
+    _segments = PlaybackSegmentsResolver.resolve(
+      video: currentVideo,
+      stream: currentStream,
+    );
+  }
+
+  /// Workstream C: any subtitle-relevant write that did NOT come from the
+  /// player's own sheet (settings page, cloud-sync merge, backup restore)
+  /// updates [_subStyle] + the mpv sub-delay immediately. Diffing against
+  /// [_lastSubValues] keeps sheet previews authoritative and avoids
+  /// redundant notifier writes.
+  void _onAppSettingsChanged() {
+    final values = SubtitleStyle.valuesFrom(_app.webSettings);
+    if (mapEquals(values, _lastSubValues)) return;
+    final oldOffset =
+        (_lastSubValues['subtitleOffsetMs'] as num?)?.toInt() ?? 0;
+    final newOffset = (values['subtitleOffsetMs'] as num?)?.toInt() ?? 0;
+    _lastSubValues = Map<String, Object?>.of(values);
+    _subStyle.value = SubtitleStyle.fromMap(values);
+    if (newOffset != oldOffset) {
+      unawaited(_engine?.setSubtitleDelayMs(newOffset));
+    }
   }
 
   void _listenTorrent() {
@@ -287,7 +358,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _scrobble('stop');
       unawaited(_saveProgress());
     }
+    _maybeAutoAdvance(engine);
     setState(() {});
+  }
+
+  /// Workstream B: fires the next-episode SOURCE flow when a data-provided
+  /// auto-advance countdown elapses. Without timing data this never arms
+  /// (autoAdvanceAtMs returns null) — the card stays manual, exactly as
+  /// shipped. Honors the Cancel latch and the autoplay preference.
+  void _maybeAutoAdvance(MediaKitEngine engine) {
+    if (_autoAdvanceFired ||
+        _upNextDismissed ||
+        _stopScrobbled ||
+        _episodeTransitionBusy) {
+      return;
+    }
+    if ((_app.webSettings['autoPlayNextEpisode'] ?? true) != true) return;
+    final at = SegmentWindows.autoAdvanceAtMs(
+      segments: _segments,
+      durationMs: engine.duration.inMilliseconds,
+    );
+    if (at == null || engine.position.inMilliseconds < at) return;
+    _autoAdvanceFired = true;
+    final next = _episodeAt(_currentEpisodeIndex() + 1);
+    if (next != null) unawaited(_startEpisodeSources(next));
   }
 
   // ── Episodes ────────────────────────────────────────────────────────────
@@ -522,13 +616,27 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   // ── Sheets ──────────────────────────────────────────────────────────────
 
-  Future<void> _openSheet(Future<void> Function() show) async {
+  Future<void> _openSheet(
+    Future<void> Function() show, {
+    bool pauseVideo = false,
+  }) async {
     _sheetOpen = true;
     _hideTimer?.cancel();
     if (mounted) setState(() => _controlsVisible = true);
+    final engine = _engine;
+    // Workstream A1: the full-screen selection panels pause the video for
+    // their lifetime and resume ONLY if it was playing before — closing
+    // must never leave the player paused, and opening must never auto-start
+    // a video the user had paused. The `identical` guard keeps the resume
+    // off an engine that was swapped/disposed while the panel was open.
+    final wasPlaying = pauseVideo && (engine?.playing ?? false);
+    if (wasPlaying) await engine!.pause();
     try {
       await show();
     } finally {
+      if (wasPlaying && mounted && identical(_engine, engine)) {
+        await engine!.play();
+      }
       if (mounted) {
         setState(() => _sheetOpen = false);
         _bumpControls();
@@ -611,7 +719,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Future<void> _openAudioSheet() => _openSheet(() async {
         final engine = _engine;
         if (engine == null) return;
-        await showPlayerSheet<void>(
+        await showPlayerFullScreenSheet<void>(
           context,
           builder: (_) => AudioTracksSheet(
             english: english,
@@ -627,9 +735,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               if (!mounted) return;
               await context.read<AppState>().setSetting('audioDelayMs', ms);
             },
+            expanded: true,
           ),
         );
-      });
+      }, pauseVideo: true);
 
   List<Map<String, dynamic>> _externalSubRows = const [];
 
@@ -650,7 +759,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         if (engine == null) return;
         await _loadExternalSubs();
         if (!mounted) return;
-        final result = await showPlayerSheet<String>(
+        final result = await showPlayerFullScreenSheet<String>(
           context,
           builder: (_) => SubtitleTracksSheet(
             english: english,
@@ -665,13 +774,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               }
             },
             onOpenSettings: () => Navigator.of(context).pop('style-settings'),
+            expanded: true,
           ),
         );
         if (!mounted) return;
         if (result == 'style-settings') {
           await _openSubtitleStyleSheet();
         }
-      });
+      }, pauseVideo: true);
 
   /// Live-editing subtitle style/timing sheet (user request): every change is
   /// pushed to the engine immediately and persisted through AppState.
@@ -686,6 +796,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       });
 
   void _applySubtitleValues(Map<String, Object?> values) {
+    // Workstream C: remember exactly what the sheet applied so the AppState
+    // listener's diff treats this as the new baseline (no double-apply, no
+    // clobbering the preview).
+    _lastSubValues = Map<String, Object?>.of(values);
     // Visual settings: straight into the overlay's notifier — the running
     // video restyles instantly (Task 130 requirement: no restart, no
     // re-open, no leaving the player).
@@ -712,32 +826,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   Future<void> _openStreamsSheet() => _openSheet(() async {
         if (widget.streams.isEmpty) return;
-        await showPlayerSheet<void>(
+        await showPlayerFullScreenSheet<void>(
           context,
           builder: (_) => StreamsSheet(
             english: english,
             streams: widget.streams,
             selectedIndex: _streamIndex,
             onPick: (stream) => unawaited(_switchStream(stream)),
+            expanded: true,
           ),
         );
-      });
+      }, pauseVideo: true);
 
   Future<void> _switchEpisode(Map<String, dynamic> episode) async {
-    final app = context.read<AppState>();
     final episodeId = (episode['id'] ?? widget.item.id).toString();
     if (episodeId == widget.videoId) return;
     try {
-      final streams =
-          await app.catalogs.streams(widget.item.type, episodeId, app.addons);
-      final playable = streams.where((stream) {
-        if (stream['url'] != null) return true;
-        if (stream['infoHash'] != null) {
-          if (app.api.debridService != null) return true;
-          return app.webSettings['p2pEnabled'] == true;
-        }
-        return false;
-      }).toList();
+      final playable = await _fetchPlayableStreams(episodeId);
+      if (!mounted) return;
       if (playable.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -753,7 +859,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return;
       }
       final stream = _bestStream(playable);
-      final resolved = await _resolveForPlayback(app, stream);
+      final resolved = await _resolveForPlayback(_app, stream);
       if (!mounted) return;
       if (resolved == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -795,6 +901,133 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         );
       }
     }
+  }
+
+  /// Playable-stream fetch shared by the episode-switch paths (the same
+  /// debrid/P2P gate the detail page applies before showing sources).
+  Future<List<Map<String, dynamic>>> _fetchPlayableStreams(
+    String episodeId,
+  ) async {
+    final app = _app;
+    final streams =
+        await app.catalogs.streams(widget.item.type, episodeId, app.addons);
+    return streams.where((stream) {
+      if (stream['url'] != null) return true;
+      if (stream['infoHash'] != null) {
+        if (app.api.debridService != null) return true;
+        return app.webSettings['p2pEnabled'] == true;
+      }
+      return false;
+    }).toList();
+  }
+
+  /// Next-episode flow routed through the EXISTING source-selection page
+  /// (spec B2.3: never bypass source selection). Used by the Up-Next card's
+  /// Next button AND by the auto-advance when a data-provided countdown
+  /// exists. [_episodeTransitionBusy] closes the double-tap/countdown race.
+  Future<void> _startEpisodeSources(Map<String, dynamic> episode) async {
+    if (_episodeTransitionBusy) return;
+    _episodeTransitionBusy = true;
+    try {
+      final episodeId = (episode['id'] ?? widget.item.id).toString();
+      if (episodeId == widget.videoId) return;
+      final playable = await _fetchPlayableStreams(episodeId);
+      if (!mounted) return;
+      if (playable.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              english
+                  ? 'No playable source for the next episode.'
+                  : 'لا يوجد مصدر قابل للتشغيل للحلقة التالية.',
+            ),
+          ),
+        );
+        return;
+      }
+      final picked = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(
+          builder: (_) => SourcesPage(
+            item: widget.item,
+            video: episode,
+            streams: playable,
+            english: english,
+          ),
+        ),
+      );
+      if (!mounted || picked == null) return;
+      final resolved = await _resolveForPlayback(_app, picked);
+      if (!mounted) return;
+      if (resolved == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              english
+                  ? 'Could not resolve the source. Try another stream.'
+                  : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
+            ),
+          ),
+        );
+        return;
+      }
+      final pickedIndex = playable.indexOf(picked);
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => VideoPlayerPage(
+            item: widget.item,
+            url: resolved.url,
+            streamName:
+                (picked['title'] ?? picked['addonName'] ?? 'Noor').toString(),
+            videoId: episodeId,
+            season: (episode['season'] as num?)?.toInt(),
+            episode: (episode['episode'] as num?)?.toInt(),
+            headers: resolved.headers.isEmpty ? null : resolved.headers,
+            torrent: resolved.torrent,
+            streams: playable,
+            streamIndex: pickedIndex < 0 ? null : pickedIndex,
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        // Task 128: actionable message instead of the raw exception string.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(torrentFriendlyMessage(error, english: english)),
+          ),
+        );
+      }
+    } finally {
+      _episodeTransitionBusy = false;
+    }
+  }
+
+  // ── Skip intro / outro (workstream B) ────────────────────────────────
+
+  Future<void> _skipSegment({required bool intro}) async {
+    final engine = _engine;
+    if (engine == null || !engine.ready) return;
+    if (intro) {
+      final end = _segments.introEndMs;
+      if (end == null) return;
+      await engine.seekTo(Duration(milliseconds: end));
+      _flashHint(english ? 'Intro skipped' : 'تم تخطي المقدمة');
+    } else {
+      final end = _segments.outroEndMs;
+      if (end == null) return;
+      final duration = engine.duration.inMilliseconds;
+      final next = _episodeAt(_currentEpisodeIndex() + 1);
+      if (duration > 0 && end >= duration - 1500 && next != null) {
+        // The outro runs to the end of the video — skipping it moves the
+        // user to the next stage: the next-episode source flow.
+        await _startEpisodeSources(next);
+        return;
+      }
+      await engine.seekTo(Duration(milliseconds: end));
+      _flashHint(english ? 'Outro skipped' : 'تم تخطي الخاتمة');
+    }
+    _bumpControls();
   }
 
   Map<String, dynamic> _bestStream(List<Map<String, dynamic>> list) {
@@ -910,8 +1143,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (engine == null || !engine.ready) return;
     _dragStartDx = details.localFocalPoint.dx;
     _dragAccumDx = 0;
+    _dragAccumDy = 0;
     _positionAtDragStartMs = engine.position.inMilliseconds;
     _brightnessStart = null;
+    _volumeStart = null;
     _mode = _GestureMode.none;
   }
 
@@ -937,11 +1172,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (engine == null || !engine.ready) return;
     final size = MediaQuery.sizeOf(context);
 
-    // Axis lock on first significant movement.
+    // Axis lock on first significant movement (the dead zone — taps and
+    // micro-jitters below [kGestureAxisLockPx] never claim a gesture).
     if (_mode == _GestureMode.none) {
       final dx = details.focalPointDelta.dx;
       final dy = details.focalPointDelta.dy;
-      if (dx.abs() < 8 && dy.abs() < 8) return;
+      if (dx.abs() < kGestureAxisLockPx && dy.abs() < kGestureAxisLockPx) {
+        return;
+      }
       if (dx.abs() >= dy.abs()) {
         _mode = _GestureMode.seek;
       } else if (_dragStartDx < size.width * .35) {
@@ -962,22 +1200,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         setState(() {
           _hudDeltaSeconds = (deltaMs / 1000).round();
           _hudTargetMs =
-              (_positionAtDragStartMs + deltaMs).clamp(0, durationMs).toInt();
+              clampSeekTargetMs(_positionAtDragStartMs + deltaMs, durationMs);
         });
       case _GestureMode.brightness:
-        unawaited(_updateBrightness(details.focalPointDelta.dy, size.height));
+        // Accumulate BEFORE applying: the value tracks the total drag from
+        // the captured start, not just this tick's delta (A2 fix).
+        _dragAccumDy += details.focalPointDelta.dy;
+        unawaited(_updateBrightness(_dragAccumDy, size.height));
       case _GestureMode.volume:
-        unawaited(_updateVolume(details.focalPointDelta.dy, size.height));
+        _dragAccumDy += details.focalPointDelta.dy;
+        unawaited(_updateVolume(_dragAccumDy, size.height));
       case _GestureMode.zoom:
       case _GestureMode.none:
         break;
     }
   }
 
-  Future<void> _updateBrightness(double dy, double height) async {
+  Future<void> _updateBrightness(double totalDy, double height) async {
     try {
       _brightnessStart ??= await ScreenBrightness().application;
-      final next = (_brightnessStart! - dy / height).clamp(0.0, 1.0);
+      final next = gestureScaledValue(
+        start: _brightnessStart!,
+        totalDy: totalDy,
+        height: height,
+      );
       await ScreenBrightness().setApplicationScreenBrightness(next);
       if (mounted) setState(() => _hudValue = next);
     } catch (_) {
@@ -986,10 +1232,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
   }
 
-  Future<void> _updateVolume(double dy, double height) async {
+  Future<void> _updateVolume(double totalDy, double height) async {
     try {
-      final current = await VolumeController.instance.getVolume();
-      final next = (current - dy / height).clamp(0.0, 1.0);
+      // Captured ONCE per gesture (see [_volumeStart]): re-reading the
+      // system value every tick raced the platform round-trip.
+      _volumeStart ??= await VolumeController.instance.getVolume();
+      final next = gestureScaledValue(
+        start: _volumeStart!,
+        totalDy: totalDy,
+        height: height,
+      );
       VolumeController.instance.showSystemUI = false;
       await VolumeController.instance.setVolume(next);
       if (mounted) setState(() => _hudValue = next);
@@ -1035,6 +1287,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   @override
   void dispose() {
+    _app.removeListener(_onAppSettingsChanged);
     _hideTimer?.cancel();
     _progressTimer?.cancel();
     _hintTimer?.cancel();
@@ -1072,8 +1325,27 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _stuck || (engine?.failed ?? false) || _engineInitError != null;
     final duration = engine?.duration.inMilliseconds ?? 0;
     final position = engine?.position.inMilliseconds ?? 0;
-    final nearEnd = duration > 0 && (duration - position) <= 30000 ||
-        (duration > 0 && position / duration >= 0.95);
+    // Workstream B: skip pills exist ONLY inside data-provided windows; the
+    // next-episode card trigger is data-first with the shipped nearEnd
+    // fallback (≤30 s left or ≥95% elapsed) inherited from the old code.
+    final introVisible = ready &&
+        !_locked &&
+        SegmentWindows.introVisible(
+          segments: _segments,
+          positionMs: position,
+          durationMs: duration,
+        );
+    final outroVisible = ready &&
+        !_locked &&
+        SegmentWindows.outroVisible(
+          segments: _segments,
+          positionMs: position,
+          durationMs: duration,
+        );
+    final cardAppearAt = SegmentWindows.cardAppearAtMs(
+      segments: _segments,
+      durationMs: duration,
+    );
     final nextEpisode = widget.item.type == 'series'
         ? _episodeAt(_currentEpisodeIndex() + 1)
         : null;
@@ -1482,13 +1754,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     ),
                   ),
 
-                // Up-Next card.
+                // Up-Next card. Suppressed while the skip-outro pill is up
+                // (the same corner — the outro pill is the actionable one
+                // there; the card returns once the outro window passes).
                 if (!_locked &&
+                    ready &&
+                    !failed &&
                     nextEpisode != null &&
-                    nearEnd &&
+                    cardAppearAt >= 0 &&
+                    position >= cardAppearAt &&
+                    !outroVisible &&
                     !_upNextDismissed &&
-                    !_stopScrobbled &&
-                    duration > 0)
+                    !_stopScrobbled)
                   Positioned(
                     bottom: 180 * scale,
                     right: 16,
@@ -1512,7 +1789,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                 border: Border.all(color: HorseTheme.line),
                               ),
                               child: Text(
-                                countdown(nearEnd, duration, position),
+                                _cardCountdown(duration, position),
                                 style: const TextStyle(
                                   color: Colors.white54,
                                   fontSize: 10,
@@ -1555,8 +1832,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                   label: english
                                       ? 'Next episode'
                                       : 'الحلقة التالية',
+                                  // Spec B2.3: ALWAYS through the existing
+                                  // source-selection page — never auto-pick.
                                   onPressed: () => unawaited(
-                                    _switchEpisode(nextEpisode),
+                                    _startEpisodeSources(nextEpisode),
                                   ),
                                 ),
                               ),
@@ -1572,6 +1851,25 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       ),
                     ),
                   ),
+                // Workstream B: skip-intro / skip-outro pill. Visible ONLY
+                // while the playhead is inside a data-provided window — with
+                // no timing data it never appears (spec B1.4/B3: no guessed
+                // timings, feature inactive).
+                if (introVisible || outroVisible)
+                  Positioned(
+                    bottom: 180 * scale,
+                    right: 16,
+                    child: _SegmentSkipPill(
+                      key: ValueKey(introVisible ? 'intro' : 'outro'),
+                      label: introVisible
+                          ? (english ? 'Skip intro' : 'تخطي المقدمة')
+                          : (english ? 'Skip outro' : 'تخطي الخاتمة'),
+                      icon: introVisible
+                          ? Icons.fast_forward_rounded
+                          : Icons.skip_next_rounded,
+                      onTap: () => unawaited(_skipSegment(intro: introVisible)),
+                    ),
+                  ),
               ],
             ],
           ),
@@ -1580,8 +1878,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     );
   }
 
-  String countdown(bool nearEnd, int duration, int position) {
-    final seconds = ((duration - position) / 1000).ceil().clamp(0, 30);
+  /// The card's countdown: to the auto-advance moment when data provides
+  /// one, otherwise to the end of the episode (shipped display behavior).
+  String _cardCountdown(int duration, int position) {
+    final at = SegmentWindows.autoAdvanceAtMs(
+          segments: _segments,
+          durationMs: duration,
+        ) ??
+        duration;
+    final seconds = ((at - position) / 1000).ceil().clamp(0, 9999);
     final s = seconds.toString();
     final unit = english ? 's' : 'ث';
     return seconds > 0
@@ -1652,6 +1957,50 @@ class _PlaybackResolution {
   final String url;
   final Map<String, String> headers;
   final PreparedTorrent? torrent;
+}
+
+/// Skip-intro / skip-outro pill (workstream B). Material icon + label in the
+/// translucent pill language of the player's other chrome (_TorrentHud);
+/// 44px-tall touch target for landscape phones.
+class _SegmentSkipPill extends StatelessWidget {
+  const _SegmentSkipPill({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: Colors.white),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 }
 
 class _TorrentHud extends StatelessWidget {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, mapEquals;
 import 'package:flutter/material.dart';
 
 import '../engine/playback_engine.dart';
@@ -123,6 +123,33 @@ class SubtitleStyle {
         fontFamily: _familyName(map['subFontFamily']),
       );
 
+  /// The webSettings keys this style (plus the mpv sub-delay) consumes.
+  static const Set<String> settingsKeys = {
+    'subFontSize',
+    'subFontColor',
+    'subStyle',
+    'subBorderColor',
+    'subBorderSize',
+    'subBackgroundOpacity',
+    'subPos',
+    'subFontFamily',
+    'subtitleOffsetMs',
+  };
+
+  /// Projection of a settings map onto [settingsKeys] (absent keys omitted).
+  ///
+  /// Used by the player to DIFF incoming AppState notifications: a settings-
+  /// page write, a cloud-sync merge, or a backup restore reaches an open
+  /// player through this projection — if it differs from the last applied
+  /// values, the on-screen subtitles restyle instantly (no restart, no
+  /// re-open). Values stay raw so they can round-trip into [fromMap] and be
+  /// compared with [mapEquals] across transports.
+  static Map<String, Object?> valuesFrom(Map<String, dynamic> settings) =>
+      <String, Object?>{
+        for (final key in settingsKeys)
+          if (settings[key] != null) key: settings[key],
+      };
+
   /// mpv sub-pos → Flutter alignment: 0 → topCenter, 50 → center, 100 →
   /// bottomCenter (position is clamped at parse time).
   Alignment get alignment => Alignment(0, (position / 50.0) - 1.0);
@@ -185,10 +212,29 @@ class _SubtitleOverlayState extends State<SubtitleOverlay> {
   @override
   void initState() {
     super.initState();
-    _subscription = widget.engine.subtitleTexts.listen((lines) {
+    _subscribe(widget.engine);
+  }
+
+  void _subscribe(PlaybackEngine engine) {
+    _subscription = engine.subtitleTexts.listen((lines) {
       if (!mounted) return;
       setState(() => _lines = lines);
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SubtitleOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.engine, oldWidget.engine)) {
+      // Engine swap (software-decode retry / error retry): the old
+      // subscription points at a disposed player, so the subtitle TEXT would
+      // freeze forever even though the style notifier kept flowing.
+      // Re-seed from the new engine's snapshot and resubscribe.
+      unawaited(_subscription?.cancel());
+      _subscription = null;
+      _lines = widget.engine.subtitleTextSnapshot;
+      _subscribe(widget.engine);
+    }
   }
 
   @override
