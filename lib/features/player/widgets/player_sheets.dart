@@ -215,158 +215,14 @@ class SheetScaffold extends StatelessWidget {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 
-class PlayerSettingsSheet extends StatelessWidget {
-  const PlayerSettingsSheet({
+// Task 141 (user mandate): the playback-settings picker joined the RIGHT-HALF
+// side panels — PlayerSettingsPanelBody lives in
+// widgets/player_side_panel.dart. The selection chips below are shared with
+// the sheets that remain.
+
+class SheetSelectChip extends StatelessWidget {
+  const SheetSelectChip({
     super.key,
-    required this.english,
-    required this.speed,
-    required this.fit,
-    required this.audioLabel,
-    required this.subtitleLabel,
-    required this.hasEpisodes,
-    required this.onSpeed,
-    required this.onFit,
-    required this.onOpenAudio,
-    required this.onOpenSubtitles,
-    required this.onOpenEpisodes,
-  });
-
-  final bool english;
-  final double speed;
-  final BoxFit fit;
-  final String audioLabel;
-  final String subtitleLabel;
-  final bool hasEpisodes;
-  final ValueChanged<double> onSpeed;
-  final ValueChanged<BoxFit> onFit;
-  final VoidCallback onOpenAudio;
-  final VoidCallback onOpenSubtitles;
-  final VoidCallback onOpenEpisodes;
-
-  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-
-  @override
-  Widget build(BuildContext context) {
-    final entries = [
-      _SheetEntry(
-        icon: LucideIcons.audioLines,
-        label: english ? 'Audio track' : 'المسار الصوتي',
-        value: audioLabel,
-        onTap: onOpenAudio,
-      ),
-      _SheetEntry(
-        icon: LucideIcons.captions,
-        label: english ? 'Subtitles' : 'الترجمة',
-        value: subtitleLabel,
-        onTap: onOpenSubtitles,
-      ),
-      if (hasEpisodes)
-        _SheetEntry(
-          icon: LucideIcons.listVideo,
-          label: english ? 'Episodes' : 'الحلقات',
-          value: '',
-          onTap: onOpenEpisodes,
-        ),
-    ];
-
-    return SheetScaffold(
-      title: english ? 'Playback settings' : 'إعدادات التشغيل',
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionLabel(english ? 'Speed' : 'السرعة'),
-            const SizedBox(height: 8),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              childAspectRatio: 2.6,
-              children: [
-                for (final value in _speeds)
-                  _SelectChip(
-                    label: '${value == 1.0 ? '1' : value}×',
-                    selected: (speed - value).abs() < .01,
-                    onTap: () => onSpeed(value),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _SectionLabel(english ? 'Video fit' : 'ملاءمة الفيديو'),
-            const SizedBox(height: 8),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              childAspectRatio: 2.2,
-              children: [
-                _SelectChip(
-                  label: english ? 'Fit' : 'احتواء',
-                  selected: fit == BoxFit.contain,
-                  onTap: () => onFit(BoxFit.contain),
-                ),
-                _SelectChip(
-                  label: english ? 'Fill' : 'ملء',
-                  selected: fit == BoxFit.cover,
-                  onTap: () => onFit(BoxFit.cover),
-                ),
-                _SelectChip(
-                  label: english ? 'Stretch' : 'تمديد',
-                  selected: fit == BoxFit.fill,
-                  onTap: () => onFit(BoxFit.fill),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            for (final entry in entries)
-              _EntryTile(
-                icon: entry.icon,
-                label: entry.label,
-                value: entry.value,
-                onTap: entry.onTap,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetEntry {
-  const _SheetEntry({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white38,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: .8,
-        ),
-      );
-}
-
-class _SelectChip extends StatelessWidget {
-  const _SelectChip({
     required this.label,
     required this.selected,
     required this.onTap,
@@ -401,51 +257,13 @@ class _SelectChip extends StatelessWidget {
       );
 }
 
-class _EntryTile extends StatelessWidget {
-  const _EntryTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => ListTile(
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        leading: Icon(icon, size: 20, color: Colors.white70),
-        title: Text(
-          label,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-        ),
-        subtitle: value.isEmpty
-            ? null
-            : Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white38, fontSize: 12),
-              ),
-        trailing: const Icon(
-          LucideIcons.chevronRight,
-          size: 20,
-          color: Colors.white24,
-        ),
-        onTap: onTap,
-      );
-}
-
 // ── Track pickers ──────────────────────────────────────────────────────────
 
 // The audio / subtitle / stream pickers moved to the RIGHT-HALF side panel
 // (widgets/player_side_panel.dart, Task 139 user mandate): instant open,
-// in-panel loading and a header refresh button. Only the settings, episodes
-// and subtitle-style sheets remain bottom sheets here.
+// in-panel loading and a header refresh button. The playback settings
+// joined them in Task 141 — only the episodes and subtitle-style
+// sheets remain bottom sheets here.
 
 /// A selectable subtitle row model: external addon subtitles carry their raw
 /// language code + source addon; embedded mpv tracks carry track info.
@@ -554,8 +372,7 @@ class EpisodesSheet extends StatelessWidget {
                   )
                 : null,
             trailing: isCurrent
-                ? const Icon(LucideIcons.play,
-                    size: 20, color: HorseTheme.gold)
+                ? const Icon(LucideIcons.play, size: 20, color: HorseTheme.gold)
                 : null,
             onTap: isCurrent
                 ? null
@@ -817,7 +634,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
                 padding: EdgeInsetsDirectional.only(
                   end: option.$1 == 100 ? 0 : 6,
                 ),
-                child: _SelectChip(
+                child: SheetSelectChip(
                   label: option.$2,
                   selected: (pos - option.$1).abs() <= 2,
                   onTap: () {
@@ -1083,7 +900,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
                     child: Padding(
                       padding: EdgeInsetsDirectional.only(
                           end: option.$1 == 'box' ? 0 : 6),
-                      child: _SelectChip(
+                      child: SheetSelectChip(
                         label: option.$2,
                         selected: _v['subStyle'] == option.$1,
                         onTap: () => _commit('subStyle', option.$1),

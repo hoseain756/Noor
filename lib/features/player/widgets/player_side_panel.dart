@@ -3,6 +3,8 @@
 /// (50% of the screen width, full height) the INSTANT its button is pressed,
 /// shows its loading state inside the panel itself, and carries a refresh
 /// button in the header so the lists can be re-fetched in place.
+/// Task 141: the playback-settings picker joined them — same chrome, same
+/// instant open, same full-height right half.
 ///
 /// Panels are in-page overlays (not routes): opening is a single setState —
 /// zero route-transition delay — and the video pauses for the panel's
@@ -25,10 +27,11 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/horse_theme.dart';
 import '../engine/playback_engine.dart';
-import 'player_sheets.dart' show SubtitleChoice, subtitleLanguageName;
+import 'player_sheets.dart'
+    show SheetSelectChip, SubtitleChoice, subtitleLanguageName;
 
 /// Which picker the side panel currently hosts.
-enum PlayerPanelKind { audio, subtitles, streams }
+enum PlayerPanelKind { audio, subtitles, streams, settings }
 
 /// Panel width: exactly HALF the screen, clamped for readability — narrow
 /// landscape phones never go below 300dp, large tablets never past 640dp.
@@ -870,6 +873,186 @@ class StreamsPanelBody extends StatelessWidget {
           onTap: playable ? () => onPick(stream) : null,
         );
       },
+    );
+  }
+}
+
+// ── Playback settings ──────────────────────────────────────────────────────
+
+/// Playback-settings body (Task 141 user mandate): the player's settings now
+/// open as the SAME right-half panel as the subtitle picker — instant,
+/// in-page, full height — instead of a bottom-sheet route. Speed and video
+/// fit apply LIVE with the panel staying open (same contract as picking
+/// audio tracks); the audio / subtitles entries hand the panel over in
+/// place, and episodes keeps its dense bottom sheet.
+class PlayerSettingsPanelBody extends StatelessWidget {
+  const PlayerSettingsPanelBody({
+    super.key,
+    required this.english,
+    required this.speed,
+    required this.fit,
+    required this.audioLabel,
+    required this.subtitleLabel,
+    required this.hasEpisodes,
+    required this.onSpeed,
+    required this.onFit,
+    required this.onOpenAudio,
+    required this.onOpenSubtitles,
+    required this.onOpenEpisodes,
+  });
+
+  final bool english;
+  final double speed;
+  final BoxFit fit;
+  final String audioLabel;
+  final String subtitleLabel;
+  final bool hasEpisodes;
+  final ValueChanged<double> onSpeed;
+  final ValueChanged<BoxFit> onFit;
+  final VoidCallback onOpenAudio;
+  final VoidCallback onOpenSubtitles;
+  final VoidCallback onOpenEpisodes;
+
+  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 4),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
+          child: Text(
+            english ? 'Speed' : 'السرعة',
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: .8,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          childAspectRatio: 2.6,
+          padding: EdgeInsets.zero,
+          children: [
+            for (final value in _speeds)
+              SheetSelectChip(
+                label: '${value == 1.0 ? '1' : value}×',
+                selected: (speed - value).abs() < .01,
+                onTap: () => onSpeed(value),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+          child: Text(
+            english ? 'Video fit' : 'ملاءمة الفيديو',
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: .8,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          childAspectRatio: 2.2,
+          padding: EdgeInsets.zero,
+          children: [
+            SheetSelectChip(
+              label: english ? 'Fit' : 'احتواء',
+              selected: fit == BoxFit.contain,
+              onTap: () => onFit(BoxFit.contain),
+            ),
+            SheetSelectChip(
+              label: english ? 'Fill' : 'ملء',
+              selected: fit == BoxFit.cover,
+              onTap: () => onFit(BoxFit.cover),
+            ),
+            SheetSelectChip(
+              label: english ? 'Stretch' : 'تمديد',
+              selected: fit == BoxFit.fill,
+              onTap: () => onFit(BoxFit.fill),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ListTile(
+          dense: true,
+          leading: const Icon(LucideIcons.audioLines,
+              size: 20, color: Colors.white70),
+          title: Text(
+            english ? 'Audio track' : 'المسار الصوتي',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          subtitle: Text(
+            audioLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+          trailing: const Icon(
+            LucideIcons.chevronRight,
+            size: 20,
+            color: Colors.white24,
+          ),
+          onTap: onOpenAudio,
+        ),
+        ListTile(
+          dense: true,
+          leading:
+              const Icon(LucideIcons.captions, size: 20, color: Colors.white70),
+          title: Text(
+            english ? 'Subtitles' : 'الترجمة',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          subtitle: Text(
+            subtitleLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+          trailing: const Icon(
+            LucideIcons.chevronRight,
+            size: 20,
+            color: Colors.white24,
+          ),
+          onTap: onOpenSubtitles,
+        ),
+        if (hasEpisodes)
+          ListTile(
+            dense: true,
+            leading: const Icon(
+              LucideIcons.listVideo,
+              size: 20,
+              color: Colors.white70,
+            ),
+            title: Text(
+              english ? 'Episodes' : 'الحلقات',
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+            trailing: const Icon(
+              LucideIcons.chevronRight,
+              size: 20,
+              color: Colors.white24,
+            ),
+            onTap: onOpenEpisodes,
+          ),
+      ],
     );
   }
 }

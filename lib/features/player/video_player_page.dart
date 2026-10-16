@@ -636,46 +636,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
   }
 
-  Future<void> _openSettings() => _openSheet(() async {
-        final next = await showPlayerSheet<String>(
-          context,
-          builder: (_) => PlayerSettingsSheet(
-            english: english,
-            speed: _engine?.rate ?? 1.0,
-            fit: _fit,
-            audioLabel: _audioLabel,
-            subtitleLabel: _subtitleLabel,
-            hasEpisodes: widget.item.type == 'series' && _episodes.isNotEmpty,
-            onSpeed: (value) {
-              Navigator.of(context).pop('speed:${value.toString()}');
-            },
-            onFit: (fit) => Navigator.of(context).pop('fit:$fit'),
-            onOpenAudio: () => Navigator.of(context).pop('audio'),
-            onOpenSubtitles: () => Navigator.of(context).pop('subtitles'),
-            onOpenEpisodes: () => Navigator.of(context).pop('episodes'),
-          ),
-        );
-        if (!mounted || next == null) return;
-        if (next.startsWith('speed:')) {
-          final value = double.tryParse(next.substring(6));
-          if (value != null) await _engine?.setRate(value);
-        } else if (next.startsWith('fit:')) {
-          final name = next.substring(4);
-          setState(() {
-            _fit = name == 'BoxFit.cover'
-                ? BoxFit.cover
-                : name == 'BoxFit.fill'
-                    ? BoxFit.fill
-                    : BoxFit.contain;
-          });
-        } else if (next == 'audio') {
-          _openAudioPanel();
-        } else if (next == 'subtitles') {
-          _openSubtitlesPanel();
-        } else if (next == 'episodes') {
-          await _openEpisodesSheet();
-        }
-      });
+  /// Task 141 (user mandate): the playback settings open as the SAME
+  /// right-half panel as the subtitle picker — a single setState, no route,
+  /// no await. The old pop-result sheet flow (speed:/fit:/audio/...) is gone.
+  void _openSettingsPanel() => _openPanel(PlayerPanelKind.settings);
 
   String get _audioLabel {
     final track = _engine?.selectedAudio;
@@ -724,8 +688,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _closePanel();
       return;
     }
-    final wasPlaying = engine?.playing ?? false;
-    if (wasPlaying) unawaited(engine!.pause());
+    // Task 141: panel→panel hand-offs (settings → audio / subtitles) keep
+    // the ORIGINAL session's pause contract — no double pause, and the final
+    // close still resumes exactly when the first panel interrupted playback.
+    final switching = _panel != null;
+    final wasPlaying =
+        switching ? _panelWasPlaying : (engine?.playing ?? false);
+    if (!switching && wasPlaying) unawaited(engine!.pause());
     _hideTimer?.cancel();
     setState(() {
       _panel = kind;
@@ -832,6 +801,42 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             streams: _panelStreams,
             currentStream: currentStream,
             onPick: (stream) => unawaited(_switchToStream(stream)),
+          ),
+        );
+      case PlayerPanelKind.settings:
+        // Task 141 (user mandate): the settings fill the SAME right-half
+        // panel as the subtitle picker. No refresh button — everything here
+        // is engine/device state, applied live in front of the user.
+        return PlayerSidePanel(
+          title: english ? 'Playback settings' : 'إعدادات التشغيل',
+          english: english,
+          onClose: _closePanel,
+          child: PlayerSettingsPanelBody(
+            english: english,
+            speed: _engine?.rate ?? 1.0,
+            fit: _fit,
+            audioLabel: _audioLabel,
+            subtitleLabel: _subtitleLabel,
+            hasEpisodes: widget.item.type == 'series' && _episodes.isNotEmpty,
+            // Speed + fit apply LIVE — the panel stays open so the user can
+            // audition values (same contract as picking audio tracks).
+            onSpeed: (value) {
+              unawaited(_engine?.setRate(value));
+              if (mounted) setState(() {});
+            },
+            onFit: (value) => setState(() => _fit = value),
+            // Audio / subtitles hand the panel over IN PLACE (no route, no
+            // flash) — the original pause/resume session is preserved by
+            // _openPanel's switching branch.
+            onOpenAudio: () => _openPanel(PlayerPanelKind.audio),
+            onOpenSubtitles: () => _openPanel(PlayerPanelKind.subtitles),
+            // Episodes stays a dense bottom sheet (SheetScaffold route); the
+            // panel closes with its normal resume contract, matching the old
+            // flow where playback kept running under the sheet.
+            onOpenEpisodes: () {
+              _closePanel();
+              unawaited(_openEpisodesSheet());
+            },
           ),
         );
     }
@@ -1599,7 +1604,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             PlayerSpeedPill(
                               label: _speedLabel,
                               semanticLabel: 'Playback speed',
-                              onTap: _openSettings,
+                              onTap: _openSettingsPanel,
                             ),
                           ],
                         ),
