@@ -1,5 +1,5 @@
 name: noor_mobile
-description: "Horse mobile application for phones and tablets."
+description: "NOVA, a bilingual cinematic media experience for phones and tablets."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -60,6 +60,8 @@ dependencies:
   postgres: ^3.5.6
   share_plus: ^13.3.1
   lucide_icons_flutter: ^4.0.0
+  flutter_svg: ^2.3.0
+  cached_network_image: ^4.0.4
 
 dependency_overrides:
   # Sandbox/user builds have no NDK: pin the last pre-jnigen path_provider_android
@@ -76,6 +78,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  analyzer: ^14.5.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -88,7 +91,31 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/brand/svg/
+    - lib/l10n/
+
   fonts:
+    - family: IBMPlexSansArabic
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSansArabic-Bold.ttf
+          weight: 700
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
     # App-wide UI family (user request): Tajawal — Arabic + Latin, OFL.
     - family: Tajawal
       fonts:

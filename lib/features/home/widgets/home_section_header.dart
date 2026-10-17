@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 /// The home gold-bar section header: a 3×19 rounded gold accent bar, a 10px
 /// gap, then the rail title in `titleLarge` — extracted verbatim from the
@@ -22,14 +22,8 @@ class HomeSectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 3,
-          height: 19,
-          decoration: BoxDecoration(
-            color: HorseTheme.gold,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
+        Icon(LucideIcons.history,
+            size: 20, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 10),
         Expanded(
           child: Text(title, style: Theme.of(context).textTheme.titleLarge),

@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,189 +13,258 @@ import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/noor_toast.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
+import '../shell/nova_browse_widgets.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+/// Sliver panel: collections are created only as they approach the viewport.
 class CustomListsPanel extends StatelessWidget {
   const CustomListsPanel({super.key});
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final english = app.english;
-    return Padding(
-      padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(english ? 'Your collections' : 'قوائمك',
-                    style: Theme.of(context).textTheme.titleLarge),
-              ),
-              IconButton.filledTonal(
-                tooltip: english ? 'Import list' : 'استيراد قائمة',
-                onPressed: () => _importList(context),
-                icon: const Icon(Icons.file_download_outlined),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
-                onPressed: () => _createList(context),
-                icon: const Icon(Icons.add_rounded),
-                label: Text(english ? 'New list' : 'قائمة جديدة'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (app.customLists.isEmpty)
-            _CollectionEmpty(english: english)
-          else
-            for (final list in app.customLists)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Material(
-                  color: HorseTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    leading: _ListArtwork(item: list.items.firstOrNull),
-                    title: Text(list.name,
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      '${list.items.length} ${english ? 'titles' : 'عناوين'}'
-                      '${list.description == null ? '' : ' · ${list.description}'}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => CustomListDetailPage(listId: list.id),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-        ],
-      ),
-    );
+    return SliverMainAxisGroup(slivers: [
+      SliverToBoxAdapter(
+          child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+              child: Wrap(spacing: 12, runSpacing: 12, children: [
+                FilledButton.icon(
+                    onPressed: () => _createList(context),
+                    icon: const Icon(LucideIcons.plus),
+                    label: Text(app.tr('message605'))),
+                OutlinedButton.icon(
+                    onPressed: () => _importList(context),
+                    icon: const Icon(LucideIcons.import),
+                    label: Text(app.tr('message606'))),
+              ]))),
+      if (app.customLists.isEmpty)
+        SliverToBoxAdapter(
+            child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: _CollectionEmpty(english: app.english)))
+      else
+        SliverPadding(
+            padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+            sliver: SliverList.separated(
+                itemCount: app.customLists.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 16),
+                itemBuilder: (context, index) {
+                  final list = app.customLists[index];
+                  return Material(
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(24),
+                    child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    CustomListDetailPage(listId: list.id))),
+                        child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(children: [
+                              SizedBox(
+                                  width: 88,
+                                  height: 96,
+                                  child: Stack(children: [
+                                    for (var i = 0;
+                                        i <
+                                            (list.items.length < 3
+                                                ? list.items.length
+                                                : 3);
+                                        i++)
+                                      PositionedDirectional(
+                                          start: i * 18.0,
+                                          top: i * 5.0,
+                                          child: Transform.rotate(
+                                              angle: (i - 1) * .07,
+                                              child: _ListArtwork(
+                                                  item: list.items[i]))),
+                                    if (list.items.isEmpty)
+                                      Center(
+                                          child: Icon(LucideIcons.library,
+                                              size: 36,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary)),
+                                  ])),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                    Text(list.name,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                        '${list.items.length} ${app.tr('message607')}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge
+                                            ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary)),
+                                    if (list.description?.isNotEmpty ==
+                                        true) ...[
+                                      const SizedBox(height: 8),
+                                      Text(list.description!,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall)
+                                    ],
+                                  ])),
+                              const SizedBox(width: 12),
+                              Icon(Directionality.of(context) ==
+                                      TextDirection.rtl
+                                  ? LucideIcons.chevronLeft
+                                  : LucideIcons.chevronRight),
+                            ]))),
+                  );
+                })),
+    ]);
   }
 }
 
 class CustomListDetailPage extends StatelessWidget {
   const CustomListDetailPage({super.key, required this.listId});
   final String listId;
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final english = app.english;
     final list =
         app.customLists.where((entry) => entry.id == listId).firstOrNull;
-    if (list == null) {
-      return Scaffold(
-        appBar: AppBar(title: Text(english ? 'Collection' : 'القائمة')),
-        body: Center(
-          child: Text(english
-              ? 'This list no longer exists.'
-              : 'لم تعد هذه القائمة موجودة.'),
-        ),
-      );
-    }
-    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final posterWidth = MediaQuery.sizeOf(context).width >= 800 ? 184.0 : 160.0;
-    final rowExtent = posterWidth / .72 + 70 * scale + 18;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(list.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(
-            tooltip: english ? 'Edit list' : 'تعديل القائمة',
-            onPressed: () => _editList(context, list),
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          IconButton(
-            tooltip: english ? 'Copy share code' : 'نسخ رمز المشاركة',
-            onPressed: () => _copyList(context, list),
-            icon: const Icon(Icons.share_outlined),
-          ),
-          IconButton(
-            tooltip: english ? 'Delete list' : 'حذف القائمة',
-            onPressed: () => _deleteList(context, list),
-            icon: const Icon(Icons.delete_outline_rounded),
-          ),
-        ],
-      ),
-      body: list.items.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.playlist_add_rounded,
-                        size: 42, color: HorseTheme.gold),
-                    const SizedBox(height: 12),
-                    Text(
-                      english
-                          ? 'This list is empty. Add titles from their detail pages.'
-                          : 'هذه القائمة فارغة. أضف العناوين من صفحات التفاصيل.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1250),
-                child: GridView.builder(
-                  padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 32),
-                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: posterWidth,
-                    mainAxisExtent: rowExtent,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 16,
-                  ),
-                  itemCount: list.items.length,
-                  itemBuilder: (context, index) {
-                    final entry = list.items[index];
-                    final item = _toMediaItem(entry);
-                    return Stack(
-                      alignment: AlignmentDirectional.topEnd,
-                      children: [
-                        PosterCard(
-                          item: item,
-                          width: double.infinity,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                                builder: (_) => MediaDetailPage(item: item)),
-                          ),
-                        ),
-                        Material(
-                          color: Colors.black.withValues(alpha: .72),
-                          shape: const CircleBorder(),
-                          child: IconButton(
-                            tooltip: english
-                                ? 'Remove from list'
-                                : 'إزالة من القائمة',
-                            iconSize: 18,
-                            constraints: const BoxConstraints.tightFor(
-                                width: 38, height: 38),
-                            onPressed: () =>
-                                app.removeFromCustomList(list.id, entry.id),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-    );
+        appBar: AppBar(title: Text(app.tr('message608'))),
+        body: list == null
+            ? Center(child: Text(app.tr('message609')))
+            : Center(
+                child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: CustomScrollView(slivers: [
+                  SliverToBoxAdapter(
+                      child: NovaBrowseHeader(
+                          compact: true,
+                          title: list.name,
+                          eyebrow:
+                              '${list.items.length} ${app.tr('message610')}',
+                          subtitle: list.description ?? app.tr('message611'),
+                          actions: [
+                        FilledButton.tonalIcon(
+                            onPressed: () => _copyList(context, list),
+                            icon: const Icon(LucideIcons.share2),
+                            label: Text(app.tr('message139'))),
+                        OutlinedButton.icon(
+                            onPressed: () => _editList(context, list),
+                            icon: const Icon(LucideIcons.pencil),
+                            label: Text(app.tr('message612'))),
+                        IconButton(
+                            tooltip: app.tr('message613'),
+                            onPressed: () => _deleteList(context, list),
+                            icon: const Icon(LucideIcons.trash2)),
+                      ])),
+                  if (list.items.isEmpty)
+                    SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                            child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(LucideIcons.library,
+                                          size: 48,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary),
+                                      const SizedBox(height: 16),
+                                      Text(app.tr('message614'),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleLarge,
+                                          textAlign: TextAlign.center),
+                                      const SizedBox(height: 8),
+                                      Text(app.tr('message615'),
+                                          textAlign: TextAlign.center),
+                                    ]))))
+                  else
+                    SliverPadding(
+                        padding:
+                            const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 48),
+                        sliver: SliverLayoutBuilder(
+                            builder: (context, constraints) {
+                          final columns = (constraints.crossAxisExtent / 190)
+                              .floor()
+                              .clamp(2, 7);
+                          final width = (constraints.crossAxisExtent -
+                                  (columns - 1) * 20) /
+                              columns;
+                          return SliverGrid.builder(
+                              itemCount: list.items.length,
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: columns,
+                                      mainAxisExtent: width / .72 +
+                                          78 *
+                                              MediaQuery.textScalerOf(context)
+                                                  .scale(1),
+                                      crossAxisSpacing: 20,
+                                      mainAxisSpacing: 24),
+                              itemBuilder: (_, index) {
+                                final entry = list.items[index];
+                                final item = _toMediaItem(entry);
+                                return Stack(
+                                    alignment: AlignmentDirectional.topEnd,
+                                    children: [
+                                      PosterCard(
+                                          item: item,
+                                          width: width,
+                                          onTap: () => Navigator.of(context)
+                                              .push(MaterialPageRoute<void>(
+                                                  builder: (_) =>
+                                                      MediaDetailPage(
+                                                          item: item)))),
+                                      Material(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerHigh,
+                                          shape: const CircleBorder(),
+                                          child: IconButton(
+                                              tooltip: app.tr('message616'),
+                                              constraints:
+                                                  const BoxConstraints.tightFor(
+                                                      width: 48, height: 48),
+                                              onPressed: () {
+                                                app.removeFromCustomList(
+                                                    list.id, entry.id);
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(SnackBar(
+                                                        content: Text(app
+                                                            .tr('message617')),
+                                                        action: SnackBarAction(
+                                                            label: app.tr(
+                                                                'message618'),
+                                                            onPressed: () => app
+                                                                .addToCustomList(
+                                                                    list.id,
+                                                                    item))));
+                                              },
+                                              icon: const Icon(LucideIcons.x,
+                                                  size: 20))),
+                                    ]);
+                              });
+                        })),
+                ]),
+              )));
   }
 }
+
+Future<void> createNovaCollection(BuildContext context) => _createList(context);
 
 Future<void> _createList(BuildContext context) async {
   final app = context.read<AppState>();
@@ -285,7 +356,8 @@ class _CollectionFormDialogState extends State<_CollectionFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.english ? 'Collection details' : 'بيانات القائمة'),
+      icon: const Icon(LucideIcons.library, size: 32),
+      title: Text(NovaStrings.lookup(widget.english, 'message619')),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -297,17 +369,19 @@ class _CollectionFormDialogState extends State<_CollectionFormDialog> {
                 maxLength: 80,
                 autofocus: true,
                 decoration: InputDecoration(
-                    labelText: widget.english ? 'Name' : 'الاسم'),
+                    labelText:
+                        NovaStrings.lookup(widget.english, 'message620')),
                 validator: (value) => value?.trim().isNotEmpty == true
                     ? null
-                    : (widget.english ? 'Enter a name.' : 'أدخل اسم القائمة.'),
+                    : (NovaStrings.lookup(widget.english, 'message621')),
               ),
               TextField(
                 controller: _description,
                 maxLength: 200,
                 maxLines: 3,
                 decoration: InputDecoration(
-                    labelText: widget.english ? 'Description' : 'الوصف'),
+                    labelText:
+                        NovaStrings.lookup(widget.english, 'message622')),
               ),
             ],
           ),
@@ -316,7 +390,7 @@ class _CollectionFormDialogState extends State<_CollectionFormDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(widget.english ? 'Cancel' : 'إلغاء')),
+            child: Text(NovaStrings.lookup(widget.english, 'cancel'))),
         FilledButton(
           onPressed: () {
             if (_formKey.currentState?.validate() != true) return;
@@ -325,7 +399,7 @@ class _CollectionFormDialogState extends State<_CollectionFormDialog> {
               (_name.text.trim(), _description.text.trim()),
             );
           },
-          child: Text(widget.english ? 'Save' : 'حفظ'),
+          child: Text(NovaStrings.lookup(widget.english, 'save')),
         ),
       ],
     );
@@ -342,10 +416,8 @@ Future<void> _importList(BuildContext context) async {
   if (input == null || !context.mounted) return;
   final shared = decodeCustomListShare(input);
   if (shared == null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(english
-            ? 'That share code is invalid.'
-            : 'رمز المشاركة غير صالح.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(NovaStrings.lookup(english, 'message623'))));
     return;
   }
   try {
@@ -382,24 +454,23 @@ class _ImportListDialogState extends State<_ImportListDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: Text(widget.english ? 'Import a collection' : 'استيراد قائمة'),
+        icon: const Icon(LucideIcons.import, size: 32),
+        title: Text(NovaStrings.lookup(widget.english, 'message624')),
         content: TextField(
           controller: _code,
           minLines: 2,
           maxLines: 5,
           decoration: InputDecoration(
-            labelText: widget.english
-                ? 'Share code or link'
-                : 'رمز المشاركة أو الرابط',
+            labelText: NovaStrings.lookup(widget.english, 'message625'),
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(widget.english ? 'Cancel' : 'إلغاء')),
+              child: Text(NovaStrings.lookup(widget.english, 'cancel'))),
           FilledButton(
               onPressed: () => Navigator.pop(context, _code.text.trim()),
-              child: Text(widget.english ? 'Import' : 'استيراد')),
+              child: Text(NovaStrings.lookup(widget.english, 'message626'))),
         ],
       );
 }
@@ -412,9 +483,7 @@ Future<void> _copyList(BuildContext context, CustomMediaList list) async {
   if (!context.mounted) return;
   NoorToast.show(
     context,
-    english
-        ? 'Share code copied. The recipient can import it in My Library.'
-        : 'نُسخ رمز المشاركة. يمكن استيراده من مكتبتي.',
+    NovaStrings.lookup(english, 'message627'),
   );
 }
 
@@ -424,17 +493,16 @@ Future<void> _deleteList(BuildContext context, CustomMediaList list) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: Text(english ? 'Delete this collection?' : 'حذف هذه القائمة؟'),
-      content: Text(english
-          ? 'Its saved titles will be removed from this collection.'
-          : 'ستُزال العناوين المحفوظة من هذه القائمة.'),
+      icon: const Icon(LucideIcons.trash2, size: 32),
+      title: Text(NovaStrings.lookup(english, 'message628')),
+      content: Text(NovaStrings.lookup(english, 'message629')),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(english ? 'Cancel' : 'إلغاء')),
+            child: Text(NovaStrings.lookup(english, 'cancel'))),
         FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(english ? 'Delete' : 'حذف')),
+            child: Text(NovaStrings.lookup(english, 'message384'))),
       ],
     ),
   );
@@ -451,19 +519,17 @@ class _CollectionEmpty extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: HorseTheme.surface,
+          color: NovaTheme.of(context).surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HorseTheme.line),
+          border: Border.all(color: NovaTheme.of(context).line),
         ),
         child: Text(
-          english
-              ? 'Create a collection for films and series you want to keep together.'
-              : 'أنشئ قائمة لتجميع الأفلام والمسلسلات التي تريد حفظها معًا.',
+          NovaStrings.lookup(english, 'message630'),
           textAlign: TextAlign.center,
           style: Theme.of(context)
               .textTheme
               .bodyMedium
-              ?.copyWith(color: HorseTheme.muted),
+              ?.copyWith(color: NovaTheme.of(context).muted),
         ),
       );
 }
@@ -481,17 +547,19 @@ class _ListArtwork extends StatelessWidget {
         width: 42,
         height: 58,
         child: poster == null
-            ? const ColoredBox(
-                color: HorseTheme.raised,
-                child: Icon(Icons.movie_outlined, color: HorseTheme.gold),
+            ? ColoredBox(
+                color: NovaTheme.of(context).raised,
+                child:
+                    Icon(LucideIcons.film, color: NovaTheme.of(context).gold),
               )
-            : Image.network(poster,
+            : NovaNetworkImage(poster,
                 fit: BoxFit.cover,
                 // Task 136: decode at the 42px list thumbnail size.
                 cacheWidth: imageCacheWidth(context, 42),
-                errorBuilder: (_, __, ___) => const ColoredBox(
-                    color: HorseTheme.raised,
-                    child: Icon(Icons.movie_outlined, color: HorseTheme.gold))),
+                errorBuilder: (_, __, ___) => ColoredBox(
+                    color: NovaTheme.of(context).raised,
+                    child: Icon(LucideIcons.film,
+                        color: NovaTheme.of(context).gold))),
       ),
     );
   }

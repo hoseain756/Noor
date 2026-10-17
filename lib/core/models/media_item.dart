@@ -18,6 +18,15 @@ class MediaItem {
     this.videos = const [],
     this.anilistId,
     this.idMal,
+    this.originalTitle,
+    this.status,
+    this.language,
+    this.releaseDate,
+    this.seasonCount,
+    this.episodeCount,
+    this.castMembers = const [],
+    this.crewMembers = const [],
+    this.productionCompanies = const [],
   });
 
   final String id;
@@ -53,6 +62,16 @@ class MediaItem {
   /// integration.
   final int? idMal;
 
+  final String? originalTitle;
+  final String? status;
+  final String? language;
+  final String? releaseDate;
+  final int? seasonCount;
+  final int? episodeCount;
+  final List<MediaPerson> castMembers;
+  final List<MediaPerson> crewMembers;
+  final List<MediaCompany> productionCompanies;
+
   bool get hasAnimeIds => anilistId != null || idMal != null;
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
@@ -85,6 +104,20 @@ class MediaItem {
       anilistId: (json['anilistId'] as num?)?.toInt() ??
           _idFromPrefixed(json['id'], 'anilist:'),
       idMal: (json['idMal'] as num?)?.toInt(),
+      originalTitle: _string(json['originalTitle'] ??
+          json['original_title'] ??
+          json['original_name']),
+      status: _string(json['status']),
+      language: _string(json['language'] ?? json['original_language']),
+      releaseDate: _string(json['releaseDate'] ??
+          json['release_date'] ??
+          json['first_air_date']),
+      seasonCount: (json['seasonCount'] as num?)?.toInt(),
+      episodeCount: (json['episodeCount'] as num?)?.toInt(),
+      castMembers: MediaPerson.parseList(json['castMembers'] ?? json['cast']),
+      crewMembers: MediaPerson.parseList(json['crewMembers']),
+      productionCompanies: MediaCompany.parseList(
+          json['productionCompanies'] ?? json['production_companies']),
     );
   }
 
@@ -112,6 +145,19 @@ class MediaItem {
         if (cast.isNotEmpty) 'cast': cast,
         if (director.isNotEmpty) 'director': director,
         'videos': videos,
+        if (originalTitle != null) 'originalTitle': originalTitle,
+        if (status != null) 'status': status,
+        if (language != null) 'language': language,
+        if (releaseDate != null) 'releaseDate': releaseDate,
+        if (seasonCount != null) 'seasonCount': seasonCount,
+        if (episodeCount != null) 'episodeCount': episodeCount,
+        if (castMembers.isNotEmpty)
+          'castMembers': castMembers.map((person) => person.toJson()).toList(),
+        if (crewMembers.isNotEmpty)
+          'crewMembers': crewMembers.map((person) => person.toJson()).toList(),
+        if (productionCompanies.isNotEmpty)
+          'productionCompanies':
+              productionCompanies.map((company) => company.toJson()).toList(),
         if (anilistId != null) 'anilistId': anilistId,
         if (idMal != null) 'idMal': idMal,
       };
@@ -135,6 +181,15 @@ class MediaItem {
         cast: cast,
         director: director,
         videos: videos,
+        originalTitle: originalTitle,
+        status: status,
+        language: language,
+        releaseDate: releaseDate,
+        seasonCount: seasonCount,
+        episodeCount: episodeCount,
+        castMembers: castMembers,
+        crewMembers: crewMembers,
+        productionCompanies: productionCompanies,
         anilistId: anilistId ?? this.anilistId,
         idMal: idMal ?? this.idMal,
       );
@@ -158,6 +213,15 @@ class MediaItem {
         cast: cast,
         director: director,
         videos: videos,
+        originalTitle: originalTitle,
+        status: status,
+        language: language,
+        releaseDate: releaseDate,
+        seasonCount: seasonCount,
+        episodeCount: episodeCount,
+        castMembers: castMembers,
+        crewMembers: crewMembers,
+        productionCompanies: productionCompanies,
         anilistId: anilistId,
         idMal: idMal,
       );
@@ -209,6 +273,63 @@ class MediaItem {
     }
     if (value is Map) return _string(value['name'] ?? value['iso_3166_1']);
     return _string(value);
+  }
+}
+
+/// Provider-delivered identity only; absent portraits are displayed as initials.
+class MediaPerson {
+  const MediaPerson({required this.name, this.role, this.photo});
+  final String name;
+  final String? role;
+  final String? photo;
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        if (role != null) 'role': role,
+        if (photo != null) 'photo': photo
+      };
+  static List<MediaPerson> parseList(Object? input) {
+    if (input is! List) return const [];
+    return input
+        .whereType<Map>()
+        .where((row) => (row['name']?.toString().trim() ?? '').isNotEmpty)
+        .take(24)
+        .map((row) {
+      final path =
+          (row['photo'] ?? row['profile_path'] ?? row['image'])?.toString();
+      return MediaPerson(
+        name: row['name'].toString().trim(),
+        role: (row['role'] ?? row['character'] ?? row['job'])?.toString(),
+        photo: path == null || path.isEmpty
+            ? null
+            : path.startsWith('/')
+                ? 'https://image.tmdb.org/t/p/w185$path'
+                : path,
+      );
+    }).toList(growable: false);
+  }
+}
+
+class MediaCompany {
+  const MediaCompany({required this.name, this.logo});
+  final String name;
+  final String? logo;
+  Map<String, dynamic> toJson() =>
+      {'name': name, if (logo != null) 'logo': logo};
+  static List<MediaCompany> parseList(Object? input) {
+    if (input is! List) return const [];
+    return input
+        .whereType<Map>()
+        .where((row) => (row['name']?.toString().trim() ?? '').isNotEmpty)
+        .map((row) {
+      final path = (row['logo'] ?? row['logo_path'])?.toString();
+      return MediaCompany(
+          name: row['name'].toString().trim(),
+          logo: path == null || path.isEmpty
+              ? null
+              : path.startsWith('/')
+                  ? 'https://image.tmdb.org/t/p/w300$path'
+                  : path);
+    }).toList(growable: false);
   }
 }
 

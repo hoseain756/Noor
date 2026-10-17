@@ -134,8 +134,8 @@ class IntegrationCwEntry {
             : null;
     if (type == null) return null;
     final title = _asMap(media?['title']);
-    final name = (title?['english'] ?? title?['romaji'] ?? title?['native'])
-        ?.toString();
+    final name =
+        (title?['english'] ?? title?['romaji'] ?? title?['native'])?.toString();
     if (name == null || name.isEmpty) return null;
     final watched = (entry['progress'] as num?)?.toInt() ?? 0;
     final total = (media?['episodes'] as num?)?.toInt();
@@ -178,7 +178,8 @@ class IntegrationCwEntry {
     final status = _asMap(node?['list_status']);
     final watched = (status?['num_episodes_watched'] as num?)?.toInt() ?? 0;
     final poster = _asMap(node?['main_picture'])?['large']?.toString();
-    final updatedAt = DateTime.tryParse(status?['updated_at']?.toString() ?? '');
+    final updatedAt =
+        DateTime.tryParse(status?['updated_at']?.toString() ?? '');
     return IntegrationCwEntry(
       source: 'mal',
       episodesWatched: watched,

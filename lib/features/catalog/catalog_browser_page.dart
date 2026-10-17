@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import '../shell/nova_catalog_refresh.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,6 +10,8 @@ import '../../core/state/app_state.dart';
 import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
+import '../shell/nova_browse_widgets.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 enum CatalogBrowseMode { discover, movies, shows, catalogs }
 
@@ -20,7 +24,13 @@ class CatalogBrowserPage extends StatefulWidget {
   State<CatalogBrowserPage> createState() => _CatalogBrowserPageState();
 }
 
-class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
+class _CatalogBrowserPageState extends State<CatalogBrowserPage>
+    with NovaCatalogRefresh<CatalogBrowserPage> {
+  @override
+  void refreshCachedCatalogs() {
+    if (!_loading) unawaited(_load(query: _search.text.trim()));
+  }
+
   final _search = TextEditingController();
   Timer? _debounce;
   List<MediaItem> _items = const [];
@@ -44,11 +54,10 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
   }
 
   String _title(bool english) => switch (widget.mode) {
-        CatalogBrowseMode.discover => english ? 'Discover' : 'اكتشف',
-        CatalogBrowseMode.movies => english ? 'Movies' : 'الأفلام',
-        CatalogBrowseMode.shows => english ? 'Series' : 'المسلسلات',
-        CatalogBrowseMode.catalogs =>
-          english ? 'Add-on catalogs' : 'كتالوجات الإضافات',
+        CatalogBrowseMode.discover => NovaStrings.lookup(english, 'message576'),
+        CatalogBrowseMode.movies => NovaStrings.lookup(english, 'message577'),
+        CatalogBrowseMode.shows => NovaStrings.lookup(english, 'message578'),
+        CatalogBrowseMode.catalogs => NovaStrings.lookup(english, 'message579'),
       };
 
   void _onSearch(String value) {
@@ -120,7 +129,6 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
       final hideWatched = app.webSettings['hideWatchedInCatalogs'] == true;
       final watchedIds = app.history.map((entry) => entry.item.id).toSet();
       final items = results.expand((rows) => rows).where((item) {
-        if (_typeFilter != 'all' && item.type != _typeFilter) return false;
         if (query.isNotEmpty &&
             !item.name.toLowerCase().contains(query.toLowerCase())) {
           return false;
@@ -128,196 +136,172 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage> {
         if (hideWatched && watchedIds.contains(item.id)) return false;
         return seen.add(item.id);
       }).toList();
-      switch (_sort) {
-        case 'title':
-          items.sort(
-              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-        case 'year':
-          items.sort((a, b) => (int.tryParse(b.releaseInfo ?? '') ?? 0)
-              .compareTo(int.tryParse(a.releaseInfo ?? '') ?? 0));
-        case 'rating':
-          items.sort((a, b) => (double.tryParse(b.rating ?? '') ?? 0)
-              .compareTo(double.tryParse(a.rating ?? '') ?? 0));
-      }
       setState(() {
         _items = items;
         _loading = false;
         if (items.isEmpty && results.every((rows) => rows.isEmpty)) {
-          _error = app.english
-              ? 'Catalogs could not be loaded. Check the connection or add an add-on.'
-              : 'تعذر تحميل الكتالوجات. تحقق من الاتصال أو أضف إضافة.';
+          _error = NovaStrings.lookup(app.english, 'message580');
         }
       });
     } catch (_) {
       if (!mounted || request != _request) return;
       setState(() {
         _loading = false;
-        _error = app.english
-            ? 'Catalogs could not be loaded.'
-            : 'تعذر تحميل الكتالوجات.';
+        _error = NovaStrings.lookup(app.english, 'message581');
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final gridTileExtent = 185 / .72 + 68 * textScale + 12;
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
     final showTypeFilter = widget.mode == CatalogBrowseMode.discover ||
         widget.mode == CatalogBrowseMode.catalogs;
+    final items = _items
+        .where((item) => _typeFilter == 'all' || item.type == _typeFilter)
+        .toList();
+    switch (_sort) {
+      case 'title':
+        items.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      case 'year':
+        items.sort((a, b) => (int.tryParse(b.releaseInfo ?? '') ?? 0)
+            .compareTo(int.tryParse(a.releaseInfo ?? '') ?? 0));
+      case 'rating':
+        items.sort((a, b) => (double.tryParse(b.rating ?? '') ?? 0)
+            .compareTo(double.tryParse(a.rating ?? '') ?? 0));
+    }
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_title(english)),
-        actions: [
-          IconButton(
-            tooltip: english ? 'Refresh' : 'تحديث',
+      appBar: AppBar(title: Text(app.tr('message582')), actions: [
+        IconButton(
+            tooltip: app.tr('message68'),
             onPressed: () => unawaited(_load(query: _search.text.trim())),
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
+            icon: const Icon(LucideIcons.refreshCw))
+      ]),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1250),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 10),
-                child: TextField(
-                  controller: _search,
-                  onChanged: _onSearch,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    hintText: english ? 'Search titles' : 'ابحث عن عنوان',
-                    suffixIcon: _search.text.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: english ? 'Clear search' : 'مسح البحث',
-                            onPressed: () {
-                              _search.clear();
-                              _onSearch('');
-                            },
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 10),
-                child: Row(
-                  children: [
-                    if (showTypeFilter)
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              for (final entry in [
-                                ('all', english ? 'All' : 'الكل'),
-                                ('movie', english ? 'Movies' : 'أفلام'),
-                                ('series', english ? 'Series' : 'مسلسلات'),
-                              ])
-                                Padding(
-                                  padding:
-                                      const EdgeInsetsDirectional.only(end: 7),
-                                  child: ChoiceChip(
-                                    label: Text(entry.$2),
-                                    selected: _typeFilter == entry.$1,
-                                    onSelected: (_) {
-                                      setState(() => _typeFilter = entry.$1);
-                                      unawaited(
-                                          _load(query: _search.text.trim()));
+          child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1440),
+        child: RefreshIndicator(
+          onRefresh: () => _load(query: _search.text.trim()),
+          child: CustomScrollView(slivers: [
+            SliverToBoxAdapter(
+                child: NovaBrowseHeader(
+              compact: true,
+              eyebrow: app.tr('message583'),
+              title: _title(app.english),
+              subtitle: widget.mode == CatalogBrowseMode.catalogs
+                  ? app.tr('message584')
+                  : app.tr('message585'),
+            )),
+            SliverToBoxAdapter(
+                child: Padding(
+                    padding:
+                        const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 16),
+                    child: TextField(
+                        controller: _search,
+                        onChanged: _onSearch,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                            prefixIcon: const Icon(LucideIcons.search),
+                            hintText: app.tr('message586'),
+                            suffixIcon: _search.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: app.tr('message473'),
+                                    onPressed: () {
+                                      _search.clear();
+                                      _onSearch('');
                                     },
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      )
-                    else
-                      const Spacer(),
-                    const SizedBox(width: 8),
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _sort,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _sort = value);
-                          unawaited(_load(query: _search.text.trim()));
-                        },
-                        items: [
-                          DropdownMenuItem(
-                              value: 'popular',
-                              child: Text(english ? 'Popular' : 'الرائج')),
-                          DropdownMenuItem(
-                              value: 'rating',
-                              child: Text(english ? 'Rating' : 'التقييم')),
-                          DropdownMenuItem(
-                              value: 'year',
-                              child: Text(english ? 'Year' : 'السنة')),
-                          DropdownMenuItem(
-                              value: 'title',
-                              child: Text(english ? 'Title' : 'العنوان')),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_loading) const LinearProgressIndicator(minHeight: 2),
-              Expanded(
-                child: _error != null && _items.isEmpty
-                    ? AppStateMessage(
-                        icon: Icons.movie_filter_outlined,
-                        iconSize: 42,
-                        padding: const EdgeInsets.all(24),
-                        message: _error!,
-                        actionLabel: english ? 'Try again' : 'إعادة المحاولة',
-                        onAction: () =>
-                            unawaited(_load(query: _search.text.trim())))
-                    : _items.isEmpty && !_loading
-                        ? AppStateMessage(
-                            icon: Icons.movie_filter_outlined,
-                            iconSize: 42,
-                            padding: const EdgeInsets.all(24),
-                            message: english
-                                ? 'No titles match these filters.'
-                                : 'لا توجد عناوين تطابق عوامل التصفية.',
-                            actionLabel: english ? 'Refresh' : 'تحديث',
-                            onAction: () =>
-                                unawaited(_load(query: _search.text.trim())))
-                        : GridView.builder(
-                            padding: const EdgeInsetsDirectional.fromSTEB(
-                                16, 8, 16, 120),
-                            gridDelegate:
-                                SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 185,
-                              mainAxisExtent: gridTileExtent,
-                              crossAxisSpacing: 14,
-                              mainAxisSpacing: 14,
-                            ),
-                            itemCount: _items.length,
-                            itemBuilder: (context, index) {
-                              final item = _items[index];
-                              return PosterCard(
-                                item: item,
-                                width: double.infinity,
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                      builder: (_) =>
-                                          MediaDetailPage(item: item)),
-                                ),
-                              );
-                            },
-                          ),
-              ),
+                                    icon: const Icon(LucideIcons.x)))))),
+            SliverToBoxAdapter(
+                child: Padding(
+                    padding:
+                        const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+                    child: Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (showTypeFilter)
+                            for (final entry in [
+                              ('all', app.tr('message587')),
+                              ('movie', app.tr('message106')),
+                              ('series', app.tr('message107'))
+                            ])
+                              ChoiceChip(
+                                  label: Text(entry.$2),
+                                  selected: _typeFilter == entry.$1,
+                                  onSelected: (_) =>
+                                      setState(() => _typeFilter = entry.$1)),
+                          SizedBox(
+                              width: 200,
+                              child: DropdownButtonFormField<String>(
+                                  initialValue: _sort,
+                                  decoration: InputDecoration(
+                                      labelText: app.tr('message588')),
+                                  onChanged: (value) {
+                                    if (value != null)
+                                      setState(() => _sort = value);
+                                  },
+                                  items: [
+                                    for (final entry in [
+                                      ('popular', app.tr('message589')),
+                                      ('rating', app.tr('message158')),
+                                      ('year', app.tr('message441')),
+                                      ('title', app.tr('message440'))
+                                    ])
+                                      DropdownMenuItem(
+                                          value: entry.$1,
+                                          child: Text(entry.$2))
+                                  ])),
+                        ]))),
+            if (_loading && _items.isEmpty)
+              const SliverToBoxAdapter(
+                  child: SizedBox(height: 600, child: NovaBrowseSkeleton()))
+            else if (items.isEmpty)
+              SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: AppStateMessage(
+                      icon: _error != null
+                          ? LucideIcons.cloudOff
+                          : LucideIcons.search,
+                      message: _error ?? app.tr('message590'),
+                      actionLabel: app.tr('message174'),
+                      onAction: () =>
+                          unawaited(_load(query: _search.text.trim()))))
+            else ...[
+              if (_loading)
+                const SliverToBoxAdapter(
+                    child: LinearProgressIndicator(minHeight: 2)),
+              SliverPadding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 48),
+                  sliver: SliverLayoutBuilder(builder: (context, constraints) {
+                    final columns =
+                        (constraints.crossAxisExtent / 190).floor().clamp(2, 7);
+                    final width =
+                        (constraints.crossAxisExtent - (columns - 1) * 20) /
+                            columns;
+                    return SliverGrid.builder(
+                        itemCount: items.length,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: columns,
+                            mainAxisExtent: width / .72 +
+                                78 * MediaQuery.textScalerOf(context).scale(1),
+                            crossAxisSpacing: 20,
+                            mainAxisSpacing: 24),
+                        itemBuilder: (context, index) => PosterCard(
+                            item: items[index],
+                            width: width,
+                            onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        MediaDetailPage(item: items[index])))));
+                  })),
             ],
-          ),
+          ]),
         ),
-      ),
+      )),
     );
   }
 }

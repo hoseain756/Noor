@@ -13,6 +13,7 @@
 ///    re-fetch metadata.
 library;
 
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import '../../core/models/media_item.dart';
 
 /// One CW card's enrichment result (web `UpcomingInfo` + episode name).
@@ -127,11 +128,15 @@ String? cwUpcomingLabel(int? nextAirMs, bool english, DateTime now) {
   if (nextAirMs == null) return null;
   final days = cwDaysUntil(nextAirMs, now);
   if (nextAirMs <= now.millisecondsSinceEpoch) return null;
-  if (days == 0) return english ? 'Airs today' : 'يُعرض اليوم';
-  if (days == 1) return english ? 'Airs tomorrow' : 'يُعرض غداً';
+  if (days == 0) return NovaStrings.lookup(english, 'message102');
+  if (days == 1) return NovaStrings.lookup(english, 'message103');
   if (!english) {
     // Intl.PluralRules('ar') categories: one=1, two=2, few=3–10, many=11+.
-    final unit = days == 2 ? 'يومين' : (days >= 3 && days <= 10) ? 'أيام' : 'يوم';
+    final unit = days == 2
+        ? 'يومين'
+        : (days >= 3 && days <= 10)
+            ? 'أيام'
+            : 'يوم';
     return 'يُعرض بعد $days $unit';
   }
   final unit = days == 1 ? 'day' : 'days';

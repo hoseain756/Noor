@@ -14,6 +14,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 /// One bottom-dock tab: identity (`id`), destination (`view`), bilingual
 /// labels and the outline/filled icon pair used by the 150ms cross-fade.
@@ -67,32 +68,32 @@ const List<DockTab> kDockTabs = [
     view: 'settings',
     labelEn: 'Settings',
     labelAr: 'الإعدادات',
-    iconOutline: Icons.settings_outlined,
-    iconFilled: Icons.settings,
+    iconOutline: LucideIcons.settings,
+    iconFilled: LucideIcons.settings,
   ),
   DockTab(
     id: DockTab.kidsId,
     view: 'kids',
     labelEn: 'Kids',
     labelAr: 'الأطفال',
-    iconOutline: Icons.child_care_outlined,
-    iconFilled: Icons.child_care,
+    iconOutline: LucideIcons.baby,
+    iconFilled: LucideIcons.baby,
   ),
   DockTab(
     id: DockTab.animeId,
     view: 'anime',
     labelEn: 'Anime',
     labelAr: 'الأنمي',
-    iconOutline: Icons.auto_awesome_outlined,
-    iconFilled: Icons.auto_awesome,
+    iconOutline: LucideIcons.sparkles,
+    iconFilled: LucideIcons.sparkles,
   ),
   DockTab(
     id: DockTab.homeId,
     view: 'home',
     labelEn: 'Home',
     labelAr: 'الرئيسية',
-    iconOutline: Icons.home_outlined,
-    iconFilled: Icons.home,
+    iconOutline: LucideIcons.house,
+    iconFilled: LucideIcons.house,
   ),
 ];
 
@@ -182,7 +183,9 @@ class DockNavFrame {
   const DockNavFrame.ofView(this.view) : isView = true;
 
   /// Any non-view frame (detail page, player, modal, …).
-  const DockNavFrame.other() : isView = false, view = '';
+  const DockNavFrame.other()
+      : isView = false,
+        view = '';
 
   final bool isView;
   final String view;
@@ -198,7 +201,8 @@ String dockActiveTabId(
   Map<String, String> extraViewIds = const {},
 }) {
   for (final frame in stack.reversed) {
-    if (frame.isView) return dockTabIdForView(frame.view, extraViewIds: extraViewIds);
+    if (frame.isView)
+      return dockTabIdForView(frame.view, extraViewIds: extraViewIds);
   }
   return DockTab.fallbackId;
 }

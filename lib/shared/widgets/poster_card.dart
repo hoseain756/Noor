@@ -1,3 +1,5 @@
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -61,7 +63,7 @@ class PosterCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       if (item.poster != null)
-                        Image.network(
+                        NovaNetworkImage(
                           item.poster!,
                           fit: BoxFit.cover,
                           // Task 136: decode at the card's on-screen size.
@@ -100,9 +102,9 @@ class PosterCard extends StatelessWidget {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
-                                    Icons.star_rounded,
-                                    color: HorseTheme.gold,
+                                  Icon(
+                                    LucideIcons.star,
+                                    color: NovaTheme.of(context).gold,
                                     size: 12,
                                   ),
                                   const SizedBox(width: 3),
@@ -156,9 +158,10 @@ class _PosterFallback extends StatelessWidget {
   const _PosterFallback();
   @override
   Widget build(BuildContext context) => Container(
-        color: HorseTheme.raised,
-        child: const Center(
-          child: Icon(Icons.movie_outlined, size: 34, color: HorseTheme.gold),
+        color: NovaTheme.of(context).raised,
+        child: Center(
+          child: Icon(LucideIcons.film,
+              size: 34, color: NovaTheme.of(context).gold),
         ),
       );
 }

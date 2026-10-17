@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,8 +7,9 @@ import 'package:provider/provider.dart';
 import '../../core/data/catalog_repository.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
-import '../../shared/widgets/image_decode.dart';
+import '../shell/nova_browse_widgets.dart';
+import '../../shared/widgets/poster_card.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../media/media_detail_page.dart';
 
 /// Live anime search over AniList's public GraphQL (works without linking).
@@ -17,7 +19,8 @@ Future<void> showAnimeSearchSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+    useSafeArea: true,
+    constraints: const BoxConstraints(maxWidth: 960),
     builder: (_) => const _AnimeSearchSheet(),
   );
 }
@@ -107,9 +110,7 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
       if (resolved == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(app.english
-                ? 'A playable Stremio entry was not found for this title.'
-                : 'لم يُعثر على عنوان قابل للتشغيل لهذا العمل.'),
+            content: Text(NovaStrings.lookup(app.english, 'message117')),
           ),
         );
         return;
@@ -134,192 +135,149 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final english = context.watch<AppState>().english;
+    context.select<AppState, bool>((a) => a.english);
+    final app = context.read<AppState>();
+    final theme = Theme.of(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final height = (MediaQuery.sizeOf(context).height * .9 - keyboard)
+        .clamp(180.0, 1000.0);
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 640),
-        margin: const EdgeInsets.all(14),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        decoration: BoxDecoration(
-          color: HorseTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: HorseTheme.line),
-        ),
+        padding: EdgeInsetsDirectional.only(bottom: keyboard),
         child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * .72,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _query,
-                focusNode: _focus,
-                onChanged: _onChanged,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  hintText: _provider == 'mal'
-                      ? (english
-                          ? 'Search anime on MyAnimeList…'
-                          : 'ابحث عن الأنمي في MyAnimeList…')
-                      : (english
-                          ? 'Search anime on AniList…'
-                          : 'ابحث عن الأنمي في AniList…'),
-                  suffixIcon: _query.text.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 19),
-                          onPressed: () {
-                            _query.clear();
-                            _onChanged('');
-                          },
-                        ),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'anilist', label: Text('AniList')),
-                  ButtonSegment(
-                    value: 'mal',
-                    label: Text('MyAnimeList'),
-                  ),
-                ],
-                selected: {_provider},
-                showSelectedIcon: false,
-                onSelectionChanged: (selection) =>
-                    _switchProvider(selection.first),
-              ),
-              const SizedBox(height: 12),
+            height: height,
+            child: Column(children: [
+              Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 16, 16, 8),
+                  child: Row(children: [
+                    Expanded(
+                        child: Text(app.tr('message536'),
+                            style: theme.textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800))),
+                    IconButton(
+                        tooltip: app.tr('close'),
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(LucideIcons.x))
+                  ])),
+              Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 12),
+                  child: TextField(
+                      controller: _query,
+                      focusNode: _focus,
+                      onChanged: _onChanged,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                          prefixIcon: const Icon(LucideIcons.search),
+                          hintText: app.tr('message537'),
+                          suffixIcon: _query.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: app.tr('message473'),
+                                  icon: const Icon(LucideIcons.x),
+                                  onPressed: () {
+                                    _query.clear();
+                                    _onChanged('');
+                                  })))),
+              Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 12),
+                  child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Wrap(spacing: 8, runSpacing: 8, children: [
+                        for (final provider in [
+                          ('anilist', 'AniList'),
+                          ('mal', 'MyAnimeList')
+                        ])
+                          ChoiceChip(
+                              label: Text(provider.$2),
+                              selected: _provider == provider.$1,
+                              onSelected: (_) => _switchProvider(provider.$1))
+                      ]))),
               Expanded(
-                child: _results == null
-                    ? Center(
-                        child: Text(
-                          english
-                              ? 'Type a title to search.'
-                              : 'اكتب اسم عمل للبحث.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: HorseTheme.muted),
-                        ),
-                      )
-                    : FutureBuilder<List<MediaItem>>(
-                        future: _results,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                              child: SizedBox.square(
-                                dimension: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return Center(
-                              child: Text(
-                                english
-                                    ? 'Search failed — check your connection.'
-                                    : 'فشل البحث — تحقق من الاتصال.',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: HorseTheme.muted),
-                              ),
-                            );
-                          }
-                          final items = snapshot.data ?? const <MediaItem>[];
-                          if (items.isEmpty) {
-                            return Center(
-                              child: Text(
-                                english ? 'No results.' : 'لا نتائج.',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: HorseTheme.muted),
-                              ),
-                            );
-                          }
-                          return GridView.builder(
-                            gridDelegate:
-                                const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 108,
-                              mainAxisSpacing: 10,
-                              crossAxisSpacing: 10,
-                              childAspectRatio: .58,
-                            ),
-                            itemCount: items.length,
-                            itemBuilder: (context, index) {
-                              final item = items[index];
-                              final busy = _resolving.contains(item.id);
-                              return InkWell(
-                                borderRadius: BorderRadius.circular(10),
-                                onTap: busy ? null : () => _open(item),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
+                  child: _results == null
+                      ? Center(
+                          child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Expanded(
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: Stack(
-                                          fit: StackFit.expand,
+                                    Icon(LucideIcons.sparkles,
+                                        size: 48,
+                                        color: theme.colorScheme.secondary),
+                                    const SizedBox(height: 16),
+                                    Text(app.tr('message538'),
+                                        style: theme.textTheme.titleLarge,
+                                        textAlign: TextAlign.center),
+                                    const SizedBox(height: 8),
+                                    Text(app.tr('message539'),
+                                        textAlign: TextAlign.center),
+                                  ])))
+                      : FutureBuilder<List<MediaItem>>(
+                          future: _results,
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting)
+                              return const NovaBrowseSkeleton();
+                            final items = snapshot.data ?? const <MediaItem>[];
+                            if (snapshot.hasError || items.isEmpty)
+                              return Center(
+                                  child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Column(
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            const ColoredBox(
-                                              color: HorseTheme.raised,
-                                            ),
-                                            if (item.poster != null)
-                                              Image.network(
-                                                item.poster!,
-                                                fit: BoxFit.cover,
-                                                // Task 136: decode at the
-                                                // ≤108px grid tile size.
-                                                cacheWidth: imageCacheWidth(
-                                                    context, 108),
-                                                errorBuilder: (_, __, ___) =>
-                                                    const SizedBox(),
-                                              ),
-                                            if (busy)
-                                              const ColoredBox(
-                                                color: Colors.black45,
-                                                child: Center(
-                                                  child: SizedBox.square(
-                                                    dimension: 16,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      item.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+                                            Text(
+                                                snapshot.hasError
+                                                    ? app.tr('message540')
+                                                    : app.tr('message541'),
+                                                textAlign: TextAlign.center),
+                                            if (snapshot.hasError) ...[
+                                              const SizedBox(height: 16),
+                                              FilledButton(
+                                                  onPressed: () => setState(
+                                                      () => _results = _search(
+                                                          _query.text.trim())),
+                                                  child: Text(
+                                                      app.tr('message174')))
+                                            ],
+                                          ])));
+                            return LayoutBuilder(
+                                builder: (context, constraints) {
+                              final columns = (constraints.maxWidth / 180)
+                                  .floor()
+                                  .clamp(2, 6);
+                              final width = (constraints.maxWidth -
+                                      48 -
+                                      (columns - 1) * 16) /
+                                  columns;
+                              return GridView.builder(
+                                  padding: const EdgeInsets.all(24),
+                                  itemCount: items.length,
+                                  gridDelegate:
+                                      SliverGridDelegateWithFixedCrossAxisCount(
+                                          crossAxisCount: columns,
+                                          mainAxisExtent: width / .72 +
+                                              78 *
+                                                  MediaQuery.textScalerOf(
+                                                          context)
+                                                      .scale(1),
+                                          mainAxisSpacing: 24,
+                                          crossAxisSpacing: 16),
+                                  itemBuilder: (_, i) => Stack(children: [
+                                        PosterCard(
+                                            item: items[i],
+                                            width: width,
+                                            onTap: () => _open(items[i])),
+                                        if (_resolving.contains(items[i].id))
+                                          const PositionedDirectional(
+                                              top: 8,
+                                              end: 8,
+                                              child: SizedBox.square(
+                                                  dimension: 24,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                          strokeWidth: 2))),
+                                      ]));
+                            });
+                          })),
+            ])));
   }
 }

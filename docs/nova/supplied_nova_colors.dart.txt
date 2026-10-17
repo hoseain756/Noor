@@ -1,0 +1,288 @@
+// =============================================================================
+// NOVA - COLOUR SYSTEM (Flutter / Dart)
+// =============================================================================
+// App: Nova, a movies and series streaming app.
+// Default theme: DARK (cinematic). A light theme is provided as an option.
+//
+// HOW AI TOOLS SHOULD USE THIS FILE
+// - Never hard-code hex colours in widgets. Always use NovaColors.* or the
+//   ThemeData / ColorScheme built from them (see NovaTheme at the bottom).
+// - Colour balance per screen: about 60% ink backgrounds, 25% white / grey
+//   text and surfaces, 15% Nova Red.
+// - Use ONE primary red button per screen.
+// - Text placed on top of Nova Red is always white (contrast 4.7:1).
+// - Never use pure vivid red (#FF0000) anywhere in the app.
+// - Never communicate status by colour alone: pair it with an icon and text.
+//
+// NOTE: The brand colours (red, ink, graphite, mist, soft red) are the official
+// Nova brand palette. The status colours, extra surface shades and the light
+// theme were chosen as sensible companions and have not been fully
+// contrast-tested. Test them on real screens before release.
+// =============================================================================
+
+import 'package:flutter/material.dart';
+
+abstract final class NovaColors {
+  // ---------------------------------------------------------------------------
+  // BRAND COLOURS
+  // ---------------------------------------------------------------------------
+
+  /// Nova Red (#D13B47). THE brand colour: a calm red, not vivid.
+  /// Use for: primary buttons, active tab / selected state, progress bars,
+  /// focus rings, key actions (Play, Subscribe), the app icon background.
+  /// Text on top of it must be white. Do NOT use as small body text on the
+  /// dark background (contrast only 3.9:1): use [redSoft] for that.
+  static const Color red = Color(0xFFD13B47);
+
+  /// Deep Red (#9E2A34). Darker red.
+  /// Use for: pressed state of red buttons, shadows or gradients that go with
+  /// red, dark accents. Not for text.
+  static const Color redDeep = Color(0xFF9E2A34);
+
+  /// Soft Red (#E8858D). Light red.
+  /// Use for: red text or icons on dark backgrounds (links, small labels,
+  /// active icons), tags, highlights. This is the readable red on dark.
+  static const Color redSoft = Color(0xFFE8858D);
+
+  /// Blush (#F9E4E6). Very light red tint.
+  /// Use for: light-theme highlighted surfaces, selected rows in light theme,
+  /// soft banners. Not used much in the dark theme.
+  static const Color blush = Color(0xFFF9E4E6);
+
+  // ---------------------------------------------------------------------------
+  // DARK THEME: BACKGROUNDS AND SURFACES
+  // ---------------------------------------------------------------------------
+
+  /// Ink (#141417). Main app background in the dark theme.
+  /// Use for: Scaffold background, splash screen, full-screen player chrome.
+  static const Color ink = Color(0xFF141417);
+
+  /// Graphite (#232329). First surface level above Ink.
+  /// Use for: cards, movie / series tiles, list items, bottom navigation bar,
+  /// app bar when scrolled.
+  static const Color graphite = Color(0xFF232329);
+
+  /// Surface high (#2E2E35). Second surface level above Ink.
+  /// Use for: dialogs, bottom sheets, dropdown menus, text field backgrounds,
+  /// search bar. Suggested companion shade.
+  static const Color surfaceHigh = Color(0xFF2E2E35);
+
+  /// Divider (#3A3A42). Thin lines on dark surfaces.
+  /// Use for: dividers, card borders, outlines of inactive inputs, skeleton
+  /// loading placeholders. Suggested companion shade.
+  static const Color divider = Color(0xFF3A3A42);
+
+  // ---------------------------------------------------------------------------
+  // DARK THEME: TEXT
+  // ---------------------------------------------------------------------------
+
+  /// White (#FFFFFF). Primary text on dark backgrounds.
+  /// Use for: titles, movie names, body text, button labels on red, icons on
+  /// dark. Also the wordmark colour on dark backgrounds.
+  static const Color white = Color(0xFFFFFFFF);
+
+  /// Mist (#A4A4AC). Secondary text.
+  /// Use for: subtitles, year / duration / genre metadata, captions, hints,
+  /// inactive tab labels and icons.
+  static const Color mist = Color(0xFFA4A4AC);
+
+  /// Disabled text (#6E6E78). Lowest emphasis.
+  /// Use for: disabled buttons' labels, disabled inputs, placeholder text that
+  /// is not essential. Suggested companion shade.
+  static const Color textDisabled = Color(0xFF6E6E78);
+
+  // ---------------------------------------------------------------------------
+  // STATUS COLOURS (suggested companions, not part of the logo palette)
+  // ---------------------------------------------------------------------------
+
+  /// Success green (#3FB27F). Use for: success messages, "Downloaded" state,
+  /// completed payment. Always with a check icon and text.
+  static const Color success = Color(0xFF3FB27F);
+
+  /// Warning amber (#E8A93B). Use for: warnings, expiring subscription,
+  /// weak connection notices. Always with a warning icon and text.
+  static const Color warning = Color(0xFFE8A93B);
+
+  /// Info blue (#4C8DE0). Use for: neutral information, tips, "New episode"
+  /// notices that are not actions. Always with an info icon and text.
+  static const Color info = Color(0xFF4C8DE0);
+
+  /// Error red (#E5484D). Use for: error messages, failed playback, invalid
+  /// input borders. It is close to Nova Red, so errors MUST always include an
+  /// error icon and a clear message, never colour alone.
+  static const Color error = Color(0xFFE5484D);
+
+  /// Rating gold (#F5C451). Use ONLY for star ratings (for example 4.5 stars).
+  static const Color rating = Color(0xFFF5C451);
+
+  // ---------------------------------------------------------------------------
+  // LIGHT THEME (optional)
+  // ---------------------------------------------------------------------------
+
+  /// Light background (#F6F6F7). Scaffold background in the light theme.
+  static const Color lightBackground = Color(0xFFF6F6F7);
+
+  /// Light surface (#FFFFFF). Cards, sheets and dialogs in the light theme.
+  static const Color lightSurface = Color(0xFFFFFFFF);
+
+  /// Light text (#141417). Primary text in the light theme (same as [ink]).
+  static const Color lightText = Color(0xFF141417);
+
+  /// Light secondary text (#585862). Subtitles and metadata in the light theme.
+  static const Color lightTextSecondary = Color(0xFF585862);
+
+  /// Light accent (#B82C39). Slightly darker red used in the light theme so red
+  /// text and icons stay readable on white. Use for links and active icons in
+  /// the light theme. Buttons still use [red] with white text.
+  static const Color lightAccent = Color(0xFFB82C39);
+
+  /// Light divider (#DCDCE0). Lines and borders in the light theme.
+  static const Color lightDivider = Color(0xFFDCDCE0);
+
+  // ---------------------------------------------------------------------------
+  // SPECIAL COLOURS
+  // ---------------------------------------------------------------------------
+
+  /// Scrim (#000000 at 60% opacity). Use for: dark overlays behind dialogs and
+  /// bottom sheets, and the gradient over poster images so white text stays
+  /// readable.
+  static const Color scrim = Color(0x99000000);
+
+  /// Splash background. Same as [ink]. Use for: native splash screen colour.
+  static const Color splashBackground = ink;
+
+  /// Android adaptive icon background. Same as [red].
+  static const Color adaptiveIconBackground = red;
+}
+
+// =============================================================================
+// THEMES: ready to plug into MaterialApp(theme: ..., darkTheme: ...)
+// Example:
+//   MaterialApp(
+//     theme: NovaTheme.light(),
+//     darkTheme: NovaTheme.dark(),
+//     themeMode: ThemeMode.dark, // Nova is dark-first
+//   );
+// =============================================================================
+abstract final class NovaTheme {
+  /// Dark theme: the default look of Nova.
+  static ThemeData dark() {
+    const scheme = ColorScheme(
+      brightness: Brightness.dark,
+      primary: NovaColors.red, // main buttons, active elements
+      onPrimary: NovaColors.white, // text/icons on red
+      secondary: NovaColors.redSoft, // readable red accents on dark
+      onSecondary: NovaColors.ink,
+      error: NovaColors.error,
+      onError: NovaColors.white,
+      surface: NovaColors.graphite, // cards and sheets
+      onSurface: NovaColors.white, // main text
+    );
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: NovaColors.ink,
+      dividerColor: NovaColors.divider,
+      canvasColor: NovaColors.ink,
+      cardColor: NovaColors.graphite,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: NovaColors.ink,
+        foregroundColor: NovaColors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: NovaColors.graphite,
+        selectedItemColor: NovaColors.redSoft, // active tab
+        unselectedItemColor: NovaColors.mist, // inactive tabs
+      ),
+      textTheme: const TextTheme(
+        bodyLarge: TextStyle(color: NovaColors.white),
+        bodyMedium: TextStyle(color: NovaColors.white),
+        bodySmall: TextStyle(color: NovaColors.mist), // metadata
+        titleLarge: TextStyle(color: NovaColors.white),
+        titleMedium: TextStyle(color: NovaColors.white),
+        labelSmall: TextStyle(color: NovaColors.mist),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: NovaColors.surfaceHigh,
+        hintStyle: const TextStyle(color: NovaColors.textDisabled),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: NovaColors.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: NovaColors.red, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: NovaColors.error),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: NovaColors.red,
+          foregroundColor: NovaColors.white,
+          disabledBackgroundColor: NovaColors.divider,
+          disabledForegroundColor: NovaColors.textDisabled,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: NovaColors.red,
+        linearTrackColor: NovaColors.divider,
+      ),
+      dialogBackgroundColor: NovaColors.surfaceHigh,
+    );
+  }
+
+  /// Light theme: optional.
+  static ThemeData light() {
+    const scheme = ColorScheme(
+      brightness: Brightness.light,
+      primary: NovaColors.red,
+      onPrimary: NovaColors.white,
+      secondary: NovaColors.lightAccent,
+      onSecondary: NovaColors.white,
+      error: NovaColors.error,
+      onError: NovaColors.white,
+      surface: NovaColors.lightSurface,
+      onSurface: NovaColors.lightText,
+    );
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: NovaColors.lightBackground,
+      dividerColor: NovaColors.lightDivider,
+      cardColor: NovaColors.lightSurface,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: NovaColors.lightBackground,
+        foregroundColor: NovaColors.lightText,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: NovaColors.lightSurface,
+        selectedItemColor: NovaColors.lightAccent,
+        unselectedItemColor: NovaColors.lightTextSecondary,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: NovaColors.red,
+          foregroundColor: NovaColors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: NovaColors.red,
+        linearTrackColor: NovaColors.lightDivider,
+      ),
+    );
+  }
+}

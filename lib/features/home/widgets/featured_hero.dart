@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -7,9 +9,8 @@ import 'package:provider/provider.dart';
 import '../../../core/models/featured_artwork.dart';
 import '../../../core/models/media_item.dart';
 import '../../../core/state/app_state.dart';
-import '../../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../shared/widgets/image_decode.dart';
-import '../../shell/noor_dock_tabs.dart' show glassDockContentClearance;
 
 /// The featured hero carousel (home's top slot): full-bleed autoplaying
 /// artwork with TMDB-enriched logo / portrait / landscape picks, the bottom
@@ -140,6 +141,7 @@ class _FeaturedCardState extends State<FeaturedHero>
       );
       if (!mounted || signature != _artworkSignature) return;
       setState(() => _artwork[item.id] = result);
+      _precacheNext();
       await Future<void>.delayed(const Duration(milliseconds: 150));
     }
   }
@@ -186,6 +188,24 @@ class _FeaturedCardState extends State<FeaturedHero>
     final target = ((targetIndex % count) + count) % count;
     if (target == _activeIndex) return;
     setState(() => _activeIndex = target);
+    _precacheNext();
+  }
+
+  void _precacheNext() {
+    if (!mounted || widget.items.isEmpty) return;
+    final next = widget.items[(_activeIndex + 1) % widget.items.length];
+    final wide = MediaQuery.sizeOf(context).width >= 700;
+    final art = _artwork[next.id];
+    final url = wide
+        ? (art?.landscape ?? next.background ?? next.poster)
+        : (art?.portrait ?? next.poster ?? next.background);
+    if (url != null)
+      unawaited(precacheImage(
+          ResizeImage.resizeIfNeeded(
+              imageCacheWidth(context, MediaQuery.sizeOf(context).width),
+              null,
+              NetworkImage(url)),
+          context));
   }
 
   void _handleSwipeEnd() {
@@ -199,7 +219,7 @@ class _FeaturedCardState extends State<FeaturedHero>
 
   @override
   Widget build(BuildContext context) {
-    final heroHeight = _featuredHeroHeight(context);
+    final heroHeight = featuredHeroHeight(context);
     final activeItem = widget.items[_activeIndex];
     return SizedBox(
       height: heroHeight,
@@ -250,96 +270,73 @@ class _FeaturedCardState extends State<FeaturedHero>
 }
 
 class _FeaturedArtwork extends StatelessWidget {
-  const _FeaturedArtwork({
-    super.key,
-    required this.item,
-    required this.artwork,
-  });
-
+  const _FeaturedArtwork(
+      {super.key, required this.item, required this.artwork});
   final MediaItem item;
   final FeaturedArtwork? artwork;
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final large = size.width >= 600;
-    final portrait = artwork?.portrait ?? item.poster;
-    final landscape = artwork?.landscape ?? item.background;
-    final background =
-        large ? (landscape ?? portrait) : (portrait ?? landscape);
-
-    // FIX: Keep AnimatedSwitcher artwork at the full hero size instead of its image's intrinsic size.
+    final wide = size.width >= 700 || size.width > size.height;
+    final url = wide
+        ? (artwork?.landscape ?? item.background ?? item.poster)
+        : (artwork?.portrait ?? item.poster ?? item.background);
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox.expand(
-      child: background != null
-          ? Image.network(
-              background,
+      child: url == null
+          ? ColoredBox(color: scheme.surfaceContainerHighest)
+          : NovaNetworkImage(
+              url,
               width: double.infinity,
               height: double.infinity,
               fit: BoxFit.cover,
-              // Task 136: decode at the hero's on-screen width — the TMDB
-              // backdrop URL can be w1280; on a phone the hero is ~400px.
               cacheWidth: imageCacheWidth(context, size.width),
-              alignment: large ? Alignment.center : Alignment.topCenter,
+              alignment: Alignment.topCenter,
+              excludeFromSemantics: true,
+              frameBuilder: (context, child, frame, sync) => AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 320),
+                child: child,
+              ),
               errorBuilder: (_, __, ___) =>
-                  const ColoredBox(color: HorseTheme.raised),
-            )
-          : const ColoredBox(color: HorseTheme.raised),
+                  ColoredBox(color: scheme.surfaceContainerHighest),
+            ),
     );
   }
 }
 
 class _FeaturedScrim extends StatelessWidget {
   const _FeaturedScrim();
-
   @override
-  Widget build(BuildContext context) => const Stack(
-        fit: StackFit.expand,
-        children: [
-          // Bottom fade into the canvas — the original hero scrim, unchanged.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0, .34, .64, .9],
-                colors: [
-                  Color(0x00000000),
-                  Color(0x18000000),
-                  Color(0xB8000000),
-                  Color(0xFF000000),
-                ],
-              ),
-            ),
-          ),
-          // EDGE-TO-EDGE readability scrim (Task 119): the hero now bleeds
-          // behind the transparent status bar, so a short dark band keeps
-          // the clock/battery/signal icons readable over bright artwork
-          // (same idea as the web home hero's top gradient).
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0, .16],
-                colors: [Color(0x66000000), Color(0x00000000)],
-              ),
-            ),
-          ),
-        ],
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+        decoration: BoxDecoration(
+            gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        scheme.scrim.withValues(alpha: .25),
+        scheme.scrim.withValues(alpha: .05),
+        scheme.scrim.withValues(alpha: .86),
+        scheme.scrim
+      ],
+      stops: const [0, .35, .78, 1],
+    )));
+  }
 }
 
 class _FeaturedOverlay extends StatelessWidget {
-  const _FeaturedOverlay({
-    required this.item,
-    required this.artwork,
-    required this.itemsCount,
-    required this.activeIndex,
-    required this.reduceMotion,
-    required this.onSelectPage,
-    required this.onTap,
-  });
-
+  const _FeaturedOverlay(
+      {required this.item,
+      required this.artwork,
+      required this.itemsCount,
+      required this.activeIndex,
+      required this.reduceMotion,
+      required this.onSelectPage,
+      required this.onTap});
   final MediaItem item;
   final FeaturedArtwork? artwork;
   final int itemsCount;
@@ -347,389 +344,182 @@ class _FeaturedOverlay extends StatelessWidget {
   final bool reduceMotion;
   final ValueChanged<int> onSelectPage;
   final VoidCallback onTap;
-
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final english = app.english;
+    final scheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
-    final large = size.width >= 600;
-    final english = context.read<AppState>().english;
+    final wide = size.width >= 700;
+    // Cinematic art always has a dark palette-derived legibility bed.
+    final foreground = Theme.of(context).brightness == Brightness.dark
+        ? scheme.onSurface
+        : scheme.surface;
     final logo = artwork?.logo ?? item.logo;
     final genre = artwork?.genre ?? item.genres.firstOrNull;
-    final year = item.releaseInfo?.split('–').first.trim();
-    final metadataHeight = math
-        .max(24.0, MediaQuery.textScalerOf(context).scale(16) * 1.3)
-        .toDouble();
-    final typeLabel = switch (item.type.toLowerCase()) {
-      'movie' => english ? 'Movie' : 'فيلم',
-      'series' => english ? 'Series' : 'مسلسل',
-      _ => item.type,
-    };
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              SizedBox(
-                height: 50,
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: AnimatedSwitcher(
-                    duration: reduceMotion ? Duration.zero : HorseTheme.durMed,
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: child,
-                    ),
-                    child: logo == null
-                        ? const SizedBox.shrink(key: ValueKey('empty-logo'))
-                        : Image.network(
-                            logo,
-                            key: ValueKey(logo),
-                            width: math.min(size.width * .5, 175.0),
-                            height: 50,
-                            fit: BoxFit.contain,
-                            // Task 136: decode at the logo's on-screen size.
-                            cacheWidth: imageCacheWidth(
-                                context, math.min(size.width * .5, 175.0)),
-                            semanticLabel: item.name,
-                            errorBuilder: (_, __, ___) =>
-                                const SizedBox.shrink(),
-                          ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: metadataHeight,
-                child: Center(
-                  child: AnimatedSwitcher(
-                    duration: reduceMotion
-                        ? Duration.zero
-                        : const Duration(milliseconds: 180),
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: child,
-                    ),
-                    child: ConstrainedBox(
-                      key: ValueKey(item.id),
-                      constraints: BoxConstraints(maxWidth: size.width - 32),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (year?.isNotEmpty == true) ...[
-                            Text(year!, style: _heroMetadataStyle),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 10),
-                              child: _HeroMetadataDot(),
-                            ),
-                          ],
-                          if (genre?.isNotEmpty == true) ...[
-                            Flexible(
-                              child: Text(
-                                genre!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: _heroMetadataStyle,
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 10),
-                              child: _HeroMetadataDot(),
-                            ),
-                          ],
-                          Text(typeLabel, style: _heroMetadataStyle),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(height: large ? 12 : 10),
-              FilledButton(
-                onPressed: onTap,
-                style: FilledButton.styleFrom(
-                  minimumSize: Size(146, large ? 42 : 38),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  backgroundColor: const Color(0xFFF5F6F8),
-                  foregroundColor: const Color(0xFF0B0B0B),
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  shape: const StadiumBorder(),
-                  textStyle: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    height: 1,
-                  ),
-                ),
-                child: Text(english ? 'View details' : 'عرض التفاصيل'),
-              ),
-              if (itemsCount > 1) ...[
-                const SizedBox(height: 10),
-                Semantics(
-                  label: english ? 'Featured items' : 'العناوين المميزة',
-                  child: SizedBox(
-                    height: 8,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var index = 0; index < itemsCount; index++) ...[
-                          if (index > 0) const SizedBox(width: 8),
-                          Semantics(
-                            button: true,
-                            selected: index == activeIndex,
-                            label: english
-                                ? 'Item ${index + 1} of $itemsCount'
-                                : 'العنوان ${index + 1} من $itemsCount',
-                            onTap: () => onSelectPage(index),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => onSelectPage(index),
-                              child: AnimatedContainer(
-                                duration: reduceMotion
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 180),
-                                width: index == activeIndex ? 32 : 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.all(
-                                    Radius.circular(12),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (itemsCount > 1)
-          PositionedDirectional(
-            start: 0,
-            end: 0,
-            bottom: 0,
-            child: Center(
-              child: SizedBox(
-                width: itemsCount * 16.0 + 16,
-                height: 40,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapUp: (details) {
-                    final rowWidth = itemsCount * 16.0 + 16;
-                    final logicalX =
-                        Directionality.of(context) == TextDirection.rtl
-                            ? rowWidth - details.localPosition.dx
-                            : details.localPosition.dx;
-                    var cursor = 0.0;
-                    var nearestIndex = 0;
-                    var nearestDistance = double.infinity;
-                    for (var dot = 0; dot < itemsCount; dot++) {
-                      final slotWidth = dot == activeIndex ? 32.0 : 8.0;
-                      final distance =
-                          (logicalX - (cursor + slotWidth / 2)).abs();
-                      if (distance < nearestDistance) {
-                        nearestDistance = distance;
-                        nearestIndex = dot;
-                      }
-                      cursor += slotWidth + 8;
-                    }
-                    onSelectPage(nearestIndex);
-                  },
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// Hero metadata row: plain white text with a soft shadow, as before the
-/// outlined-text experiment (user: "ارجع نص الهيرو كما هو سابقاً").
-const _heroMetadataStyle = TextStyle(
-  color: Colors.white,
-  fontSize: 16,
-  fontWeight: FontWeight.w700,
-  shadows: [Shadow(color: Colors.black87, blurRadius: 8)],
-);
-
-class _HeroMetadataDot extends StatelessWidget {
-  const _HeroMetadataDot();
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 4,
-        height: 4,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .6),
-          shape: BoxShape.circle,
-        ),
-      );
-}
-
-/// First-load placeholder matching the real hero's height, scrim ladder and
-/// status-bar band so the loading state is geometry-identical.
-class FeaturedSkeleton extends StatelessWidget {
-  const FeaturedSkeleton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final heroHeight = _featuredHeroHeight(context);
-    final english = context.read<AppState>().english;
-    final metadataHeight = math
-        .max(24.0, MediaQuery.textScalerOf(context).scale(16) * 1.3)
-        .toDouble();
-    return SizedBox(
-      height: heroHeight,
-      child: Semantics(
-        label:
-            english ? 'Loading featured titles' : 'جارٍ تحميل العناوين المميزة',
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            const ColoredBox(color: Color(0xFF050608)),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: [0, .34, .64, .9],
-                  colors: [
-                    Color(0x00000000),
-                    Color(0x18000000),
-                    Color(0xB8000000),
-                    Color(0xFF000000),
-                  ],
-                ),
-              ),
-            ),
-            // Task 119: same status-bar readability band as the real hero,
-            // so the loading state matches the edge-to-edge presentation.
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: [0, .16],
-                  colors: [Color(0x66000000), Color(0x00000000)],
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 12),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    const SizedBox(height: 50),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: metadataHeight,
-                      child: Center(
-                        child: Wrap(
-                          alignment: WrapAlignment.center,
-                          spacing: 10,
-                          children: [
-                            _HeroSkeletonChip(width: 38),
-                            _HeroSkeletonChip(width: 52),
-                            _HeroSkeletonChip(width: 30),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      width: 146,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: .2),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _HeroSkeletonDot(active: true),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                        SizedBox(width: 8),
-                        _HeroSkeletonDot(),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+    final type = item.type == 'movie'
+        ? (NovaStrings.lookup(english, 'message128'))
+        : (NovaStrings.lookup(english, 'message129'));
+    return Padding(
+      padding: EdgeInsetsDirectional.fromSTEB(
+          wide ? 40 : 24, 72, wide ? 40 : 24, 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(NovaStrings.lookup(english, 'message130'),
+              style: TextStyle(
+                  color: foreground.withValues(alpha: .85),
+                  fontSize: 12,
+                  letterSpacing: english ? 2.5 : 0,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 16),
+          if (logo != null)
+            NovaNetworkImage(logo,
+                width: math.min(size.width * .65, 320),
+                height: wide ? 88 : 72,
+                fit: BoxFit.contain,
+                alignment: AlignmentDirectional.centerStart
+                    .resolve(Directionality.of(context)),
+                cacheWidth: imageCacheWidth(context, 320),
+                semanticLabel: item.name,
+                errorBuilder: (_, __, ___) => Text(item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: foreground,
+                        fontSize: wide ? 40 : 32,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2)))
+          else
+            Text(item.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: foreground,
+                    fontSize: wide ? 40 : 32,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 12, runSpacing: 4, children: [
+            Text(type,
+                style:
+                    TextStyle(color: foreground, fontWeight: FontWeight.w700)),
+            if (item.releaseInfo?.isNotEmpty == true)
+              Text(item.releaseInfo!,
+                  style: TextStyle(color: foreground.withValues(alpha: .85))),
+            if (genre != null)
+              Text(genre,
+                  style: TextStyle(color: foreground.withValues(alpha: .85))),
+          ]),
+          if (wide &&
+              (artwork?.overview ?? item.description)?.isNotEmpty == true) ...[
+            const SizedBox(height: 12),
+            ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Text(artwork?.overview ?? item.description!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: foreground.withValues(alpha: .85),
+                        height: 1.6))),
           ],
-        ),
+          const SizedBox(height: 24),
+          Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilledButton.icon(
+                    onPressed: onTap,
+                    icon: const Icon(LucideIcons.play, size: 20),
+                    label: Text(NovaStrings.lookup(english, 'message131')),
+                    style: FilledButton.styleFrom(
+                        minimumSize: const Size(160, 52))),
+                IconButton.filledTonal(
+                    onPressed: () => unawaited(app.toggleWatchlist(item)),
+                    tooltip: app.contains(item)
+                        ? (NovaStrings.lookup(english, 'message132'))
+                        : (NovaStrings.lookup(english, 'message133')),
+                    icon: Icon(app.contains(item)
+                        ? LucideIcons.check
+                        : LucideIcons.plus),
+                    style: IconButton.styleFrom(
+                        minimumSize: const Size.square(52))),
+              ]),
+          if (itemsCount > 1) ...[
+            const SizedBox(height: 12),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                  onPressed: () => onSelectPage(activeIndex - 1),
+                  tooltip: NovaStrings.lookup(english, 'message134'),
+                  icon: Icon(
+                      Directionality.of(context) == TextDirection.rtl
+                          ? LucideIcons.chevronRight
+                          : LucideIcons.chevronLeft,
+                      color: foreground)),
+              Text('${activeIndex + 1} / $itemsCount',
+                  textDirection: TextDirection.ltr,
+                  style: TextStyle(
+                      color: foreground,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+              IconButton(
+                  onPressed: () => onSelectPage(activeIndex + 1),
+                  tooltip: NovaStrings.lookup(english, 'message135'),
+                  icon: Icon(
+                      Directionality.of(context) == TextDirection.rtl
+                          ? LucideIcons.chevronLeft
+                          : LucideIcons.chevronRight,
+                      color: foreground)),
+            ]),
+          ],
+        ],
       ),
     );
   }
 }
 
-class _HeroSkeletonChip extends StatelessWidget {
-  const _HeroSkeletonChip({required this.width});
-
-  final double width;
-
+class FeaturedSkeleton extends StatelessWidget {
+  const FeaturedSkeleton({super.key});
   @override
-  Widget build(BuildContext context) => Container(
-        width: width,
-        height: 16,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .2),
-          borderRadius: BorderRadius.circular(12),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+        height: featuredHeroHeight(context),
+        child: ColoredBox(
+            color: scheme.surfaceContainerHighest,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 40),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final width in [120.0, 240.0, 160.0]) ...[
+                      Container(
+                          width: width,
+                          height: 20,
+                          decoration: BoxDecoration(
+                              color: scheme.onSurface.withValues(alpha: .08),
+                              borderRadius: BorderRadius.circular(8))),
+                      const SizedBox(height: 16),
+                    ],
+                    Container(
+                        width: 168,
+                        height: 52,
+                        decoration: BoxDecoration(
+                            color: scheme.onSurface.withValues(alpha: .08),
+                            borderRadius: BorderRadius.circular(16))),
+                  ]),
+            )));
+  }
 }
 
-class _HeroSkeletonDot extends StatelessWidget {
-  const _HeroSkeletonDot({this.active = false});
-
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: active ? 32 : 8,
-        height: 8,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .28),
-          borderRadius: BorderRadius.circular(8),
-        ),
-      );
-}
-
-double _featuredHeroHeight(BuildContext context) {
+double featuredHeroHeight(BuildContext context) {
   final size = MediaQuery.sizeOf(context);
-  final viewPadding = MediaQuery.viewPaddingOf(context);
-  // Task: the featured hero takes ~58% of the screen height on every
-  // device. Since Task 119 it bleeds BEHIND the transparent status bar
-  // (its top edge is y=0), but the height guard is unchanged: the hero
-  // must never extend into the glass dock zone, and keeps a small floor
-  // for very short viewports (e.g. landscape phones).
-  final availableHeight =
-      (size.height - viewPadding.top - glassDockContentClearance(context))
-          .clamp(0.0, double.infinity);
-  final preferredHeight = (size.height * .58).clamp(280.0, double.infinity);
-  return math.min(availableHeight, preferredHeight).toDouble();
+  final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
+  final landscape = size.width > size.height;
+  final base = landscape
+      ? (size.height * .95).clamp(420.0, 620.0)
+      : (size.height * .78).clamp(540.0, 760.0);
+  return base + (scale - 1).clamp(0.0, 2.0) * 160;
 }

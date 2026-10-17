@@ -1,3 +1,5 @@
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -67,7 +69,7 @@ class MediaRail extends StatelessWidget {
                 width: 3,
                 height: 19,
                 decoration: BoxDecoration(
-                  color: HorseTheme.gold,
+                  color: NovaTheme.of(context).gold,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -94,7 +96,7 @@ class MediaRail extends StatelessWidget {
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
-                                ?.copyWith(color: HorseTheme.muted),
+                                ?.copyWith(color: NovaTheme.of(context).muted),
                           ),
                         ],
                       ),
@@ -139,7 +141,7 @@ class _SectionChevron extends StatelessWidget {
   Widget build(BuildContext context) {
     final english = context.read<AppState>().english;
     final forward = Directionality.of(context) == TextDirection.ltr;
-    final label = english ? 'Open section' : 'فتح القسم';
+    final label = NovaStrings.lookup(english, 'message101');
     return Semantics(
       button: true,
       label: label,
@@ -157,15 +159,13 @@ class _SectionChevron extends StatelessWidget {
                 height: 32,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: HorseTheme.raised.withValues(alpha: .6),
-                  border: Border.all(color: HorseTheme.line),
+                  color: NovaTheme.of(context).raised.withValues(alpha: .6),
+                  border: Border.all(color: NovaTheme.of(context).line),
                 ),
                 child: Icon(
-                  forward
-                      ? Icons.chevron_right_rounded
-                      : Icons.chevron_left_rounded,
+                  forward ? LucideIcons.chevronRight : LucideIcons.chevronLeft,
                   size: 22,
-                  color: HorseTheme.gold,
+                  color: NovaTheme.of(context).gold,
                 ),
               ),
             ),

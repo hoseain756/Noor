@@ -191,16 +191,17 @@ class NoorSyncService {
     final device = await deviceId();
     if (device == null) return false;
     return await _run<bool>((connection) async {
-      await connection.execute(
-        Sql.named(
-          'DELETE FROM noor_sync '
-          'WHERE device_id = @device_id AND bucket = @bucket',
-        ),
-        parameters: {'device_id': device, 'bucket': bucket},
-      );
-      _lastKnownRev.remove(bucket);
-      return true;
-    }, 'deleteBucket($bucket)') ?? false;
+          await connection.execute(
+            Sql.named(
+              'DELETE FROM noor_sync '
+              'WHERE device_id = @device_id AND bucket = @bucket',
+            ),
+            parameters: {'device_id': device, 'bucket': bucket},
+          );
+          _lastKnownRev.remove(bucket);
+          return true;
+        }, 'deleteBucket($bucket)') ??
+        false;
   }
 
   /// Closes the shared connection (called when the owning scope is disposed).

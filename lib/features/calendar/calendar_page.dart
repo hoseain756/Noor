@@ -1,10 +1,13 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/anime_airing.dart';
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import '../shell/nova_browse_widgets.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/image_decode.dart';
 import '../media/media_detail_page.dart';
@@ -18,7 +21,9 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   static final Map<String, Future<List<_CalendarEpisode>>> _cache = {};
+  static final Map<String, DateTime> _cachedAt = {};
   int _weekOffset = 0;
+  int? _selectedDay;
   late Future<List<_CalendarEpisode>> _episodes;
 
   @override
@@ -48,6 +53,15 @@ class _CalendarPageState extends State<CalendarPage> {
     final trackedIds = tracked.keys.toList()..sort();
     final cacheKey =
         '${start.year}-${start.month}-${start.day}|${trackedIds.join(',')}';
+    final now = DateTime.now();
+    _cache.removeWhere((key, _) =>
+        _cachedAt[key] == null ||
+        now.difference(_cachedAt[key]!).inMinutes >= 15);
+    while (_cache.length >= 12) {
+      _cachedAt.remove(_cache.keys.first);
+      _cache.remove(_cache.keys.first);
+    }
+    _cachedAt[cacheKey] = now;
     return _cache.putIfAbsent(cacheKey, () async {
       final end = start.add(const Duration(days: 7));
       final episodes = <_CalendarEpisode>[];
@@ -87,9 +101,8 @@ class _CalendarPageState extends State<CalendarPage> {
           video: {
             'id': '${airing.media.id}:episode:${airing.episode}',
             'episode': airing.episode,
-            'name': 'Episode ${airing.episode}',
           },
-          released: airing.airingAt,
+          released: airing.airingAt.toLocal(),
         ));
       }
       episodes.sort((a, b) => a.released.compareTo(b.released));
@@ -107,9 +120,7 @@ class _CalendarPageState extends State<CalendarPage> {
         final english = context.read<AppState>().english;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(english
-                ? 'No playable catalog entry was found for this anime.'
-                : 'لم يُعثر على عنوان قابل للتشغيل لهذا الأنمي.'),
+            content: Text(NovaStrings.lookup(english, 'message564')),
           ),
         );
         return;
@@ -132,6 +143,7 @@ class _CalendarPageState extends State<CalendarPage> {
   void _moveWeek(int delta) {
     setState(() {
       _weekOffset += delta;
+      _selectedDay = null;
       _episodes = _load();
     });
   }
@@ -144,126 +156,139 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
+    final theme = Theme.of(context);
+    final local = MaterialLocalizations.of(context);
     final start = _weekStart;
-    final end = start.add(const Duration(days: 6));
     return Scaffold(
-      appBar: AppBar(
-        title: Text(english ? 'Calendar' : 'التقويم'),
-        actions: [
+        appBar: AppBar(title: Text(app.tr('message565')), actions: [
           IconButton(
-            tooltip: english ? 'Refresh' : 'تحديث',
-            onPressed: _retry,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 14),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: english ? 'Previous week' : 'الأسبوع السابق',
-                      onPressed: () => _moveWeek(-1),
-                      icon: const Icon(Icons.chevron_left_rounded),
-                    ),
-                    Expanded(
-                      child: Text(
-                        '${_formatDate(start, english)} – ${_formatDate(end, english)}',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: english ? 'Next week' : 'الأسبوع التالي',
-                      onPressed: () => _moveWeek(1),
-                      icon: const Icon(Icons.chevron_right_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: FutureBuilder<List<_CalendarEpisode>>(
-                  future: _episodes,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child:
-                            CircularProgressIndicator(color: HorseTheme.gold),
-                      );
-                    }
-                    if (snapshot.hasError) {
-                      return AppStateMessage(
-                        icon: Icons.calendar_month_outlined,
-                        message: english
-                            ? 'The calendar could not be loaded.'
-                            : 'تعذر تحميل التقويم.',
-                        actionLabel: english ? 'Retry' : 'إعادة المحاولة',
-                        onAction: _retry,
-                      );
-                    }
-                    final episodes = snapshot.data ?? const [];
-                    if (episodes.isEmpty) {
-                      return AppStateMessage(
-                        icon: Icons.calendar_month_outlined,
-                        message: app.watchlist
-                                    .any((item) => item.type == 'series') ||
-                                app.history
-                                    .any((entry) => entry.item.type == 'series')
-                            ? (english
-                                ? 'No tracked episodes are scheduled this week.'
-                                : 'لا توجد حلقات لعناوينك المسجلة هذا الأسبوع.')
-                            : (english
-                                ? 'Save a series or start watching one to see its new episodes here.'
-                                : 'أضف مسلسلًا إلى قائمتك أو ابدأ مشاهدته لعرض حلقاته الجديدة هنا.'),
-                        actionLabel: english ? 'Refresh' : 'تحديث',
-                        onAction: _retry,
-                      );
-                    }
-                    final grouped = <DateTime, List<_CalendarEpisode>>{};
-                    for (final episode in episodes) {
-                      final day = DateTime(episode.released.year,
-                          episode.released.month, episode.released.day);
-                      grouped.putIfAbsent(day, () => []).add(episode);
-                    }
-                    return ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      children: [
-                        for (final entry in grouped.entries) ...[
-                          Padding(
-                            padding: const EdgeInsetsDirectional.only(
-                                top: 12, bottom: 8),
-                            child: Text(
-                              _formatDay(entry.key, english),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(color: HorseTheme.gold),
-                            ),
-                          ),
-                          for (final episode in entry.value)
-                            _EpisodeTile(
-                              episode: episode,
-                              english: english,
-                              onTap: () => _openEpisode(episode),
-                            ),
-                        ],
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+              tooltip: app.tr('message68'),
+              onPressed: _retry,
+              icon: const Icon(LucideIcons.refreshCw))
+        ]),
+        body: Center(
+            child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: FutureBuilder<List<_CalendarEpisode>>(
+              future: _episodes,
+              builder: (context, snapshot) {
+                final all = snapshot.data ?? const <_CalendarEpisode>[];
+                final episodes = all
+                    .where((entry) =>
+                        _selectedDay == null ||
+                        entry.released.weekday == _selectedDay)
+                    .toList();
+                final sections = <Object>[];
+                DateTime? previous;
+                for (final episode in episodes) {
+                  final day = DateTime(episode.released.year,
+                      episode.released.month, episode.released.day);
+                  if (day != previous) {
+                    sections.add(day);
+                    previous = day;
+                  }
+                  sections.add(episode);
+                }
+                return CustomScrollView(slivers: [
+                  SliverToBoxAdapter(
+                      child: NovaBrowseHeader(
+                          compact: true,
+                          eyebrow: app.tr('message566'),
+                          title: app.tr('message567'),
+                          subtitle: app.tr('message568'))),
+                  SliverToBoxAdapter(
+                      child: Padding(
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                              16, 0, 16, 16),
+                          child: Row(children: [
+                            IconButton.filledTonal(
+                                tooltip: app.tr('message569'),
+                                onPressed: () => _moveWeek(-1),
+                                icon: Icon(Directionality.of(context) ==
+                                        TextDirection.rtl
+                                    ? LucideIcons.chevronRight
+                                    : LucideIcons.chevronLeft)),
+                            Expanded(
+                                child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    child: Text(
+                                        '${local.formatMediumDate(start)} — ${local.formatMediumDate(start.add(const Duration(days: 6)))}',
+                                        textAlign: TextAlign.center,
+                                        style: theme.textTheme.titleMedium))),
+                            IconButton.filledTonal(
+                                tooltip: app.tr('message570'),
+                                onPressed: () => _moveWeek(1),
+                                icon: Icon(Directionality.of(context) ==
+                                        TextDirection.rtl
+                                    ? LucideIcons.chevronLeft
+                                    : LucideIcons.chevronRight)),
+                          ]))),
+                  SliverToBoxAdapter(
+                      child: Padding(
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                              24, 0, 24, 24),
+                          child: Wrap(spacing: 8, runSpacing: 8, children: [
+                            ChoiceChip(
+                                label: Text(app.tr('message571')),
+                                selected: _selectedDay == null,
+                                onSelected: (_) =>
+                                    setState(() => _selectedDay = null)),
+                            for (var i = 0; i < 7; i++)
+                              ChoiceChip(
+                                  label: Text(local.formatShortDate(
+                                      start.add(Duration(days: i)))),
+                                  selected: _selectedDay == i + 1,
+                                  onSelected: (_) =>
+                                      setState(() => _selectedDay = i + 1)),
+                            if (_weekOffset != 0)
+                              ActionChip(
+                                  label: Text(app.tr('message572')),
+                                  onPressed: () => _moveWeek(-_weekOffset)),
+                          ]))),
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      all.isEmpty)
+                    const SliverToBoxAdapter(
+                        child: SizedBox(
+                            height: 500, child: NovaBrowseSkeleton(rows: true)))
+                  else if (snapshot.hasError || episodes.isEmpty)
+                    SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: AppStateMessage(
+                            icon: LucideIcons.calendarDays,
+                            message: snapshot.hasError
+                                ? app.tr('message573')
+                                : app.tr('message574'),
+                            actionLabel: app.tr('message68'),
+                            onAction: _retry))
+                  else
+                    SliverPadding(
+                        padding:
+                            const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 48),
+                        sliver: SliverList.builder(
+                            itemCount: sections.length,
+                            itemBuilder: (context, index) {
+                              final section = sections[index];
+                              if (section is DateTime)
+                                return Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                        top: 16, bottom: 16),
+                                    child: Text(local.formatFullDate(section),
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                color: theme
+                                                    .colorScheme.secondary)));
+                              final episode = section as _CalendarEpisode;
+                              return _EpisodeTile(
+                                  episode: episode,
+                                  english: app.english,
+                                  onTap: () => _openEpisode(episode));
+                            })),
+                ]);
+              }),
+        )));
   }
 }
 
@@ -290,102 +315,80 @@ class _EpisodeTile extends StatelessWidget {
     final number = (episode.video['episode'] as num?)?.toInt();
     final episodeLabel = season != null && number != null
         ? 'S$season E$number'
-        : (english ? 'Episode ${number ?? ''}' : 'الحلقة ${number ?? ''}');
+        : (NovaStrings.lookup(english, 'message44', {'p0': number ?? ''}));
     final title =
         (episode.video['name'] ?? episode.video['title'] ?? episodeLabel)
             .toString();
-    return Card(
-      margin: const EdgeInsets.only(bottom: 9),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(10, 5, 12, 5),
-        leading: SizedBox(
-          width: 112,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: still == null
-                ? const ColoredBox(
-                    color: HorseTheme.raised,
-                    child: Icon(Icons.live_tv_rounded))
-                : Image.network(still,
-                    fit: BoxFit.cover,
-                    // Task 136: decode at the 112px list thumbnail size.
-                    cacheWidth: imageCacheWidth(context, 112),
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                        color: HorseTheme.raised,
-                        child: Icon(Icons.live_tv_rounded))),
-          ),
-        ),
-        title: Text(episode.series.name,
-            maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text('$episodeLabel · $title',
-            maxLines: 2, overflow: TextOverflow.ellipsis),
-        trailing: Text(_formatTime(episode.released, english),
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(color: HorseTheme.gold)),
-        onTap: onTap,
-      ),
-    );
+    final app = context.read<AppState>();
+    final theme = Theme.of(context);
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+        TimeOfDay.fromDateTime(episode.released),
+        alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
+    return Padding(
+        padding: const EdgeInsetsDirectional.only(bottom: 16),
+        child: Material(
+            color: theme.colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 500;
+                    final art = ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox(
+                            width: wide ? 160 : 88,
+                            height: wide ? 96 : 112,
+                            child: still == null
+                                ? ColoredBox(
+                                    color: theme
+                                        .colorScheme.surfaceContainerHighest,
+                                    child: const Icon(LucideIcons.tv))
+                                : NovaNetworkImage(still,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: imageCacheWidth(
+                                        context, wide ? 160 : 88),
+                                    errorBuilder: (_, __, ___) => ColoredBox(
+                                        color: theme.colorScheme
+                                            .surfaceContainerHighest,
+                                        child: const Icon(LucideIcons.tv)))));
+                    return Row(children: [
+                      art,
+                      const SizedBox(width: 16),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text(time,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                    color: theme.colorScheme.secondary)),
+                            const SizedBox(height: 6),
+                            Text(episode.series.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium),
+                            const SizedBox(height: 6),
+                            Text('$episodeLabel · $title',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall),
+                            const SizedBox(height: 6),
+                            Text(app.tr('message575'),
+                                style: theme.textTheme.labelMedium),
+                          ])),
+                      if (wide) ...[
+                        const SizedBox(width: 16),
+                        const Icon(LucideIcons.play, size: 24)
+                      ],
+                    ]);
+                  })),
+            )));
   }
 }
 
 DateTime? _releaseDate(dynamic raw) {
   if (raw is! String || raw.trim().isEmpty) return null;
-  return DateTime.tryParse(raw.trim());
+  return DateTime.tryParse(raw.trim())?.toLocal();
 }
-
-String _formatDate(DateTime date, bool english) =>
-    '${date.day} ${_monthName(date.month, english)} ${date.year}';
-
-String _formatDay(DateTime date, bool english) =>
-    '${_weekdayName(date.weekday, english)}, ${_formatDate(date, english)}';
-
-String _formatTime(DateTime date, bool english) {
-  final minute = date.minute.toString().padLeft(2, '0');
-  if (!english) return '${date.hour.toString().padLeft(2, '0')}:$minute';
-  final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-  return '$hour:$minute ${date.hour < 12 ? 'AM' : 'PM'}';
-}
-
-String _monthName(int month, bool english) => english
-    ? const [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec'
-      ][month - 1]
-    : const [
-        'يناير',
-        'فبراير',
-        'مارس',
-        'أبريل',
-        'مايو',
-        'يونيو',
-        'يوليو',
-        'أغسطس',
-        'سبتمبر',
-        'أكتوبر',
-        'نوفمبر',
-        'ديسمبر'
-      ][month - 1];
-
-String _weekdayName(int weekday, bool english) => english
-    ? const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1]
-    : const [
-        'الاثنين',
-        'الثلاثاء',
-        'الأربعاء',
-        'الخميس',
-        'الجمعة',
-        'السبت',
-        'الأحد'
-      ][weekday - 1];

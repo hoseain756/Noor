@@ -1,406 +1,136 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
-
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
 import '../../features/anime/anime_tracker_sheet.dart';
+import 'nova_network_image.dart';
 import 'image_decode.dart';
 import 'noor_toast.dart';
 
-/// Long-press "quick look" for any media card (movie / series / anime).
-///
-/// The page behind blurs and dims, the tapped card's poster scales up to the
-/// center with its title and year underneath, and a floating rounded menu
-/// appears below with the quick actions (watch / add to library / mark as
-/// watched) — matching the reference sheet style: dark rounded rows, icon on
-/// the far side, label on the reading side, dismiss by tapping the backdrop.
-Future<void> showMediaQuickLook(
-  BuildContext context, {
-  required MediaItem item,
-  required VoidCallback onOpen,
-}) async {
-  HapticFeedback.mediumImpact();
-  await Navigator.of(context, rootNavigator: true).push(
-    PageRouteBuilder<void>(
-      opaque: false,
-      barrierColor: Colors.transparent,
-      transitionDuration: const Duration(milliseconds: 260),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
-      pageBuilder: (_, __, ___) => _QuickLookPage(item: item, onOpen: onOpen),
-      transitionsBuilder: (_, animation, __, child) => FadeTransition(
-        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-        child: child,
-      ),
-    ),
-  );
+/// Compact action sheet; no full-screen blur or oversized poster animation.
+Future<void> showMediaQuickLook(BuildContext context,
+    {required MediaItem item, required VoidCallback onOpen}) async {
+  HapticFeedback.selectionClick();
+  final action = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
+      builder: (_) => _QuickLook(item: item));
+  if (!context.mounted) return;
+  if (action == 'watch') onOpen();
+  if (action == 'track') await showAnimeTrackerSheet(context, item);
 }
 
-class _QuickLookPage extends StatefulWidget {
-  const _QuickLookPage({required this.item, required this.onOpen});
-
+class _QuickLook extends StatelessWidget {
+  const _QuickLook({required this.item});
   final MediaItem item;
-  final VoidCallback onOpen;
-
-  @override
-  State<_QuickLookPage> createState() => _QuickLookPageState();
-}
-
-class _QuickLookPageState extends State<_QuickLookPage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 300),
-  );
-
-  /// The card block grows in from ~82% with a soft overshoot; the menu rides
-  /// in with a small upward slide. Reverse plays on close before the pop.
-  late final Animation<double> _scale =
-      Tween<double>(begin: .82, end: 1).animate(
-    CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-  );
-  late final Animation<Offset> _menuSlide =
-      Tween<Offset>(begin: const Offset(0, .16), end: Offset.zero).animate(
-    CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _close() async {
-    await _controller.reverse();
-    if (mounted) Navigator.of(context).pop();
-  }
-
-  /// Watch = close, then open the detail page exactly like a regular tap.
-  void _watch() {
-    Navigator.of(context).pop();
-    widget.onOpen();
-  }
-
-  Future<void> _toggleLibrary(bool inLibrary) async {
-    final app = context.read<AppState>();
-    final english = app.english;
-    await app.toggleWatchlist(widget.item);
-    if (!mounted) return;
-    NoorToast.show(
-      context,
-      inLibrary
-          ? (english ? 'Removed from library' : 'تمت الإزالة من المكتبة')
-          : (english ? 'Added to library' : 'تمت الإضافة إلى المكتبة'),
-    );
-    Navigator.of(context).pop();
-  }
-
-  Future<void> _markWatched(bool watched) async {
-    final app = context.read<AppState>();
-    final english = app.english;
-    if (watched) {
-      NoorToast.show(
-        context,
-        english ? 'Already marked as watched' : 'مُحددة كمشاهدة بالفعل',
-      );
-      return;
-    }
-    await app.recordPlayback(widget.item, positionMs: 1, durationMs: 0);
-    if (!mounted) return;
-    NoorToast.show(
-      context,
-      english ? 'Marked as watched' : 'تم التحديد كمشاهد',
-    );
-    Navigator.of(context).pop();
-  }
-
-  /// Opens the anime tracking sheet (status / progress / score) for items
-  /// carrying a provider id while any tracker is linked.
-  Future<void> _trackAnime() async {
-    Navigator.of(context).pop();
-    await showAnimeTrackerSheet(context, widget.item);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
     final app = context.watch<AppState>();
-    final english = app.english;
-    final item = widget.item;
     final inLibrary = app.contains(item);
-    final watched = app.history.any((h) => h.item.id == item.id);
+    final watched = app.history.any((entry) => entry.item.id == item.id);
     final canTrack = item.hasAnimeIds &&
         (app.linkedServices['anilist']?['linked'] == true ||
             app.linkedServices['mal']?['linked'] == true);
-    // Reference sheet: poster ≈ 58% of the screen width, 2:3, radius 20.
-    final posterWidth = (size.width * .58).clamp(180.0, 260.0).toDouble();
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-
-    return Material(
-      type: MaterialType.transparency,
-      child: Stack(
-        children: [
-          // Blurred, dimmed backdrop — tap anywhere to dismiss.
-          // Task 136 (perf): sigma 18 → 10 — an ephemeral modal still
-          // recomputes the blur during its open/close animation frames,
-          // and 18-sigma gaussians are the most expensive filter class on
-          // low-end GPUs; 10 reads nearly identically over the dimmer.
-          GestureDetector(
-            onTap: _close,
-            excludeFromSemantics: true,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-              child: Container(color: Colors.black.withValues(alpha: .62)),
-            ),
-          ),
-          SafeArea(
-            child: Center(
-              child: reduceMotion
-                  ? _content(
-                      context,
-                      english: english,
-                      inLibrary: inLibrary,
-                      watched: watched,
-                      canTrack: canTrack,
-                      posterWidth: posterWidth,
-                    )
-                  : ScaleTransition(
-                      scale: _scale,
-                      child: _content(
-                        context,
-                        english: english,
-                        inLibrary: inLibrary,
-                        watched: watched,
-                        canTrack: canTrack,
-                        posterWidth: posterWidth,
-                      ),
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _content(
-    BuildContext context, {
-    required bool english,
-    required bool inLibrary,
-    required bool watched,
-    required bool canTrack,
-    required double posterWidth,
-  }) {
-    final item = widget.item;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // The enlarged poster card.
-        Container(
-          width: posterWidth,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .55),
-                blurRadius: 28,
-                offset: const Offset(0, 14),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: AspectRatio(
-              aspectRatio: .68,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  const ColoredBox(color: HorseTheme.raised),
-                  if (item.poster != null)
-                    Image.network(
-                      item.poster!,
-                      fit: BoxFit.cover,
-                      // Task 136: decode at the poster's on-screen size.
-                      cacheWidth: imageCacheWidth(context, posterWidth),
-                      errorBuilder: (_, __, ___) => const Center(
-                        child: Icon(
-                          Icons.movie_outlined,
-                          size: 44,
-                          color: HorseTheme.gold,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 18),
-        // Title + year under the card.
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Text(
-            item.name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              height: 1.25,
-            ),
-          ),
-        ),
-        if (item.releaseInfo?.isNotEmpty == true) ...[
-          const SizedBox(height: 4),
-          Text(
-            item.releaseInfo!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: HorseTheme.muted,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-        const SizedBox(height: 22),
-        // The floating rounded action menu.
-        SlideTransition(
-          position: _menuSlide,
-          child: _QuickMenu(
-            rows: [
-              _QuickMenuRow(
-                icon: Icons.play_arrow_rounded,
-                label: english ? 'Watch' : 'مشاهدة',
-                onTap: _watch,
-              ),
-              _QuickMenuRow(
-                icon: inLibrary ? Icons.check_rounded : Icons.add_rounded,
-                label: inLibrary
-                    ? (english ? 'Remove from library' : 'إزالة من المكتبة')
-                    : (english ? 'Add to library' : 'إضافة للمكتبة'),
-                onTap: () => _toggleLibrary(inLibrary),
-              ),
-              _QuickMenuRow(
-                icon: watched
-                    ? Icons.check_circle_rounded
-                    : Icons.check_circle_outline_rounded,
-                label: watched
-                    ? (english ? 'Watched' : 'تمت المشاهدة')
-                    : (english ? 'Mark as watched' : 'تحديد كمشاهد'),
-                onTap: () => _markWatched(watched),
-              ),
-              if (canTrack)
-                _QuickMenuRow(
-                  icon: Icons.playlist_add_check_rounded,
-                  label: english
-                      ? 'Track on AniList / MAL'
-                      : 'تتبّع في AniList / MAL',
-                  onTap: _trackAnime,
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _QuickMenuRow {
-  const _QuickMenuRow({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-}
-
-/// The reference menu: one dark rounded container of full-width rows,
-/// label on the reading side and the icon on the far side, hairline
-/// dividers between rows.
-class _QuickMenu extends StatelessWidget {
-  const _QuickMenu({required this.rows});
-
-  final List<_QuickMenuRow> rows;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      constraints: const BoxConstraints(maxWidth: 420),
-      decoration: BoxDecoration(
-        color: HorseTheme.raised.withValues(alpha: .97),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: HorseTheme.line.withValues(alpha: .8)),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < rows.length; i++) ...[
-              if (i > 0)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Container(
-                    height: 1,
-                    color: HorseTheme.line.withValues(alpha: .55),
-                  ),
-                ),
-              _buildRow(context, rows[i]),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRow(BuildContext context, _QuickMenuRow row) {
-    return Semantics(
-      button: true,
-      label: row.label,
-      child: InkWell(
-        onTap: row.onTap,
-        child: SizedBox(
-          height: 56,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Row(
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 24),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Reading side (right in Arabic, left in English).
-                Expanded(
-                  child: Text(
-                    row.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: HorseTheme.ink,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Far side icon — sits at the left edge in Arabic, exactly
-                // like the reference sheet.
-                Icon(row.icon, size: 22, color: HorseTheme.ink),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: SizedBox(
+                          width: 96,
+                          height: 144,
+                          child: item.poster == null
+                              ? ColoredBox(
+                                  color: scheme.surfaceContainerHigh,
+                                  child: const Icon(LucideIcons.film))
+                              : NovaNetworkImage(item.poster!,
+                                  fit: BoxFit.cover,
+                                  cacheWidth: imageCacheWidth(context, 96)))),
+                  const SizedBox(width: 20),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(item.name,
+                            style: Theme.of(context).textTheme.titleLarge),
+                        const SizedBox(height: 8),
+                        if (item.releaseInfo != null)
+                          Text(item.releaseInfo!,
+                              style: Theme.of(context).textTheme.bodySmall),
+                        if (item.description?.isNotEmpty == true) ...[
+                          const SizedBox(height: 12),
+                          Text(item.description!,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: scheme.onSurfaceVariant))
+                        ],
+                      ])),
+                  IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      tooltip: app.tr('close'),
+                      icon: const Icon(LucideIcons.x)),
+                ]),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                    onPressed: () => Navigator.pop(context, 'watch'),
+                    icon: const Icon(LucideIcons.play),
+                    label: Text(app.tr('message95'))),
+                const SizedBox(height: 16),
+                ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(inLibrary
+                        ? LucideIcons.bookmarkCheck
+                        : LucideIcons.bookmarkPlus),
+                    title: Text(
+                        inLibrary ? app.tr('message96') : app.tr('message97')),
+                    onTap: () async {
+                      await app.toggleWatchlist(item);
+                      if (context.mounted) {
+                        NoorToast.show(
+                            context,
+                            inLibrary
+                                ? app.tr('message91')
+                                : app.tr('message92'));
+                        Navigator.pop(context);
+                      }
+                    }),
+                ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                        watched ? LucideIcons.circleCheck : LucideIcons.eye),
+                    title: Text(
+                        watched ? app.tr('message98') : app.tr('message99')),
+                    onTap: watched
+                        ? null
+                        : () async {
+                            await app.recordPlayback(item,
+                                positionMs: 1, durationMs: 0);
+                            if (context.mounted) {
+                              NoorToast.show(context, app.tr('message94'));
+                              Navigator.pop(context);
+                            }
+                          }),
+                if (canTrack)
+                  ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(LucideIcons.listChecks),
+                      title: Text(app.tr('message100')),
+                      onTap: () => Navigator.pop(context, 'track')),
+              ]),
+        ));
   }
 }

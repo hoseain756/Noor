@@ -1,3 +1,4 @@
+import '../shell/nova_catalog_refresh.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,8 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import '../shell/nova_browse_widgets.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../shared/widgets/app_state_message.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../media/media_detail_page.dart';
@@ -40,7 +42,16 @@ class CatalogGridPage extends StatefulWidget {
   State<CatalogGridPage> createState() => _CatalogGridPageState();
 }
 
-class _CatalogGridPageState extends State<CatalogGridPage> {
+class _CatalogGridPageState extends State<CatalogGridPage>
+    with NovaCatalogRefresh<CatalogGridPage> {
+  @override
+  bool get catalogRefreshEnabled => widget.loader != null;
+
+  @override
+  void refreshCachedCatalogs() {
+    if (!_loading) unawaited(_load());
+  }
+
   List<MediaItem>? _items;
   bool _loading = false;
   bool _failed = false;
@@ -49,6 +60,7 @@ class _CatalogGridPageState extends State<CatalogGridPage> {
   @override
   void initState() {
     super.initState();
+    _items = widget.items;
     if (widget.loader != null) {
       unawaited(_load());
     } else {
@@ -82,96 +94,75 @@ class _CatalogGridPageState extends State<CatalogGridPage> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final english = app.english;
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final gridTileExtent = 185 / .72 + 68 * textScale + 12;
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
     final items = _items ?? const <MediaItem>[];
-    final onOpen = widget.onOpen;
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(widget.title),
-            if (widget.subtitle != null)
-              Text(
-                widget.subtitle!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: HorseTheme.muted),
-              ),
-          ],
-        ),
-        actions: [
-          if (widget.loader != null)
-            IconButton(
-              tooltip: english ? 'Refresh' : 'تحديث',
+      appBar: AppBar(title: Text(app.tr('message591')), actions: [
+        if (widget.loader != null)
+          IconButton(
+              tooltip: app.tr('message68'),
               onPressed: () => unawaited(_load()),
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-        ],
-      ),
+              icon: const Icon(LucideIcons.refreshCw))
+      ]),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1250),
-          child: _loading && items.isEmpty
-              ? const Center(child: CircularProgressIndicator())
-              : _failed && items.isEmpty
-                  ? AppStateMessage(
-                      icon: Icons.movie_filter_outlined,
-                      iconSize: 42,
-                      padding: const EdgeInsets.all(24),
-                      message: english
-                          ? 'This catalog could not be loaded.'
-                          : 'تعذر تحميل هذا الكتالوج.',
-                      actionLabel: english ? 'Try again' : 'إعادة المحاولة',
-                      onAction: () => unawaited(_load()),
-                    )
-                  : items.isEmpty && !_loading
-                      ? AppStateMessage(
-                          icon: Icons.movie_filter_outlined,
-                          iconSize: 42,
-                          padding: const EdgeInsets.all(24),
-                          message: english
-                              ? 'No titles are available in this catalog.'
-                              : 'لا توجد عناوين في هذا الكتالوج.',
-                          actionLabel: english ? 'Refresh' : 'تحديث',
-                          onAction: () => unawaited(_load()),
-                        )
-                      : GridView.builder(
-                          padding: const EdgeInsetsDirectional.fromSTEB(
-                              16, 8, 16, 120),
-                          gridDelegate:
-                              SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 185,
-                            mainAxisExtent: gridTileExtent,
-                            crossAxisSpacing: 14,
-                            mainAxisSpacing: 14,
-                          ),
-                          itemCount: items.length,
-                          itemBuilder: (context, index) {
-                            final item = items[index];
-                            return PosterCard(
-                              item: item,
-                              width: double.infinity,
-                              onTap: () => onOpen != null
-                                  ? onOpen(item)
-                                  : Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) =>
-                                            MediaDetailPage(item: item),
-                                      ),
-                                    ),
-                            );
-                          },
-                        ),
-        ),
-      ),
+          child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1440),
+        child: CustomScrollView(slivers: [
+          SliverToBoxAdapter(
+              child: NovaBrowseHeader(
+                  compact: true,
+                  eyebrow: widget.subtitle ?? app.tr('message592'),
+                  title: widget.title,
+                  subtitle: app.tr('message593'))),
+          if (_loading && items.isEmpty)
+            const SliverToBoxAdapter(
+                child: SizedBox(height: 600, child: NovaBrowseSkeleton()))
+          else if (items.isEmpty)
+            SliverFillRemaining(
+                hasScrollBody: false,
+                child: AppStateMessage(
+                    icon: _failed ? LucideIcons.cloudOff : LucideIcons.library,
+                    message:
+                        _failed ? app.tr('message594') : app.tr('message595'),
+                    actionLabel:
+                        widget.loader == null ? null : app.tr('message174'),
+                    onAction: widget.loader == null
+                        ? null
+                        : () => unawaited(_load())))
+          else ...[
+            if (_loading)
+              const SliverToBoxAdapter(
+                  child: LinearProgressIndicator(minHeight: 2)),
+            SliverPadding(
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 48),
+                sliver: SliverLayoutBuilder(builder: (context, constraints) {
+                  final columns =
+                      (constraints.crossAxisExtent / 190).floor().clamp(2, 7);
+                  final width =
+                      (constraints.crossAxisExtent - (columns - 1) * 20) /
+                          columns;
+                  return SliverGrid.builder(
+                      itemCount: items.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          mainAxisExtent: width / .72 +
+                              78 * MediaQuery.textScalerOf(context).scale(1),
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 24),
+                      itemBuilder: (context, index) => PosterCard(
+                          item: items[index],
+                          width: width,
+                          onTap: () => widget.onOpen != null
+                              ? widget.onOpen!(items[index])
+                              : Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                      builder: (_) => MediaDetailPage(
+                                          item: items[index])))));
+                })),
+          ],
+        ]),
+      )),
     );
   }
 }

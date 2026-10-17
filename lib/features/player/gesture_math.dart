@@ -28,3 +28,16 @@ int clampSeekTargetMs(int targetMs, int durationMs) {
   if (durationMs <= 0) return targetMs.clamp(0, 0).toInt();
   return targetMs.clamp(0, durationMs).toInt();
 }
+
+/// Physical touch coordinates mapped to the reading-direction timeline.
+double logicalSeekPosition(double x, double width, {required bool rtl}) =>
+    rtl ? width - x : x;
+
+int directionalSeekDeltaMs(
+    {required double dx,
+    required double width,
+    required int durationMs,
+    required bool rtl}) {
+  if (width <= 0 || durationMs <= 0) return 0;
+  return ((rtl ? -dx : dx) / width * durationMs * .5).round();
+}

@@ -1,13 +1,16 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api/noor_api.dart';
 import '../../core/oauth/oauth_redirect.dart';
 import '../../core/state/app_state.dart';
 import '../../shared/widgets/noor_toast.dart';
+import '../../shared/widgets/nova_parental_gate.dart';
 import 'magnet_opener.dart';
 
 /// Listens for VIEW intents forwarded by the Android side over the
@@ -62,7 +65,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
     final lower = data.toLowerCase();
     if (lower.startsWith('magnet:')) {
       if (!mounted) return;
-      unawaited(openMagnetFlow(context, initialMagnet: data));
+      unawaited(_openGuardedMagnet(data));
       return;
     }
     if (lower.startsWith('noor://')) {
@@ -76,6 +79,16 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
     if (lower.startsWith('https://') && NoorApi.isTraktHttpsReturn(data)) {
       unawaited(_completeTrakt(data));
     }
+  }
+
+  Future<void> _openGuardedMagnet(String link) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final app = context.read<AppState>();
+    if (app.kidsSession || prefs.getBool('nova.kids.active') == true) {
+      if (!await NovaParentalGate.verify(context) || !mounted) return;
+    }
+    if (mounted) await openMagnetFlow(context, initialMagnet: link);
   }
 
   /// Receives an AniList / MyAnimeList OAuth return
@@ -93,30 +106,20 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
         ? 'AniList'
         : service == 'mal'
             ? 'MyAnimeList'
-            : (english ? 'the tracker' : 'الموقع');
+            : (NovaStrings.lookup(english, 'message698'));
     switch (reason) {
       case 'invalid_client':
-        return english
-            ? '$who rejected the app credentials — update them and retry.'
-            : 'رفض $who بيانات التطبيق — حدّثها وأعد المحاولة.';
+        return NovaStrings.lookup(english, 'message699', {'p0': who});
       case 'invalid_grant':
-        return english
-            ? '$who rejected the authorization code — start a new link.'
-            : 'رفض $who رمز التفويض — ابدأ الربط من جديد.';
+        return NovaStrings.lookup(english, 'message700', {'p0': who});
       case 'state_mismatch':
       case 'flow_expired':
       case 'no_pending_flow':
-        return english
-            ? 'The link request expired — start again from Integrations.'
-            : 'انتهت مهلة طلب الربط — ابدأ من صفحة التكاملات.';
+        return NovaStrings.lookup(english, 'message701');
       case 'access_denied':
-        return english
-            ? 'Approval was denied.'
-            : 'تم رفض الموافقة.';
+        return NovaStrings.lookup(english, 'message702');
       default:
-        return english
-            ? 'Could not finish linking $who.'
-            : 'تعذر إكمال الربط مع $who.';
+        return NovaStrings.lookup(english, 'message703', {'p0': who});
     }
   }
 
@@ -143,9 +146,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
       if (!mounted) return;
       NoorToast.show(
         context,
-        app.english
-            ? 'Trakt account connected.'
-            : 'تم ربط حساب Trakt.',
+        NovaStrings.lookup(app.english, 'message704'),
       );
       return;
     }
@@ -204,9 +205,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
           if (ok) {
             NoorToast.show(
               context,
-              app.english
-                  ? 'Trakt account connected.'
-                  : 'تم ربط حساب Trakt.',
+              NovaStrings.lookup(app.english, 'message704'),
             );
           } else {
             NoorToast.show(
@@ -239,9 +238,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
                     : '';
             NoorToast.show(
               context,
-              app.english
-                  ? '$who account connected.'
-                  : 'تم ربط حساب $who.',
+              NovaStrings.lookup(app.english, 'message705', {'p0': who}),
             );
           } else {
             NoorToast.show(

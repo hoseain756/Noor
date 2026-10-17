@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -10,14 +11,16 @@ import 'package:provider/provider.dart';
 import '../../core/data/cache_reset_service.dart';
 import '../../core/state/app_state.dart';
 import '../../core/sync/noor_sync.dart';
-import '../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../../core/version.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'widgets/settings_tiles.dart';
+import '../downloads/downloads_page.dart';
 
 class SettingsDataPage extends StatelessWidget {
-  const SettingsDataPage({super.key});
+  const SettingsDataPage({super.key, this.section = 'all'});
+  final String section;
 
   @override
   Widget build(BuildContext context) {
@@ -32,84 +35,99 @@ class SettingsDataPage extends StatelessWidget {
     final app = context.read<AppState>();
     return Scaffold(
       appBar: AppBar(
-          title: Text(english ? 'Data and privacy' : 'البيانات والخصوصية')),
+          title: Text(section == 'storage'
+              ? app.tr('message345')
+              : section == 'account'
+                  ? app.tr('message346')
+                  : app.tr('message347'))),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
           child: ListView(
-            padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 36),
+            padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
             children: [
-              _SupabaseSyncCard(app: app),
-              const _TorrentDownloadsCard(),
-              const _CacheResetCard(),
-              _DataRow(
-                icon: Icons.download_outlined,
-                title: english ? 'Export backup' : 'تصدير نسخة احتياطية',
-                detail: english
-                    ? '$savedCount saved titles · $historyCount history records'
-                    : '$savedCount عنوان محفوظ · $historyCount سجل مشاهدة',
-                onTap: () async {
-                  await Clipboard.setData(
-                      ClipboardData(text: await app.exportLocalData()));
-                  if (!context.mounted) return;
-                  NoorToast.show(
+              SettingsPageIntro(
+                  title: section == 'storage'
+                      ? app.tr('message348')
+                      : section == 'account'
+                          ? app.tr('message349')
+                          : app.tr('message350'),
+                  description: section == 'storage'
+                      ? app.tr('message351')
+                      : section == 'account'
+                          ? app.tr('message352')
+                          : app.tr('message353'),
+                  icon: section == 'storage'
+                      ? LucideIcons.hardDrive
+                      : section == 'account'
+                          ? LucideIcons.cloud
+                          : LucideIcons.shieldCheck),
+              if (section == 'account' || section == 'all')
+                _SupabaseSyncCard(app: app),
+              if (section == 'storage' || section == 'all') ...[
+                SettingsTile(
+                    icon: LucideIcons.download,
+                    title: app.tr('downloads'),
+                    subtitle: app.tr('downloadIntro'),
+                    onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                            builder: (_) => const DownloadsPage()))),
+                const _TorrentDownloadsCard(),
+                const _CacheResetCard(),
+              ],
+              if (section == 'privacy' || section == 'all') ...[
+                _DataRow(
+                  icon: LucideIcons.download,
+                  title: NovaStrings.lookup(english, 'message354'),
+                  detail: NovaStrings.lookup(english, 'message355',
+                      {'p0': savedCount, 'p1': historyCount}),
+                  onTap: () async {
+                    await Clipboard.setData(
+                        ClipboardData(text: await app.exportLocalData()));
+                    if (!context.mounted) return;
+                    NoorToast.show(
+                      context,
+                      NovaStrings.lookup(english, 'message356'),
+                    );
+                  },
+                ),
+                _DataRow(
+                  icon: LucideIcons.rotateCcw,
+                  title: NovaStrings.lookup(english, 'message357'),
+                  detail: NovaStrings.lookup(english, 'message358'),
+                  onTap: () => _restoreBackup(context, app),
+                ),
+                _DataRow(
+                  icon: LucideIcons.history,
+                  title: NovaStrings.lookup(english, 'message359'),
+                  detail: NovaStrings.lookup(
+                      english, 'message360', {'p0': historyCount}),
+                  destructive: true,
+                  onTap: () => _confirm(
                     context,
-                    english
-                        ? 'Backup copied as JSON.'
-                        : 'تم نسخ النسخة الاحتياطية بصيغة JSON.',
-                  );
-                },
-              ),
-              _DataRow(
-                icon: Icons.restore_rounded,
-                title: english ? 'Restore backup' : 'استعادة نسخة احتياطية',
-                detail: english
-                    ? 'Paste a Noor mobile JSON backup to restore this device.'
-                    : 'الصق نسخة Noor الاحتياطية بصيغة JSON لاستعادتها على هذا الجهاز.',
-                onTap: () => _restoreBackup(context, app),
-              ),
-              _DataRow(
-                icon: Icons.history_toggle_off_rounded,
-                title: english ? 'Clear viewing history' : 'مسح سجل المشاهدة',
-                detail: english ? '$historyCount records' : '$historyCount سجل',
-                destructive: true,
-                onTap: () => _confirm(
-                  context,
-                  title:
-                      english ? 'Clear viewing history?' : 'مسح سجل المشاهدة؟',
-                  body: english
-                      ? 'This also removes your Continue Watching progress.'
-                      : 'سيؤدي هذا أيضًا إلى إزالة تقدم «متابعة المشاهدة».',
-                  onConfirm: app.clearHistory,
+                    title: NovaStrings.lookup(english, 'message361'),
+                    body: NovaStrings.lookup(english, 'message362'),
+                    onConfirm: app.clearHistory,
+                  ),
                 ),
-              ),
-              _DataRow(
-                icon: Icons.delete_outline_rounded,
-                title: english
-                    ? 'Clear library and history'
-                    : 'مسح المكتبة والسجل',
-                detail: english
-                    ? 'Remove saved titles and playback records from this device.'
-                    : 'إزالة العناوين المحفوظة وسجلات التشغيل من هذا الجهاز.',
-                destructive: true,
-                onTap: () => _confirm(
-                  context,
-                  title: english ? 'Clear your library?' : 'مسح مكتبتك؟',
-                  body: english
-                      ? 'Your add-ons stay installed on this device.'
-                      : 'ستبقى الإضافات مثبتة على هذا الجهاز.',
-                  onConfirm: app.clearLibraryData,
+                _DataRow(
+                  icon: LucideIcons.trash2,
+                  title: NovaStrings.lookup(english, 'message363'),
+                  detail: NovaStrings.lookup(english, 'message364'),
+                  destructive: true,
+                  onTap: () => _confirm(
+                    context,
+                    title: NovaStrings.lookup(english, 'message365'),
+                    body: NovaStrings.lookup(english, 'message366'),
+                    onConfirm: app.clearLibraryData,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
+              ],
+              SizedBox(height: 24),
               Text(
-                english
-                    ? 'Provider API credentials are kept on this device and excluded from cloud sync.'
-                    : 'تُحفظ مفاتيح الخدمات على هذا الجهاز ولا تدخل ضمن المزامنة السحابية.',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: HorseTheme.muted),
+                NovaStrings.lookup(english, 'message367'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -133,10 +151,10 @@ class SettingsDataPage extends StatelessWidget {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: Text(english ? 'Cancel' : 'إلغاء')),
+              child: Text(NovaStrings.lookup(english, 'cancel'))),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text(english ? 'Clear' : 'مسح')),
+              child: Text(NovaStrings.lookup(english, 'message368'))),
         ],
       ),
     );
@@ -180,28 +198,31 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
       SnackBar(
         content: Text(
           ok
-              ? (english ? 'Sync complete.' : 'تمت المزامنة.')
-              : (english
-                  ? 'Sync failed — check your connection.'
-                  : 'تعذّرت المزامنة — تحقّق من الاتصال.'),
+              ? (NovaStrings.lookup(english, 'message369'))
+              : (NovaStrings.lookup(english, 'message370')),
         ),
       ),
     );
   }
 
   String _bucketLabel(String bucket, bool english) => switch (bucket) {
-        NoorSyncService.bucketSettings => english ? 'Settings' : 'الإعدادات',
+        NoorSyncService.bucketSettings =>
+          NovaStrings.lookup(english, 'settings'),
         NoorSyncService.bucketLibrary =>
-          english ? 'Continue watching' : 'متابعة المشاهدة',
-        NoorSyncService.bucketLists => english ? 'Lists' : 'القوائم',
-        NoorSyncService.bucketWatchlist => english ? 'Watchlist' : 'المحفوظات',
-        NoorSyncService.bucketHistory => english ? 'History' : 'السجل',
-        NoorSyncService.bucketAddons => english ? 'Add-ons' : 'الإضافات',
+          NovaStrings.lookup(english, 'message371'),
+        NoorSyncService.bucketLists =>
+          NovaStrings.lookup(english, 'message372'),
+        NoorSyncService.bucketWatchlist =>
+          NovaStrings.lookup(english, 'message373'),
+        NoorSyncService.bucketHistory =>
+          NovaStrings.lookup(english, 'message374'),
+        NoorSyncService.bucketAddons =>
+          NovaStrings.lookup(english, 'message220'),
         _ => bucket,
       };
 
   String _format(DateTime? last, bool english) {
-    if (last == null) return english ? 'Never' : 'لم تتم بعد';
+    if (last == null) return NovaStrings.lookup(english, 'message375');
     final local = last.toLocal();
     String two(int value) => value.toString().padLeft(2, '0');
     return '${local.year}-${two(local.month)}-${two(local.day)} '
@@ -225,23 +246,21 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.cloud_sync_outlined,
-                  color: HorseTheme.gold, size: 22),
-              const SizedBox(width: 10),
+              Icon(LucideIcons.cloud,
+                  color: Theme.of(context).colorScheme.secondary, size: 22),
+              SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  english
-                      ? 'Cloud sync (Supabase)'
-                      : 'مزامنة سحابية (Supabase)',
+                  NovaStrings.lookup(english, 'message376'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
@@ -253,32 +272,28 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           Text(
-            english
-                ? 'Accountless device sync · Device $shortId'
-                : 'بدون حساب — مزامنة عبر معرّف الجهاز · الجهاز $shortId',
+            NovaStrings.lookup(english, 'message377', {'p0': shortId}),
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           if (enabled)
             ...NoorSyncService.buckets.map(
               (bucket) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        _bucketLabel(bucket, english),
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                    Text(
+                      _bucketLabel(bucket, english),
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     Text(
                       _format(_lastSync[bucket], english),
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: HorseTheme.muted),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -286,23 +301,21 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
             ),
           if (!enabled)
             Text(
-              english
-                  ? 'Sync is off — data stays on this device only.'
-                  : 'المزامنة متوقفة — ستبقى البيانات على هذا الجهاز فقط.',
+              NovaStrings.lookup(english, 'message378'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           Align(
             alignment: AlignmentDirectional.centerEnd,
             child: FilledButton.tonal(
               onPressed: _busy ? null : _syncNow,
               child: _busy
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 17,
                       height: 17,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(english ? 'Sync now' : 'مزامنة الآن'),
+                  : Text(NovaStrings.lookup(english, 'message379')),
             ),
           ),
         ],
@@ -322,7 +335,7 @@ Future<void> _restoreBackup(BuildContext context, AppState app) async {
       await app.restoreLocalData(backup);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(english ? 'Backup restored.' : 'تمت استعادة النسخة.'),
+          content: Text(NovaStrings.lookup(english, 'message380')),
         ));
       }
     } catch (error) {
@@ -354,6 +367,7 @@ class _TorrentEntry {
 
 class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
   List<_TorrentEntry>? _entries;
+  String? _scanError;
   bool _busy = false;
 
   @override
@@ -364,6 +378,7 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
 
   Future<void> _scan() async {
     final entries = <_TorrentEntry>[];
+    _scanError = null;
     try {
       final docs = await getApplicationDocumentsDirectory();
       final root = Directory('${docs.path}/torrents');
@@ -395,13 +410,20 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
         }
       }
     } catch (_) {
-      // Storage scan failed — show the empty state rather than an error.
+      if (mounted) _scanError = context.read<AppState>().tr('message381');
     }
     entries.sort((a, b) => b.size.compareTo(a.size));
     if (mounted) setState(() => _entries = entries);
   }
 
   Future<void> _delete(_TorrentEntry entry) async {
+    final app = context.read<AppState>();
+    if (!await confirmSettingsAction(context,
+        title: app.tr('message382'),
+        message: app.tr('message383'),
+        confirm: app.tr('message384'),
+        cancel: app.tr('cancel'))) return;
+    if (!mounted) return;
     setState(() => _busy = true);
     try {
       try {
@@ -426,6 +448,13 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
   Future<void> _clearAll() async {
     final entries = _entries;
     if (entries == null || entries.isEmpty) return;
+    final app = context.read<AppState>();
+    if (!await confirmSettingsAction(context,
+        title: app.tr('message385'),
+        message: app.tr('message386'),
+        confirm: app.tr('message387'),
+        cancel: app.tr('cancel'))) return;
+    if (!mounted) return;
     setState(() => _busy = true);
     for (final entry in entries) {
       try {
@@ -472,20 +501,21 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HorseTheme.line),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.bolt_rounded, color: HorseTheme.gold, size: 20),
-              const SizedBox(width: 10),
+              Icon(LucideIcons.zap,
+                  color: Theme.of(context).colorScheme.secondary, size: 20),
+              SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  english ? 'Torrent downloads' : 'تنزيلات التورنت',
+                  NovaStrings.lookup(english, 'message388'),
                   style: Theme.of(context)
                       .textTheme
                       .titleSmall
@@ -496,30 +526,36 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
                 TextButton(
                   onPressed: _busy ? null : _clearAll,
                   child: Text(
-                    english ? 'Clear all' : 'حذف الكل',
-                    style: const TextStyle(color: Color(0xFFE0705A)),
+                    NovaStrings.lookup(english, 'message389'),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           Text(
             entries == null
-                ? (english ? 'Checking storage…' : 'جارٍ فحص التخزين…')
+                ? (NovaStrings.lookup(english, 'message390'))
                 : entries.isEmpty
-                    ? (english
-                        ? 'Nothing on disk — streamed torrents can be kept for instant resume.'
-                        : 'لا شيء على القرص — التورنتات المشاهدة تُحفظ للاستئناف الفوري.')
-                    : (english
-                        ? '${entries.length} torrent(s) · ${_formatSize(total)} on disk'
-                        : '${entries.length} تورنت · ${_formatSize(total)} على القرص'),
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: HorseTheme.muted),
+                    ? (NovaStrings.lookup(english, 'message391'))
+                    : (NovaStrings.lookup(english, 'message392',
+                        {'p0': entries.length, 'p1': _formatSize(total)})),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
+          if (entries == null)
+            const Padding(
+                padding: EdgeInsetsDirectional.only(top: 16),
+                child: LinearProgressIndicator()),
+          if (_scanError != null) ...[
+            SettingsInfoBanner(message: _scanError!, error: true),
+            TextButton(
+                onPressed: _scan,
+                child: Text(NovaStrings.lookup(english, 'message393'))),
+          ],
           if (entries != null && entries.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             ...entries.map((entry) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
@@ -532,18 +568,20 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
                               entry.hash.length > 18
                                   ? '${entry.hash.substring(0, 18)}…'
                                   : entry.hash,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12.5,
                                 fontFamily: 'monospace',
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(height: 2),
+                            SizedBox(height: 2),
                             Text(
-                              '${_formatSize(entry.size)} · ${entry.files} ${english ? 'files' : 'ملف'}',
-                              style: const TextStyle(
-                                color: HorseTheme.muted,
+                              '${_formatSize(entry.size)} · ${entry.files} ${NovaStrings.lookup(english, 'message394')}',
+                              style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                                 fontSize: 11.5,
                               ),
                             ),
@@ -551,13 +589,13 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
                         ),
                       ),
                       IconButton(
-                        tooltip: english ? 'Delete' : 'حذف',
+                        tooltip: NovaStrings.lookup(english, 'message384'),
                         onPressed:
                             _busy ? null : () => unawaited(_delete(entry)),
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
+                        icon: Icon(
+                          LucideIcons.trash2,
                           size: 20,
-                          color: Color(0xFFE0705A),
+                          color: Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ],
@@ -589,7 +627,7 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: Text(widget.english ? 'Restore backup' : 'استعادة النسخة'),
+        title: Text(NovaStrings.lookup(widget.english, 'message395')),
         content: SizedBox(
           width: 520,
           child: TextField(
@@ -598,8 +636,7 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
             maxLines: 10,
             keyboardType: TextInputType.multiline,
             decoration: InputDecoration(
-              hintText:
-                  widget.english ? 'Paste backup JSON' : 'الصق نص JSON هنا',
+              hintText: NovaStrings.lookup(widget.english, 'message396'),
               border: const OutlineInputBorder(),
             ),
           ),
@@ -607,11 +644,11 @@ class _RestoreBackupDialogState extends State<_RestoreBackupDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(widget.english ? 'Cancel' : 'إلغاء'),
+            child: Text(NovaStrings.lookup(widget.english, 'cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, _controller.text),
-            child: Text(widget.english ? 'Restore' : 'استعادة'),
+            child: Text(NovaStrings.lookup(widget.english, 'message397')),
           ),
         ],
       );
@@ -654,34 +691,37 @@ class _CacheResetCard extends StatelessWidget {
       ),
     );
     final detail = hours <= 0
-        ? (english
-            ? 'Automatic reset is off — clear manually from this screen.'
-            : 'إعادة التعيين التلقائية معطّلة — يمكنك المسح يدويًا من هذه الشاشة.')
-        : (english
-            ? 'Torrent temp files and the image cache are reset ${_labelFor(hours, true).toLowerCase()}.'
-            : 'تُعاد تعيين ملفات التورنت المؤقتة وذاكرة الصور ${_labelFor(hours, false)}');
+        ? (NovaStrings.lookup(english, 'message398'))
+        : (NovaStrings.lookup(english, 'message399', {
+            'p0': _labelFor(hours, true).toLowerCase(),
+            'p1': _labelFor(hours, false)
+          }));
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       child: Material(
-        color: HorseTheme.surface,
+        color: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: const BorderSide(color: HorseTheme.line),
+          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
         child: ListTile(
           onTap: () => unawaited(_openSheet(context)),
           minVerticalPadding: 10,
-          leading:
-              const Icon(Icons.auto_delete_outlined, color: HorseTheme.gold),
-          title: Text(english
-              ? 'Reset temporary storage'
-              : 'إعادة تعيين الذاكرة المؤقتة'),
-          subtitle: Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
-          trailing: Text(
-            _labelFor(hours, english),
-            style: const TextStyle(color: HorseTheme.gold),
-          ),
+          leading: Icon(LucideIcons.hardDrive,
+              color: Theme.of(context).colorScheme.secondary),
+          title: Text(NovaStrings.lookup(english, 'message400')),
+          subtitle:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_labelFor(hours, english),
+                style:
+                    TextStyle(color: Theme.of(context).colorScheme.secondary)),
+            const SizedBox(height: 6),
+            Text(detail),
+          ]),
+          trailing: Icon(Directionality.of(context) == TextDirection.rtl
+              ? LucideIcons.chevronLeft
+              : LucideIcons.chevronRight),
         ),
       ),
     );
@@ -694,7 +734,11 @@ class _CacheResetCard extends StatelessWidget {
     var busy = false;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: HorseTheme.surface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      isScrollControlled: true,
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .8),
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheetState) => SafeArea(
           child: Column(
@@ -705,9 +749,7 @@ class _CacheResetCard extends StatelessWidget {
                 child: Align(
                   alignment: AlignmentDirectional.centerStart,
                   child: Text(
-                    english
-                        ? 'Reset temporary storage'
-                        : 'إعادة تعيين الذاكرة المؤقتة',
+                    NovaStrings.lookup(english, 'message400'),
                     style: Theme.of(sheetContext).textTheme.titleMedium,
                   ),
                 ),
@@ -717,16 +759,9 @@ class _CacheResetCard extends StatelessWidget {
                 child: Align(
                   alignment: AlignmentDirectional.centerStart,
                   child: Text(
-                    english
-                        ? 'Clears downloaded torrent temp files and the image '
-                            'cache when the interval elapses. The torrent '
-                            'currently streaming is never touched.'
-                        : 'تمسح ملفات التورنت المؤقتة وذاكرة الصور عند انتهاء '
-                            'المدة المحددة، ولا تُمس ملفات التورنت الذي يُبث الآن.',
-                    style: Theme.of(sheetContext)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: HorseTheme.muted),
+                    NovaStrings.lookup(english, 'message401'),
+                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
               ),
@@ -734,10 +769,11 @@ class _CacheResetCard extends StatelessWidget {
                 ListTile(
                   leading: Icon(
                     current == hours
-                        ? Icons.radio_button_checked_rounded
-                        : Icons.radio_button_off_rounded,
-                    color:
-                        current == hours ? HorseTheme.gold : HorseTheme.muted,
+                        ? LucideIcons.circleDot
+                        : LucideIcons.circle,
+                    color: current == hours
+                        ? Theme.of(context).colorScheme.secondary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   title: Text(english ? label : arabic),
                   onTap: () {
@@ -749,19 +785,19 @@ class _CacheResetCard extends StatelessWidget {
               ListTile(
                 enabled: !busy,
                 leading: busy
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: HorseTheme.gold,
+                          color: Theme.of(context).colorScheme.secondary,
                         ),
                       )
-                    : const Icon(
-                        Icons.cleaning_services_rounded,
-                        color: HorseTheme.gold,
+                    : Icon(
+                        LucideIcons.brushCleaning,
+                        color: Theme.of(context).colorScheme.secondary,
                       ),
-                title: Text(english ? 'Reset now' : 'إعادة التعيين الآن'),
+                title: Text(NovaStrings.lookup(english, 'message402')),
                 onTap: busy
                     ? null
                     : () async {
@@ -775,12 +811,9 @@ class _CacheResetCard extends StatelessWidget {
                         NoorToast.show(
                           context,
                           megs >= 0.1
-                              ? (english
-                                  ? 'Cache cleared — ${megs.toStringAsFixed(1)} MB freed.'
-                                  : 'تم مسح الذاكرة المؤقتة — تم تحرير ${megs.toStringAsFixed(1)} م.ب.')
-                              : (english
-                                  ? 'Cache cleared — nothing to free.'
-                                  : 'تم مسح الذاكرة المؤقتة — لا يوجد ما يُحرَّر.'),
+                              ? (NovaStrings.lookup(english, 'message403',
+                                  {'p0': megs.toStringAsFixed(1)}))
+                              : (NovaStrings.lookup(english, 'message404')),
                         );
                       },
               ),
@@ -811,24 +844,32 @@ class _DataRow extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: HorseTheme.surface,
+          color: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
-            side: const BorderSide(color: HorseTheme.line),
+            side:
+                BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           clipBehavior: Clip.antiAlias,
           child: ListTile(
             onTap: onTap,
             minVerticalPadding: 10,
             leading: Icon(icon,
-                color: destructive ? HorseTheme.danger : HorseTheme.gold),
+                color: destructive
+                    ? Theme.of(context).colorScheme.error
+                    : Theme.of(context).colorScheme.secondary),
             title: Text(title,
                 style: TextStyle(
-                    color: destructive ? const Color(0xFFFFA29B) : null)),
+                    color: destructive
+                        ? Theme.of(context).colorScheme.error
+                        : null)),
             subtitle:
                 Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
-            trailing:
-                const Icon(Icons.chevron_left_rounded, color: HorseTheme.muted),
+            trailing: Icon(
+                Directionality.of(context) == TextDirection.rtl
+                    ? LucideIcons.chevronLeft
+                    : LucideIcons.chevronRight,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -836,79 +877,65 @@ class _DataRow extends StatelessWidget {
 
 class SettingsAboutPage extends StatelessWidget {
   const SettingsAboutPage({super.key});
-
   @override
   Widget build(BuildContext context) {
-    final english = context.select<AppState, bool>((app) => app.english);
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
     return Scaffold(
-      appBar: AppBar(title: Text(english ? 'About Noor' : 'حول Noor')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
+        appBar: AppBar(title: Text(app.tr('message405'))),
+        body: Center(
+            child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 800),
           child: ListView(
-            padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 32),
-            children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: HorseTheme.surface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: HorseTheme.line),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Noor',
-                        style: Theme.of(context).textTheme.headlineSmall),
-                    const SizedBox(height: 4),
-                    // Task 137: on-device build verification — the exact
-                    // pubspec version, so "did the update reach me?" is
-                    // answerable in two taps (Settings → حول Noor).
-                    Text(
-                      english
-                          ? 'Version $noorVersionLabel'
-                          : 'الإصدار $noorVersionLabel',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(color: HorseTheme.gold),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      english
-                          ? 'An independent, open-source media center for the Stremio add-on protocol. Noor is not affiliated with Stremio, does not host or ship media, and users install their own add-ons.'
-                          : 'مركز وسائط مستقل ومفتوح المصدر لبروتوكول إضافات Stremio. لا يرتبط Noor بـ Stremio ولا يستضيف أو يوزّع محتوى؛ ويثبّت المستخدم إضافاته بنفسه.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      english
-                          ? 'MIT licensed. Attribution: Harbor desktop project.'
-                          : 'مرخّص بموجب MIT. الإسناد: مشروع Harbor لسطح المكتب.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: HorseTheme.muted),
-                    ),
-                    const SizedBox(height: 12),
-                    const SelectableText('github.com/harborstremio/harbor'),
-                    const Divider(height: 28),
-                    Text(
-                      english
-                          ? 'Movie metadata and images may be provided by TMDB.'
-                          : 'قد تُقدَّم بيانات الأفلام وصورها عبر TMDB.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: HorseTheme.muted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 16, 24, 48),
+              children: [
+                Center(
+                    child: Image.asset(
+                        'assets/brand/android/play_store/ic_launcher-playstore-512.png',
+                        width: 104,
+                        height: 104,
+                        filterQuality: FilterQuality.medium)),
+                const SizedBox(height: 24),
+                Text('NOVA',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w800, letterSpacing: 8)),
+                const SizedBox(height: 8),
+                Text(app.tr('message406', {'p0': noorVersionLabel}),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.secondary)),
+                const SizedBox(height: 32),
+                Text(app.tr('message407'),
+                    style: Theme.of(context).textTheme.headlineSmall),
+                const SizedBox(height: 12),
+                Text(app.tr('message408'),
+                    style: Theme.of(context).textTheme.bodyLarge),
+                SettingsContentSection(title: app.tr('message409'), children: [
+                  SettingsTile(
+                      icon: LucideIcons.codeXml,
+                      title: app.tr('message410'),
+                      subtitle: app.tr('message411'),
+                      onTap: () => showLicensePage(
+                          context: context,
+                          applicationName: 'NOVA',
+                          applicationVersion: noorVersionLabel)),
+                  Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(app.tr('message412')),
+                            const SizedBox(height: 8),
+                            const SelectableText(
+                                'github.com/harborstremio/harbor'),
+                          ])),
+                  Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(app.tr('message413'))),
+                ]),
+                SettingsInfoBanner(message: app.tr('message414')),
+              ]),
+        )));
   }
 }

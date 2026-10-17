@@ -83,9 +83,6 @@ const double _kStadiumRadius = 9999;
 // replaced the Harbor `--glass-*` cyan-tint recipe (tint `#BFE6F2` ring +
 // sheen + panel fill `#10181C` @ .434 + saturate 1.35) so the dock, search
 // button and detail pills all wear the same neutral dark glass.
-const Color _kActiveFill = Color(0x29FFFFFF); // rgba(255,255,255,0.16)
-const Color _kIconActive = Color(0xFFF5F5F5);
-const Color _kIconInactive = Color(0xBFFFFFFF); // rgba(255,255,255,0.75)
 
 // ---------------------------------------------------------------------------
 // Size ladder (web window classes 1890–2002 + landscape last-wins override).
@@ -193,10 +190,10 @@ GlassDockSizing glassDockSizing({
     pad = 8;
   }
   final scale = zoom * kidsZoom;
-  barH *= scale;
-  tabH *= scale;
+  barH = math.max(barH, 76) * scale;
+  tabH = math.max(tabH, 60) * scale;
   icon *= scale;
-  width *= scale;
+  width = math.max(width, math.min(w - 24, 390)) * scale;
   // Hard width guard (web `--nav-max` + safe-area caps).
   final viewportCap =
       math.max(0.0, math.min(w - 16, w - safePadding.horizontal));
@@ -235,6 +232,8 @@ class GlassDock extends StatefulWidget {
     required this.onTabSelected,
     this.languageCode,
     this.hidden = false,
+    this.reduceMotion = false,
+    this.reduceTransparency = false,
     this.zoom = 1.0,
     this.kidsZoom = 1.0,
   });
@@ -260,6 +259,8 @@ class GlassDock extends StatefulWidget {
   /// Effective hidden state (slide below screen + fade + ignore pointers +
   /// exclude semantics). Drive it from [GlassDockScrollHide] and/or routes.
   final bool hidden;
+  final bool reduceMotion;
+  final bool reduceTransparency;
 
   /// App zoom multiplier (web `--nav-zoom`, ≤1.1). Defaults to 1.0.
   final double zoom;
@@ -327,12 +328,15 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _reduceMotion =
+        widget.reduceMotion || MediaQuery.disableAnimationsOf(context);
   }
 
   @override
   void didUpdateWidget(covariant GlassDock oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _reduceMotion =
+        widget.reduceMotion || MediaQuery.disableAnimationsOf(context);
     final idsChanged = !_sameTabIds(oldWidget.tabs, widget.tabs);
     if (idsChanged && _scrubbing) {
       // Defensive: the tab set changed mid-scrub (language switch / kids
@@ -677,8 +681,11 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                   // old back-pill soft shadow (Task 120 recipe swap).
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(_kStadiumRadius),
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: .15)),
+                    border: Border.all(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outlineVariant
+                            .withValues(alpha: .65)),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: .35),
@@ -702,7 +709,11 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                         // compensate for the lost blur diffusion.
                         Positioned.fill(
                           child: ColoredBox(
-                            color: Colors.black.withValues(alpha: .72),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHigh
+                                .withValues(
+                                    alpha: widget.reduceTransparency ? 1 : .96),
                           ),
                         ),
                         // Track: pill BEHIND equal-flex tabs (web .dock-track).
@@ -746,7 +757,9 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                                   _scale, _scale, 1, 1),
                                             child: DecoratedBox(
                                               decoration: BoxDecoration(
-                                                color: _kActiveFill,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primaryContainer,
                                                 borderRadius:
                                                     BorderRadius.circular(
                                                   _kStadiumRadius,
@@ -858,63 +871,71 @@ class _DockTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final duration = reduceMotion ? Duration.zero : _kIconCrossfadeDuration;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: dockTabLabel(tab, arabic: arabic),
-      onTap: onActivate,
-      child: AnimatedScale(
-        scale: pressed ? 0.96 : 1, // web :active scale(--glass-press-scale)
-        duration: duration,
-        curve: kDockEase,
-        child: Stack(
-          children: [
-            // State layer (web .md-state active 0.1 on currentColor).
-            Positioned.fill(
-              child: AnimatedOpacity(
-                opacity: pressed ? 1 : 0,
-                duration: duration,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(_kStadiumRadius),
+    return FocusableActionDetector(
+        mouseCursor: SystemMouseCursors.click,
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+            onActivate();
+            return null;
+          })
+        },
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: dockTabLabel(tab, arabic: arabic),
+          onTap: onActivate,
+          child: AnimatedScale(
+            scale: pressed ? 0.96 : 1, // web :active scale(--glass-press-scale)
+            duration: duration,
+            curve: kDockEase,
+            child: Stack(
+              children: [
+                // State layer (web .md-state active 0.1 on currentColor).
+                Positioned.fill(
+                  child: AnimatedOpacity(
+                    opacity: pressed ? 1 : 0,
+                    duration: duration,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(_kStadiumRadius),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(tab.iconOutline,
+                      size: iconSize,
+                      color: highlighted
+                          ? Theme.of(context).colorScheme.onPrimaryContainer
+                          : Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(height: 3),
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Text(dockTabLabel(tab, arabic: arabic),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                  fontSize: 10,
+                                  fontWeight: highlighted
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                  color: highlighted
+                                      ? Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant))),
+                ])),
+              ],
             ),
-            // Icon frame: the SAME glyph twice, stacked, 150ms cross-fade.
-            Center(
-              child: SizedBox.square(
-                dimension: iconSize,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    AnimatedOpacity(
-                      opacity: highlighted ? 0 : 1,
-                      duration: duration,
-                      child: Icon(
-                        tab.iconOutline,
-                        size: iconSize,
-                        color: highlighted ? _kIconActive : _kIconInactive,
-                      ),
-                    ),
-                    AnimatedOpacity(
-                      opacity: highlighted ? 1 : 0,
-                      duration: duration,
-                      child: Icon(
-                        tab.iconFilled,
-                        size: iconSize,
-                        color: _kIconActive,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+          ),
+        ));
   }
 }
 

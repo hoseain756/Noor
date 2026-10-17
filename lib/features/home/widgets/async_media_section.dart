@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -46,18 +48,16 @@ class AsyncMediaSection extends StatelessWidget {
   Widget build(BuildContext context) => FutureBuilder<List<MediaItem>>(
         future: future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
             return RailLoadingSkeleton(title: title);
           }
           final items = snapshot.data ?? const <MediaItem>[];
           if (snapshot.hasError) {
-            if (!showEmptyState) return const SizedBox.shrink();
             return _RailMessage(
               title: title,
-              message: english
-                  ? 'Could not load today’s ranking.'
-                  : 'تعذر تحميل قائمة اليوم.',
-              actionLabel: english ? 'Retry' : 'إعادة المحاولة',
+              message: NovaStrings.lookup(english, 'message119'),
+              actionLabel: NovaStrings.lookup(english, 'message120'),
               onRetry: onRetry,
             );
           }
@@ -65,10 +65,8 @@ class AsyncMediaSection extends StatelessWidget {
             if (!showEmptyState) return const SizedBox.shrink();
             return _RailMessage(
               title: title,
-              message: english
-                  ? 'No ranked titles are available right now.'
-                  : 'لا تتوفر عناوين في القائمة حاليًا.',
-              actionLabel: english ? 'Refresh' : 'تحديث',
+              message: NovaStrings.lookup(english, 'message121'),
+              actionLabel: NovaStrings.lookup(english, 'message68'),
               onRetry: onRetry,
             );
           }
@@ -143,30 +141,30 @@ class RailLoadingSkeleton extends StatelessWidget {
                       height: posterHeight,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: HorseTheme.surface,
+                          color: NovaTheme.of(context).surface,
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                     ),
                     if (showTitle) ...[
                       const SizedBox(height: 8),
-                      const SizedBox(
+                      SizedBox(
                         width: 96,
                         height: 11,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: HorseTheme.surface,
+                            color: NovaTheme.of(context).surface,
                             borderRadius: BorderRadius.all(Radius.circular(8)),
                           ),
                         ),
                       ),
                       const SizedBox(height: 5),
-                      const SizedBox(
+                      SizedBox(
                         width: 64,
                         height: 9,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: HorseTheme.surface,
+                            color: NovaTheme.of(context).surface,
                             borderRadius: BorderRadius.all(Radius.circular(8)),
                           ),
                         ),
@@ -219,7 +217,7 @@ class _RailMessage extends StatelessWidget {
               alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(LucideIcons.refreshCw),
                 label: Text(actionLabel),
               ),
             ),

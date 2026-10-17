@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nova_red">#D13B47</color>
+    <color name="nova_red_deep">#9E2A34</color>
+    <color name="nova_ink">#141417</color>
+    <color name="nova_graphite">#232329</color>
+    <color name="nova_white">#FFFFFF</color>
+</resources>

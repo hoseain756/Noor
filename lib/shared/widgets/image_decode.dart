@@ -17,5 +17,5 @@ import 'package:flutter/widgets.dart';
 int imageCacheWidth(BuildContext context, double logicalWidth) {
   final dpr = MediaQuery.devicePixelRatioOf(context);
   final px = (logicalWidth.clamp(64.0, 1280.0) * dpr).round();
-  return px < 96 ? 96 : px;
+  return px.clamp(96, 2048);
 }

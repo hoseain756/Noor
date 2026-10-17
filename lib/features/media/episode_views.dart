@@ -11,9 +11,12 @@
 /// Data helpers (sort/progress/default-season) live in `episode_data.dart`.
 library;
 
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
@@ -28,9 +31,9 @@ final Map<String, int> _sessionSeason = {};
 /// rgba(8,8,10,.72) — the web --ep-overlay-bg.
 const Color _kOverlayBg = Color(0xB808080A);
 
-const Color _kWatchedGreen = Color(0xFF22C55E);
-const Color _kProgressBarRed = Color(0xFFDC2626);
-const Color _kImdbYellow = Color(0xFFF5C518);
+const Color _kWatchedGreen = NovaColors.success;
+const Color _kProgressBarRed = NovaColors.red;
+const Color _kImdbYellow = NovaColors.warning;
 
 ColorFilter _saturate(double s) => ColorFilter.matrix(<double>[
       0.213 + (1 - 0.213) * s, 0.715 * (1 - s), 0.072 * (1 - s), 0, 0, //
@@ -95,7 +98,7 @@ class EpisodeViewData {
       epNum: epNum,
       title: rawTitle.isNotEmpty
           ? rawTitle
-          : (english ? 'Episode $epNum' : 'الحلقة $epNum'),
+          : (NovaStrings.lookup(english, 'message44', {'p0': epNum})),
       story: rawStory,
       watched: isEpisodeWatched(progressMap, video, itemId),
       progress: progress,
@@ -196,8 +199,8 @@ class EpisodesController extends ChangeNotifier {
   }
 
   String seasonLabel(int season, bool english) => season == 0
-      ? (english ? 'Specials' : 'حلقات خاصة')
-      : (english ? 'Season $season' : 'الموسم $season');
+      ? (NovaStrings.lookup(english, 'message161'))
+      : (NovaStrings.lookup(english, 'message162', {'p0': season}));
 
   List<SeasonOption> seasonOptions(bool english) {
     final progressMap = _progressMap();
@@ -295,7 +298,7 @@ List<Widget> buildEpisodeSlivers({
   final header = Padding(
     padding: const EdgeInsetsDirectional.only(bottom: 12),
     child: Text(
-      english ? 'Episodes' : 'الحلقات',
+      NovaStrings.lookup(english, 'message43'),
       style: const TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
@@ -312,9 +315,7 @@ List<Widget> buildEpisodeSlivers({
           children: [
             header,
             Text(
-              english
-                  ? 'No episode information available for this series.'
-                  : 'لا تتوفر معلومات حلقات لهذا المسلسل.',
+              NovaStrings.lookup(english, 'message163'),
               style: const TextStyle(fontSize: 14, color: HorseTheme.muted),
             ),
           ],
@@ -353,7 +354,7 @@ List<Widget> buildEpisodeSlivers({
           height: 48,
           alignment: AlignmentDirectional.centerStart,
           child: Text(
-            english ? '${videos.length} episodes' : '${videos.length} حلقة',
+            NovaStrings.lookup(english, 'message164', {'p0': videos.length}),
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -511,8 +512,8 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                         width: 20,
                         height: 20,
                         child: option.season == widget.value
-                            ? const Icon(Icons.check_rounded,
-                                size: 16, color: HorseTheme.gold)
+                            ? Icon(LucideIcons.check,
+                                size: 16, color: NovaTheme.of(context).gold)
                             : null,
                       ),
                       const SizedBox(width: 10),
@@ -524,10 +525,10 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                               option.label,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: HorseTheme.ink,
+                                color: NovaTheme.of(context).ink,
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -536,9 +537,9 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                               child: Text(
                                 '${option.count} · '
                                 '${option.watched}/${option.count}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
-                                  color: HorseTheme.muted,
+                                  color: NovaTheme.of(context).muted,
                                 ),
                               ),
                             ),
@@ -563,7 +564,7 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
     final current =
         widget.options.where((o) => o.season == widget.value).firstOrNull;
     final label =
-        current?.label ?? (widget.english ? 'Select season' : 'اختر الموسم');
+        current?.label ?? (NovaStrings.lookup(widget.english, 'message165'));
     // Content-sized (Task 118): no minWidth forcing the pill to fill the
     // row — the label + chevron set the width, capped at 240dp for very
     // long labels (the web contract is min-w-40, content-sized).
@@ -587,10 +588,10 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: HorseTheme.ink,
+                          color: NovaTheme.of(context).ink,
                         ),
                       ),
                     ),
@@ -599,10 +600,10 @@ class _SeasonDropdownState extends State<_SeasonDropdown> {
                       turns: _open ? 0.5 : 0,
                       duration: const Duration(milliseconds: 220),
                       curve: const Cubic(0.2, 0, 0, 1),
-                      child: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
+                      child: Icon(
+                        LucideIcons.chevronDown,
                         size: 20,
-                        color: HorseTheme.muted,
+                        color: NovaTheme.of(context).muted,
                       ),
                     ),
                   ],
@@ -646,17 +647,17 @@ class _SortChip extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.swap_vert_rounded,
-                      size: 16, color: HorseTheme.muted),
+                  Icon(LucideIcons.arrowDownUp,
+                      size: 16, color: NovaTheme.of(context).muted),
                   const SizedBox(width: 8),
                   Text(
                     sortDesc
-                        ? (english ? 'Newest first' : 'الأحدث أولاً')
-                        : (english ? 'Oldest first' : 'الأقدم أولاً'),
-                    style: const TextStyle(
+                        ? (NovaStrings.lookup(english, 'message166'))
+                        : (NovaStrings.lookup(english, 'message167')),
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: HorseTheme.ink,
+                      color: NovaTheme.of(context).ink,
                     ),
                   ),
                 ],
@@ -721,15 +722,15 @@ class _ViewToggle extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _segment(
-              icon: Icons.view_list_rounded,
+              icon: LucideIcons.list,
               value: 'list',
-              tooltip: english ? 'List view' : 'عرض قائمة',
+              tooltip: NovaStrings.lookup(english, 'message168'),
             ),
             const SizedBox(width: 2),
             _segment(
-              icon: Icons.grid_view_rounded,
+              icon: LucideIcons.layoutGrid,
               value: 'grid',
-              tooltip: english ? 'Grid view' : 'عرض شبكة',
+              tooltip: NovaStrings.lookup(english, 'message169'),
             ),
           ],
         ),
@@ -765,51 +766,58 @@ class _EpisodeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget content = Padding(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: thumbWidth,
-            child: EpisodeThumbnail(
-              url: (item.video['thumbnail'] ??
-                      item.video['thumb'] ??
-                      backdropUrl ??
-                      '')
-                  .toString(),
-              episodeNumber: item.epNum,
-              watched: item.watched,
-              progress: item.progress,
-              rating: item.rating,
-              blurred: blurred,
-              watchedLabel: english ? 'Watched' : 'تمت المشاهدة',
-            ),
-          ),
-          SizedBox(width: isWide ? 16 : 12),
-          Expanded(
-            child:
-                _EpisodeTextBlock(item: item, isWide: isWide, english: english),
-          ),
-        ],
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    final thumbnail = EpisodeThumbnail(
+      url: (item.video['thumbnail'] ?? item.video['thumb'] ?? backdropUrl ?? '')
+          .toString(),
+      episodeNumber: item.epNum,
+      watched: item.watched,
+      progress: item.progress,
+      rating: item.rating,
+      blurred: blurred,
+      watchedLabel: NovaStrings.lookup(english, 'message98'),
     );
-    if (item.upcoming) {
-      // Future episode: dimmed, desaturated and NOT playable.
-      content = Opacity(
-        opacity: 0.5,
-        child: ColorFiltered(
-          colorFilter: _saturate(0.5),
-          child: content,
-        ),
-      );
-      return content;
-    }
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: content,
-    );
+    return Padding(
+        padding: const EdgeInsetsDirectional.only(bottom: 16),
+        child: Material(
+          color: scheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+              onTap: item.upcoming ? null : onTap,
+              child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(builder: (context, constraints) {
+                    final stacked = constraints.maxWidth < 320 ||
+                        MediaQuery.textScalerOf(context).scale(16) > 24;
+                    final text = _EpisodeTextBlock(
+                        item: item, isWide: isWide, english: english);
+                    if (stacked)
+                      return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            thumbnail,
+                            const SizedBox(height: 16),
+                            text
+                          ]);
+                    return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                              width: thumbWidth.clamp(
+                                  96, constraints.maxWidth * .38),
+                              child: thumbnail),
+                          const SizedBox(width: 16),
+                          Expanded(child: text),
+                          if (isWide && !item.upcoming)
+                            Padding(
+                                padding:
+                                    const EdgeInsetsDirectional.only(start: 16),
+                                child: Icon(LucideIcons.play,
+                                    color: scheme.primary))
+                        ]);
+                  }))),
+        ));
   }
 }
 
@@ -848,7 +856,7 @@ class _EpisodeCard extends StatelessWidget {
           progress: item.progress,
           rating: item.rating,
           blurred: blurred,
-          watchedLabel: english ? 'Watched' : 'تمت المشاهدة',
+          watchedLabel: NovaStrings.lookup(english, 'message98'),
         ),
         const SizedBox(height: 8),
         Padding(
@@ -868,10 +876,13 @@ class _EpisodeCard extends StatelessWidget {
       );
       return content;
     }
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: content,
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+          onTap: onTap,
+          child: Padding(padding: const EdgeInsets.all(12), child: content)),
     );
   }
 }
@@ -893,8 +904,8 @@ class _EpisodeTextBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final metaStyle = TextStyle(
       fontSize: 12,
-      height: 1.35,
-      color: HorseTheme.muted,
+      height: 1.5,
+      color: NovaTheme.of(context).muted,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     final parts = <Widget>[
@@ -909,7 +920,7 @@ class _EpisodeTextBlock extends StatelessWidget {
     if (item.runtimeMin != null) {
       parts.add(Text('·', style: metaStyle));
       parts.add(Text(
-        english ? '${item.runtimeMin} min' : '${item.runtimeMin} دقيقة',
+        NovaStrings.lookup(english, 'message170', {'p0': item.runtimeMin}),
         style: metaStyle,
       ));
     }
@@ -935,10 +946,10 @@ class _EpisodeTextBlock extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: isWide ? 16 : 15,
+            fontSize: 16,
             fontWeight: FontWeight.w600,
-            height: 1.25,
-            color: HorseTheme.ink,
+            height: 1.5,
+            color: NovaTheme.of(context).ink,
           ),
         ),
         if (parts.length > 1) ...[
@@ -958,9 +969,9 @@ class _EpisodeTextBlock extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: isWide ? 14 : 13,
-              height: 1.35,
-              color: HorseTheme.muted,
+              fontSize: 14,
+              height: 1.5,
+              color: NovaTheme.of(context).muted,
             ),
           ),
         ],
@@ -971,15 +982,15 @@ class _EpisodeTextBlock extends StatelessWidget {
                 horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: HorseTheme.line),
-              color: HorseTheme.raised,
+              border: Border.all(color: NovaTheme.of(context).line),
+              color: NovaTheme.of(context).raised,
             ),
             child: Text(
-              english ? 'Upcoming' : 'لم تُعرض بعد',
-              style: const TextStyle(
+              NovaStrings.lookup(english, 'message171'),
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: HorseTheme.muted,
+                color: NovaTheme.of(context).muted,
               ),
             ),
           ),
@@ -1068,7 +1079,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
-                return Image.network(
+                return NovaNetworkImage(
                   widget.url,
                   fit: BoxFit.cover,
                   cacheWidth:
@@ -1128,7 +1139,8 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
         child: Stack(
           children: [
             Positioned.fill(
-                child: ColoredBox(color: HorseTheme.raised, child: art)),
+                child: ColoredBox(
+                    color: NovaTheme.of(context).raised, child: art)),
             // Legibility scrim for the bottom overlay row.
             Positioned(
               left: 0,
@@ -1176,7 +1188,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.check_rounded,
+                      const Icon(LucideIcons.check,
                           size: 12, color: _kWatchedGreen),
                       const SizedBox(width: 4),
                       Text(
@@ -1263,11 +1275,11 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
 
   Widget _placeholder() {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft, // CSS 135deg → top-left→bottom-right
           end: Alignment.bottomRight,
-          colors: [HorseTheme.raised, HorseTheme.line],
+          colors: [NovaTheme.of(context).raised, NovaTheme.of(context).line],
         ),
       ),
       child: Center(
@@ -1276,7 +1288,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
           style: TextStyle(
             fontSize: 30,
             fontWeight: FontWeight.w900,
-            color: HorseTheme.muted.withValues(alpha: .70),
+            color: NovaTheme.of(context).muted.withValues(alpha: .70),
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),

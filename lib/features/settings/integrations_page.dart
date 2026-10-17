@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -7,87 +8,218 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../shared/widgets/noor_toast.dart';
 import 'widgets/settings_tiles.dart';
 
 class IntegrationsPage extends StatelessWidget {
   const IntegrationsPage({super.key});
-
   @override
   Widget build(BuildContext context) {
-    // Task 122-c F4: the page chrome reads only the UI language — the
-    // service cards select their own fields below.
-    final english = context.select<AppState, bool>((app) => app.english);
+    context.select<AppState,
+            (bool, Map<String, Map<String, dynamic>>, bool, String?)>(
+        (app) => (
+              app.english,
+              app.linkedServices,
+              app.api.hasUserTmdbKey,
+              app.api.debridService
+            ));
+    final app = context.read<AppState>();
+    final linked = app.linkedServices;
     return Scaffold(
-      appBar: AppBar(
-          title: Text(english ? 'Connected services' : 'الخدمات المرتبطة')),
-      body: Center(
-        child: ConstrainedBox(
+        appBar: AppBar(title: Text(app.tr('message252'))),
+        body: Center(
+            child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
-            children: [
-              Text(
-                english
-                    ? 'Bring your watch history and playback services together.'
-                    : 'اجمع سجل المشاهدة وخدمات التشغيل في مكان واحد.',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 7),
-              Text(
-                english
-                    ? 'Trakt and Simkl link directly from this device — no account needed. Your personal TMDB and Debrid keys stay in secure device storage.'
-                    : 'يرتبط Trakt وSimkl مباشرة من هذا الجهاز دون حساب. تُحفظ مفاتيح TMDB وDebrid الشخصية بأمان على الجهاز.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: HorseTheme.muted,
-                    ),
-              ),
-              const SizedBox(height: 22),
-              _LinkedServiceCard(
-                service: 'trakt',
-                title: 'Trakt',
-                subtitle: english
-                    ? 'Import your watchlist and history; sync playback progress.'
-                    : 'استيراد قائمتك وسجل المشاهدة ومزامنة تقدم التشغيل.',
-                icon: Icons.local_movies_outlined,
-              ),
-              const SizedBox(height: 12),
-              _LinkedServiceCard(
-                service: 'simkl',
-                title: 'Simkl',
-                subtitle: english
-                    ? 'Import your watchlist and history; sync playback progress.'
-                    : 'استيراد قائمتك وسجل المشاهدة ومزامنة تقدم التشغيل.',
-                icon: Icons.sync_rounded,
-              ),
-              const SizedBox(height: 12),
-              _LinkedServiceCard(
-                service: 'anilist',
-                title: 'AniList',
-                subtitle: english
-                    ? 'Track anime lists, progress and scores; sync your library.'
-                    : 'تتبّع قوائم الأنمي وتقدمك وتقييماتك ومزامنة مكتبتك.',
-                icon: Icons.auto_stories_outlined,
-              ),
-              const SizedBox(height: 12),
-              _LinkedServiceCard(
-                service: 'mal',
-                title: 'MyAnimeList',
-                subtitle: english
-                    ? 'Track anime lists, progress and scores; sync your library.'
-                    : 'تتبّع قوائم الأنمي وتقدمك وتقييماتك ومزامنة مكتبتك.',
-                icon: Icons.menu_book_outlined,
-              ),
-              const SizedBox(height: 12),
-              const _TmdbKeyCard(),
-              const SizedBox(height: 12),
-              const _DebridCard(),
-            ],
-          ),
-        ),
-      ),
-    );
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
+              children: [
+                SettingsPageIntro(
+                    title: app.tr('message253'),
+                    description: app.tr('message254'),
+                    icon: LucideIcons.orbit),
+                SettingsContentSection(title: app.tr('message255'), children: [
+                  for (final service in ['trakt', 'simkl', 'anilist', 'mal'])
+                    _ServiceDestination(
+                        service: service,
+                        connected: linked[service] != null,
+                        subtitle: linked[service]?['username']?.toString()),
+                ]),
+                SettingsContentSection(title: app.tr('message256'), children: [
+                  _ServiceDestination(
+                      service: 'tmdb',
+                      connected: app.api.hasUserTmdbKey,
+                      subtitle:
+                          app.api.hasUserTmdbKey ? null : app.tr('message257')),
+                  _ServiceDestination(
+                      service: 'mdblist',
+                      connected: false,
+                      subtitle: app.tr('message258')),
+                ]),
+                SettingsContentSection(title: app.tr('message259'), children: [
+                  _ServiceDestination(
+                      service: 'debrid',
+                      connected: app.api.debridService != null,
+                      subtitle: app.api.debridService == null
+                          ? app.tr('message260')
+                          : _serviceName(app.api.debridService)),
+                ]),
+                SettingsInfoBanner(
+                    icon: LucideIcons.shieldCheck,
+                    message: app.tr('message261')),
+              ]),
+        )));
+  }
+}
+
+String _providerName(String service) => switch (service) {
+      'trakt' => 'Trakt',
+      'simkl' => 'Simkl',
+      'anilist' => 'AniList',
+      'mal' => 'MyAnimeList',
+      'tmdb' => 'TMDB',
+      'mdblist' => 'MDBList',
+      _ => 'Debrid'
+    };
+IconData _providerIcon(String service) => switch (service) {
+      'trakt' => LucideIcons.clapperboard,
+      'simkl' => LucideIcons.refreshCw,
+      'anilist' || 'mal' => LucideIcons.bookOpen,
+      'tmdb' => LucideIcons.film,
+      'mdblist' => LucideIcons.star,
+      _ => LucideIcons.cloud
+    };
+
+class _ServiceDestination extends StatelessWidget {
+  const _ServiceDestination(
+      {required this.service, required this.connected, this.subtitle});
+  final String service;
+  final bool connected;
+  final String? subtitle;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.read<AppState>();
+    return SettingsTile(
+        icon: _providerIcon(service),
+        title: _providerName(service),
+        subtitle: subtitle ??
+            (connected ? app.tr('message262') : app.tr('message263')),
+        trailing: Icon(
+            connected
+                ? LucideIcons.circleCheck
+                : Directionality.of(context) == TextDirection.rtl
+                    ? LucideIcons.chevronLeft
+                    : LucideIcons.chevronRight,
+            size: 20,
+            color: connected
+                ? Theme.of(context).colorScheme.secondary
+                : Theme.of(context).colorScheme.onSurfaceVariant),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => _ServiceSettingsPage(service: service))));
+  }
+}
+
+class _ServiceSettingsPage extends StatelessWidget {
+  const _ServiceSettingsPage({required this.service});
+  final String service;
+  @override
+  Widget build(BuildContext context) {
+    context.select<AppState, bool>((app) => app.english);
+    final connected = context
+        .select<AppState, bool>((app) => app.linkedServices[service] != null);
+    final app = context.read<AppState>();
+    final tracker = ['trakt', 'simkl', 'anilist', 'mal'].contains(service);
+    return Scaffold(
+        appBar: AppBar(title: Text(_providerName(service))),
+        body: Center(
+            child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: ListView(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
+              children: [
+                SettingsPageIntro(
+                    title: _providerName(service),
+                    description: tracker
+                        ? app.tr('message264')
+                        : service == 'debrid'
+                            ? app.tr('message265')
+                            : app.tr('message266'),
+                    icon: _providerIcon(service)),
+                if (tracker)
+                  _LinkedServiceCard(
+                      service: service,
+                      title: _providerName(service),
+                      subtitle: ['anilist', 'mal'].contains(service)
+                          ? app.tr('message267')
+                          : app.tr('message268'),
+                      icon: _providerIcon(service)),
+                if (service == 'tmdb') const _TmdbKeyCard(),
+                if (service == 'debrid') const _DebridCard(),
+                if (service == 'mdblist')
+                  SettingsInfoBanner(
+                      icon: LucideIcons.star, message: app.tr('message269')),
+                if (tracker && connected) ...[
+                  const SizedBox(height: 24),
+                  SettingsContentSection(
+                      title: app.tr('message270'),
+                      children: [
+                        if (service == 'trakt' || service == 'simkl')
+                          _ServicePreference(
+                              settingKey: '${service}Scrobbling',
+                              title: app.tr('message271'),
+                              description: app.tr('message272')),
+                        if (service == 'trakt' ||
+                            service == 'anilist' ||
+                            service == 'mal')
+                          _ServicePreference(
+                              settingKey: '${service}WatchlistSync',
+                              title: app.tr('message273'),
+                              description: app.tr('message274')),
+                        if (service == 'anilist' || service == 'mal')
+                          _ServicePreference(
+                              settingKey: '${service}ProgressSync',
+                              title: app.tr('message275'),
+                              description: app.tr('message276')),
+                      ]),
+                ],
+                if (tracker) ...[
+                  const SizedBox(height: 24),
+                  SettingsContentSection(
+                      title: app.tr('message277'),
+                      children: [
+                        ListTile(
+                            leading: const Icon(LucideIcons.listVideo),
+                            title: Text(app.tr('message278')),
+                            subtitle: Text(app.tr('message279'))),
+                        ListTile(
+                            leading: const Icon(LucideIcons.activity),
+                            title: Text(app.tr('message280')),
+                            subtitle: Text(['anilist', 'mal'].contains(service)
+                                ? app.tr('message281')
+                                : app.tr('message282'))),
+                      ]),
+                ],
+              ]),
+        )));
+  }
+}
+
+class _ServicePreference extends StatelessWidget {
+  const _ServicePreference(
+      {required this.settingKey,
+      required this.title,
+      required this.description});
+  final String settingKey, title, description;
+  @override
+  Widget build(BuildContext context) {
+    final enabled = context
+        .select<AppState, bool>((app) => app.webSettings[settingKey] != false);
+    return SettingsOptimisticSwitchTile(
+        title: Text(title),
+        subtitle: Text(description),
+        value: enabled,
+        onChanged: (value) =>
+            context.read<AppState>().setSetting(settingKey, value));
   }
 }
 
@@ -117,9 +249,7 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
       _key.clear();
       NoorToast.show(
         context,
-        app.english
-            ? 'TMDB key verified and saved securely on this device.'
-            : 'تم التحقق من مفتاح TMDB وحفظه بأمان على هذا الجهاز.',
+        NovaStrings.lookup(app.english, 'message283'),
       );
     } catch (error) {
       if (!mounted) return;
@@ -131,13 +261,17 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
 
   Future<void> _remove() async {
     final app = context.read<AppState>();
+    if (!await confirmSettingsAction(context,
+        title: app.tr('message284'),
+        message: app.tr('message285'),
+        confirm: app.tr('remove'),
+        cancel: app.tr('cancel'))) return;
     await app.api.clearTmdbUserKey();
+    if (mounted) setState(() {});
     if (!mounted) return;
     NoorToast.show(
       context,
-      app.english
-          ? 'TMDB key removed from this device.'
-          : 'تمت إزالة مفتاح TMDB من هذا الجهاز.',
+      NovaStrings.lookup(app.english, 'message286'),
     );
   }
 
@@ -152,74 +286,67 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
               app.webSettings['tmdbEnabled'] != false,
             ));
     return Container(
-      padding: const EdgeInsets.all(17),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const _ServiceIcon(icon: Icons.auto_awesome_rounded),
-              const SizedBox(width: 12),
+              const _ServiceIcon(icon: LucideIcons.sparkles),
+              SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('TMDB',
                         style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 3),
+                    SizedBox(height: 3),
                     Text(
-                      english
-                          ? 'Power recommendations with your own API key.'
-                          : 'فعّل الترشيحات بمفتاح TMDB الخاص بك.',
+                      NovaStrings.lookup(english, 'message287'),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
               if (connected)
-                const Icon(Icons.check_circle_rounded, color: HorseTheme.gold),
+                Icon(LucideIcons.circleCheck,
+                    color: Theme.of(context).colorScheme.secondary),
             ],
           ),
           SettingsOptimisticSwitchTile(
             contentPadding: EdgeInsets.zero,
-            title: Text(english ? 'TMDB features' : 'ميزات TMDB'),
-            subtitle: Text(english
-                ? 'Use TMDB recommendations when available.'
-                : 'استخدم ترشيحات TMDB عند توفرها.'),
+            title: Text(NovaStrings.lookup(english, 'message288')),
+            subtitle: Text(NovaStrings.lookup(english, 'message289')),
             value: tmdbEnabled,
             onChanged: (value) =>
                 context.read<AppState>().setSetting('tmdbEnabled', value),
           ),
           if (connected) ...[
             Text(
-              english
-                  ? 'A validated key is stored in secure device storage.'
-                  : 'المفتاح المتحقق منه محفوظ في التخزين الآمن للجهاز.',
+              NovaStrings.lookup(english, 'message290'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Align(
               alignment: AlignmentDirectional.centerEnd,
               child: TextButton.icon(
                 onPressed: _busy ? null : _remove,
-                icon: const Icon(Icons.key_off_rounded),
-                label: Text(english ? 'Remove key' : 'إزالة المفتاح'),
+                icon: Icon(LucideIcons.keyRound),
+                label: Text(NovaStrings.lookup(english, 'message291')),
               ),
             ),
           ] else ...[
             Text(
-              english
-                  ? 'Built-in default key — works with no setup.'
-                  : 'مفتاح مضمّن افتراضيًا — يعمل بدون إعداد.',
+              NovaStrings.lookup(english, 'message292'),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.muted,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             TextField(
               controller: _key,
               obscureText: true,
@@ -227,24 +354,21 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
               enableSuggestions: false,
               textDirection: TextDirection.ltr,
               decoration: InputDecoration(
-                labelText:
-                    english ? 'TMDB API key or token' : 'مفتاح أو رمز TMDB',
-                hintText: english
-                    ? 'Paste your key or read token'
-                    : 'ألصق المفتاح أو رمز القراءة',
+                labelText: NovaStrings.lookup(english, 'message293'),
+                hintText: NovaStrings.lookup(english, 'message294'),
               ),
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 onPressed: _busy ? null : _save,
                 icon: _busy
-                    ? const SizedBox.square(
+                    ? SizedBox.square(
                         dimension: 16,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.verified_user_outlined),
-                label: Text(english ? 'Verify and save' : 'التحقق والحفظ'),
+                    : Icon(LucideIcons.shieldCheck),
+                label: Text(NovaStrings.lookup(english, 'message295')),
               ),
             ),
           ],
@@ -353,8 +477,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       if (widget.service == 'anilist' || widget.service == 'mal') {
         unawaited(app.refreshTrackerProfile(widget.service));
       }
-      NoorToast.show(
-          context, english ? 'Account connected.' : 'تم ربط الحساب.');
+      NoorToast.show(context, NovaStrings.lookup(english, 'message296'));
     } else {
       NoorToast.show(
         context,
@@ -366,25 +489,17 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
 
   String _oauthFailureText(bool english, String? reason) {
     if (reason == 'invalid_client') {
-      return english
-          ? 'The provider rejected the app credentials — update Noor to the latest build and retry.'
-          : 'رفض الموقع بيانات التطبيق — حدّث Noor إلى أحدث نسخة وأعد المحاولة.';
+      return NovaStrings.lookup(english, 'message297');
     }
     if (reason == 'invalid_token') {
-      return english
-          ? 'That access token was rejected — copy it again from the AniList page and retry.'
-          : 'رُفض رمز الوصول — انسخه من جديد من صفحة AniList وأعد المحاولة.';
+      return NovaStrings.lookup(english, 'message298');
     }
     if (reason == 'state_mismatch' ||
         reason == 'flow_expired' ||
         reason == 'no_pending_flow') {
-      return english
-          ? 'This code has expired — start a new link and paste the fresh code.'
-          : 'انتهت صلاحية هذا الرمز — ابدأ ربطًا جديدًا والصق الرمز الحديث.';
+      return NovaStrings.lookup(english, 'message299');
     }
-    return english
-        ? 'Could not complete with this code — check it or restart the link.'
-        : 'تعذر الإكمال بهذا الرمز — تحقق منه أو أعد بدء الربط.';
+    return NovaStrings.lookup(english, 'message300');
   }
 
   Future<void> _start() async {
@@ -398,7 +513,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
     try {
       if (widget.service == 'anilist' || widget.service == 'mal') {
         // Browser OAuth over app.noor.mobile://callback (RFC 8252): approve
-        // on the provider and the OS bounces straight back into Noor; the
+        // on the provider and the OS bounces straight back into NOVA; the
         // paste field below is the fallback when the bounce never fires.
         final result = widget.service == 'anilist'
             ? await app.api.startAniListLink()
@@ -406,8 +521,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
           // Task 122-c translation sweep: surfaced through the error toast.
-          throw FormatException(
-              english ? 'Could not start the link.' : 'تعذر بدء الربط.');
+          throw FormatException(NovaStrings.lookup(english, 'message301'));
         }
         if (!mounted) return;
         setState(() {
@@ -424,23 +538,21 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         // Trakt issues NO client secret for it and its device grant rejects
         // secret-less exchanges, so the device flow can never complete.
         // Return leg per the user's choice: direct (noor://callback — the OS
-        // bounces back into Noor the moment Trakt approves) or relay (the
+        // bounces back into NOVA the moment Trakt approves) or relay (the
         // companion site stores the code and the app-wide watcher fetches
         // it). IncomingLinkListener finishes the handshake either way.
         final result = await app.api.startTraktLink();
         final authorizeUrl = result?['authorizeUrl']?.toString() ?? '';
         if (authorizeUrl.isEmpty) {
           // Task 122-c translation sweep: surfaced through the error toast.
-          throw FormatException(english
-              ? 'Could not start the Trakt link.'
-              : 'تعذر بدء ربط Trakt.');
+          throw FormatException(NovaStrings.lookup(english, 'message302'));
         }
         if (!mounted) return;
         setState(() {
           _flow = {'status': 'waiting', 'kind': 'pkce'};
         });
         if (_traktMethod == 'relay') {
-          // Relay leg only: the browser lands on the Noor companion which
+          // Relay leg only: the browser lands on the NOVA companion which
           // stores the code — this watcher fetches it and finishes the
           // exchange even if this sheet is closed. Direct flows complete
           // via the noor:// deep link instead; there is nothing to poll.
@@ -464,9 +576,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           '';
       if (deviceCode.isEmpty || code.isEmpty || verificationUrl.isEmpty) {
         // Task 122-c translation sweep: surfaced through the error toast.
-        throw FormatException(english
-            ? 'Could not create the link code.'
-            : 'تعذر إنشاء رمز الربط.');
+        throw FormatException(NovaStrings.lookup(english, 'message303'));
       }
       if (!mounted) return;
       final interval =
@@ -527,9 +637,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         });
         NoorToast.show(
           context,
-          context.read<AppState>().english
-              ? 'Account connected.'
-              : 'تم ربط الحساب.',
+          NovaStrings.lookup(context.read<AppState>().english, 'message296'),
         );
         return;
       }
@@ -544,9 +652,7 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
       });
       NoorToast.show(
         context,
-        context.read<AppState>().english
-            ? 'The link was not approved. Generate a new code and try again.'
-            : 'لم تتم الموافقة على الربط. أنشئ رمزًا جديدًا وأعد المحاولة.',
+        NovaStrings.lookup(context.read<AppState>().english, 'message304'),
         error: true,
       );
     } catch (_) {
@@ -564,9 +670,8 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         final english = context.read<AppState>().english;
         NoorToast.show(
           context,
-          english
-              ? 'Imported $watchlist titles and $history history items.'
-              : 'تم استيراد $watchlist عنوانًا و$history من سجل المشاهدة.',
+          NovaStrings.lookup(
+              english, 'message305', {'p0': watchlist, 'p1': history}),
         );
       }
     } catch (error) {
@@ -577,13 +682,17 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
   }
 
   Future<void> _unlink() async {
-    await context.read<AppState>().unlinkService(widget.service);
+    final app = context.read<AppState>();
+    if (!await confirmSettingsAction(context,
+        title: app.tr('message306'),
+        message: app.tr('message307', {'p0': widget.title}),
+        confirm: app.tr('message308'),
+        cancel: app.tr('cancel'))) return;
+    await app.unlinkService(widget.service);
     if (mounted) {
       NoorToast.show(
         context,
-        context.read<AppState>().english
-            ? 'Account disconnected.'
-            : 'تم فصل الحساب.',
+        NovaStrings.lookup(context.read<AppState>().english, 'message309'),
       );
     }
   }
@@ -611,11 +720,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
             (app) => (app.english, app.linkedServices[widget.service]));
     final waiting = _flow?['status'] == 'waiting';
     return Container(
-      padding: const EdgeInsets.all(17),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -623,24 +732,25 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
           Row(
             children: [
               _ServiceIcon(icon: widget.icon),
-              const SizedBox(width: 12),
+              SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.title,
                         style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 3),
+                    SizedBox(height: 3),
                     Text(widget.subtitle,
                         style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
               if (linked != null)
-                const Icon(Icons.check_circle_rounded, color: HorseTheme.gold),
+                Icon(LucideIcons.circleCheck,
+                    color: Theme.of(context).colorScheme.secondary),
             ],
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           if (linked != null) ...[
             Row(
               children: [
@@ -649,25 +759,28 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     radius: 17,
                     backgroundImage: NetworkImage(linked['avatar'].toString()),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: 10),
                 ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${english ? 'Connected as' : 'متصل باسم'}  ${linked['username'] ?? widget.title}',
+                        '${NovaStrings.lookup(english, 'message310')}  ${linked['username'] ?? widget.title}',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       if (linked['lastSyncedAt'] is num)
                         Padding(
                           padding: const EdgeInsetsDirectional.only(top: 3),
                           child: Text(
-                            '${english ? 'Last synced' : 'آخر مزامنة'} · ${_formatSyncTime(linked['lastSyncedAt'] as num)}',
+                            '${NovaStrings.lookup(english, 'message311')} · ${_formatSyncTime(linked['lastSyncedAt'] as num)}',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
-                                ?.copyWith(color: HorseTheme.muted),
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant),
                           ),
                         ),
                     ],
@@ -676,30 +789,30 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               ],
             ),
             if (widget.service == 'anilist' || widget.service == 'mal') ...[
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Wrap(
                 spacing: 7,
                 runSpacing: 7,
                 children: [
                   if (linked['animeCount'] is num)
                     _ProfileStat(
-                      english ? 'Anime' : 'أعمال',
+                      NovaStrings.lookup(english, 'message312'),
                       '${(linked['animeCount'] as num).toInt()}',
                     ),
                   if (linked['episodesWatched'] is num)
                     _ProfileStat(
-                      english ? 'Episodes' : 'حلقات',
+                      NovaStrings.lookup(english, 'message313'),
                       '${(linked['episodesWatched'] as num).toInt()}',
                     ),
                   if (linked['meanScore'] is num)
                     _ProfileStat(
-                      english ? 'Mean score' : 'متوسط التقييم',
+                      NovaStrings.lookup(english, 'message314'),
                       (linked['meanScore'] as num).toStringAsFixed(1),
                     ),
                 ],
               ),
             ],
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -707,57 +820,51 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 FilledButton.tonalIcon(
                   onPressed: _syncing ? null : _sync,
                   icon: _syncing
-                      ? const SizedBox.square(
+                      ? SizedBox.square(
                           dimension: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.sync_rounded),
-                  label: Text(english ? 'Sync library' : 'مزامنة المكتبة'),
+                      : Icon(LucideIcons.refreshCw),
+                  label: Text(NovaStrings.lookup(english, 'message315')),
                 ),
                 TextButton.icon(
                   onPressed: _unlink,
-                  icon: const Icon(Icons.link_off_rounded),
-                  label: Text(english ? 'Disconnect' : 'فصل'),
+                  icon: Icon(LucideIcons.unlink),
+                  label: Text(NovaStrings.lookup(english, 'message308')),
                 ),
               ],
             ),
           ] else if (waiting && _flow?['kind'] == 'browser') ...[
             Text(
-              english
-                  ? 'Approve the link in the ${widget.title} browser tab — the browser returns straight into Noor the moment you approve (Redirect URI app.noor.mobile://callback).'
-                  : 'وافق على الربط في تبويب ${widget.title} بالمتصفح — سيعيدك المتصفح إلى التطبيق فور الموافقة (Redirect URI ‏app.noor.mobile://callback).',
+              NovaStrings.lookup(english, 'message316', {'p0': widget.title}),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             Row(
               children: [
-                const SizedBox.square(
+                SizedBox.square(
                   dimension: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    english ? 'Waiting for approval…' : 'بانتظار الموافقة…',
+                    NovaStrings.lookup(english, 'message317'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: HorseTheme.muted,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Text(
               widget.service == 'anilist'
-                  ? (english
-                      ? 'Browser stuck on a token page? Paste the full URL or the access token here:'
-                      : 'المتصفح متوقف عند صفحة الرمز؟ الصق الرابط كاملًا أو رمز الوصول هنا:')
-                  : (english
-                      ? 'Browser stuck or showing an auth code? Paste it here:'
-                      : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:'),
+                  ? (NovaStrings.lookup(english, 'message318'))
+                  : (NovaStrings.lookup(english, 'message319')),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
@@ -770,78 +877,70 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     style: Theme.of(context).textTheme.bodySmall,
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: english ? 'Authorization code' : 'رمز التفويض',
+                      hintText: NovaStrings.lookup(english, 'message320'),
                       border: const OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => unawaited(_submitCode()),
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 FilledButton(
                   onPressed: _submittingCode ? null : _submitCode,
                   child: _submittingCode
-                      ? const SizedBox.square(
+                      ? SizedBox.square(
                           dimension: 15,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(english ? 'Finish' : 'إكمال'),
+                      : Text(NovaStrings.lookup(english, 'message321')),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: TextButton(
                 onPressed: _cancelFlow,
-                child: Text(english ? 'Cancel' : 'إلغاء'),
+                child: Text(NovaStrings.lookup(english, 'cancel')),
               ),
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: 4),
             Text(
-              english
-                  ? 'No setup needed — Noor ships with its own ${widget.title} app credentials.'
-                  : 'لا حاجة لأي إعداد — يأتي Noor ببيانات تطبيق ${widget.title} مدمجةً.',
+              NovaStrings.lookup(english, 'message322', {'p0': widget.title}),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.muted,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
           ] else if (waiting && _flow?['kind'] == 'pkce') ...[
             Text(
               _traktMethod == 'direct'
-                  ? (english
-                      ? 'Complete the approval in the Trakt browser tab — Trakt bounces you straight back into Noor the moment you approve (no website involved).'
-                      : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيعيدك Trakt إلى التطبيق فور الموافقة مباشرة (بدون أي موقع وسيط).')
-                  : (english
-                      ? 'Complete the approval in the Trakt browser tab — Noor finishes the link automatically the moment Trakt approves (you may need to switch back to the app).'
-                      : 'أكمل الموافقة في تبويب Trakt بالمتصفح — سيُكمل التطبيق الربط تلقائيًا فور الموافقة (قد تحتاج للعودة إلى التطبيق يدويًا).'),
+                  ? (NovaStrings.lookup(english, 'message323'))
+                  : (NovaStrings.lookup(english, 'message324')),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             Row(
               children: [
-                const SizedBox.square(
+                SizedBox.square(
                   dimension: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    english ? 'Waiting for approval…' : 'بانتظار الموافقة…',
+                    NovaStrings.lookup(english, 'message317'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: HorseTheme.muted,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Text(
-              english
-                  ? 'Browser stuck or showing an auth code? Paste it here:'
-                  : 'المتصفح متوقف أو يُظهر رمز تفويض؟ الصقه هنا:',
+              NovaStrings.lookup(english, 'message319'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
@@ -854,63 +953,57 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     style: Theme.of(context).textTheme.bodySmall,
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: english ? 'Authorization code' : 'رمز التفويض',
+                      hintText: NovaStrings.lookup(english, 'message320'),
                       border: const OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => unawaited(_submitCode()),
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 FilledButton(
                   onPressed: _submittingCode ? null : _submitCode,
                   child: _submittingCode
-                      ? const SizedBox.square(
+                      ? SizedBox.square(
                           dimension: 15,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(english ? 'Finish' : 'إكمال'),
+                      : Text(NovaStrings.lookup(english, 'message321')),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: TextButton(
                 onPressed: _cancelFlow,
-                child: Text(english ? 'Cancel' : 'إلغاء'),
+                child: Text(NovaStrings.lookup(english, 'cancel')),
               ),
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: 4),
             Text(
               _traktMethod == 'direct'
-                  ? (english
-                      ? 'If Trakt shows an error after approving, add noor://callback to the Redirect URIs on trakt.tv/oauth/applications (one time) — or switch the method above to “Via website”.'
-                      : 'إن ظهرت رسالة خطأ من Trakt بعد الموافقة، أضف noor://callback إلى قائمة Redirect URIs في لوحة Trakt (مرة واحدة) — أو بدّل الطريقة إلى «عبر الموقع».')
-                  : (english
-                      ? 'No setup needed — Trakt returns the approval to Noor through the Noor companion site automatically.'
-                      : 'لا حاجة لأي إعداد — يعيد Trakt الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب.'),
+                  ? (NovaStrings.lookup(english, 'message325'))
+                  : (NovaStrings.lookup(english, 'message326')),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.muted,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
           ] else if (waiting) ...[
             Text(
-              english
-                  ? 'Open ${widget.title} and enter this code:'
-                  : 'افتح ${widget.title} وأدخل رمز التفعيل:',
+              NovaStrings.lookup(english, 'message327', {'p0': widget.title}),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             SelectableText(
               _flow?['user_code']?.toString() ?? '',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: HorseTheme.gold,
+                    color: Theme.of(context).colorScheme.secondary,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 4,
                   ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -924,32 +1017,31 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                     if (!mounted) return;
                     NoorToast.show(
                       this.context,
-                      english ? 'Code copied.' : 'تم نسخ الرمز.',
+                      NovaStrings.lookup(english, 'message328'),
                     );
                   },
-                  icon: const Icon(Icons.copy_rounded),
-                  label: Text(english ? 'Copy code' : 'نسخ الرمز'),
+                  icon: Icon(LucideIcons.copy),
+                  label: Text(NovaStrings.lookup(english, 'message329')),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => launchUrl(
                     Uri.parse(_flow?['verification_url']?.toString() ?? ''),
                     mode: LaunchMode.externalApplication,
                   ),
-                  icon: const Icon(Icons.open_in_new_rounded),
-                  label: Text(
-                      english ? 'Open activation page' : 'فتح صفحة التفعيل'),
+                  icon: Icon(LucideIcons.externalLink),
+                  label: Text(NovaStrings.lookup(english, 'message330')),
                 ),
                 TextButton(
                   onPressed: _cancelFlow,
-                  child: Text(english ? 'Cancel' : 'إلغاء'),
+                  child: Text(NovaStrings.lookup(english, 'cancel')),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Text(
-              english ? 'Waiting for approval…' : 'بانتظار الموافقة…',
+              NovaStrings.lookup(english, 'message317'),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.muted,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
           ] else ...[
@@ -958,13 +1050,14 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
               child: FilledButton.icon(
                 onPressed: _busy ? null : _start,
                 icon: _busy
-                    ? const SizedBox.square(
+                    ? SizedBox.square(
                         dimension: 17,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.link_rounded),
+                    : Icon(LucideIcons.link),
                 label: Text(
-                  english ? 'Connect ${widget.title}' : 'ربط ${widget.title}',
+                  NovaStrings.lookup(
+                      english, 'message331', {'p0': widget.title}),
                 ),
               ),
             ),
@@ -972,45 +1065,31 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 linked == null &&
                 _flow?['status'] == null &&
                 _traktMethodLoaded) ...[
-              const SizedBox(height: 6),
-              SegmentedButton<String>(
-                segments: [
-                  ButtonSegment(
-                    value: 'direct',
-                    icon: const Icon(Icons.phone_iphone_rounded, size: 17),
-                    label: Text(
-                      english ? 'Direct to app' : 'مباشر للتطبيق',
-                    ),
-                  ),
-                  ButtonSegment(
-                    value: 'relay',
-                    icon: const Icon(Icons.language_rounded, size: 17),
-                    label: Text(english ? 'Via website' : 'عبر الموقع'),
-                  ),
-                ],
-                selected: {_traktMethod},
-                onSelectionChanged: (selection) =>
-                    unawaited(_pickTraktMethod(selection.first)),
-                showSelectedIcon: false,
-              ),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                ChoiceChip(
+                    label: Text(NovaStrings.lookup(english, 'message332')),
+                    selected: _traktMethod == 'direct',
+                    onSelected: (_) => unawaited(_pickTraktMethod('direct'))),
+                ChoiceChip(
+                    label: Text(NovaStrings.lookup(english, 'message333')),
+                    selected: _traktMethod == 'relay',
+                    onSelected: (_) => unawaited(_pickTraktMethod('relay'))),
+              ]),
+              SizedBox(height: 6),
               Text(
                 _traktMethod == 'direct'
-                    ? (english
-                        ? 'Approve in Trakt and the browser hands you straight back to Noor — no website in between. One-time setup: add noor://callback to the Redirect URIs on trakt.tv/oauth/applications.'
-                        : 'وافق في Trakt ويعيدك المتصفح إلى التطبيق مباشرة — بدون أي موقع وسيط. إعداد لمرة واحدة: أضف noor://callback إلى قائمة Redirect URIs في لوحة مطوّر Trakt (trakt.tv/oauth/applications).')
-                    : (english
-                        ? 'Opens the browser — the approval returns to Noor automatically through the Noor companion site. No dashboard setup required.'
-                        : 'يفتح المتصفح — تعود الموافقة إلى التطبيق تلقائيًا عبر موقع Noor المصاحب. لا حاجة لأي إعداد في لوحة Trakt.'),
+                    ? (NovaStrings.lookup(english, 'message334'))
+                    : (NovaStrings.lookup(english, 'message335')),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: HorseTheme.muted,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
               ),
             ],
             if (_flow?['status'] != null)
               TextButton.icon(
                 onPressed: _start,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: Icon(LucideIcons.refreshCw),
                 label: Text(
                   english
                       ? (widget.service == 'trakt'
@@ -1046,9 +1125,10 @@ class _ProfileStat extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: HorseTheme.gold.withValues(alpha: .09),
+          color: Theme.of(context).colorScheme.secondary.withValues(alpha: .09),
           borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: HorseTheme.line),
+          border:
+              Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1056,11 +1136,11 @@ class _ProfileStat extends StatelessWidget {
             Text(
               value,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: HorseTheme.gold,
+                    color: Theme.of(context).colorScheme.secondary,
                     fontWeight: FontWeight.w700,
                   ),
             ),
-            const SizedBox(width: 5),
+            SizedBox(width: 5),
             Text(
               label,
               style: Theme.of(context).textTheme.bodySmall,
@@ -1104,9 +1184,7 @@ class _DebridCardState extends State<_DebridCard> {
       if (mounted) {
         NoorToast.show(
           context,
-          app.english
-              ? 'Key verified and saved securely.'
-              : 'تم التحقق من المفتاح وحفظه بأمان.',
+          NovaStrings.lookup(app.english, 'message336'),
         );
       }
     } catch (error) {
@@ -1118,11 +1196,16 @@ class _DebridCardState extends State<_DebridCard> {
 
   Future<void> _remove() async {
     final app = context.read<AppState>();
+    if (!await confirmSettingsAction(context,
+        title: app.tr('message337'),
+        message: app.tr('message338'),
+        confirm: app.tr('message308'),
+        cancel: app.tr('cancel'))) return;
     await app.disconnectDebrid();
     if (mounted) {
       NoorToast.show(
         context,
-        app.english ? 'Debrid service disconnected.' : 'تم فصل خدمة Debrid.',
+        NovaStrings.lookup(app.english, 'message339'),
       );
     }
   }
@@ -1139,40 +1222,39 @@ class _DebridCardState extends State<_DebridCard> {
                   app.debridUser,
                 ));
     return Container(
-      padding: const EdgeInsets.all(17),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HorseTheme.line),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const _ServiceIcon(icon: Icons.bolt_rounded),
-              const SizedBox(width: 12),
+              const _ServiceIcon(icon: LucideIcons.zap),
+              SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Debrid',
                         style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 3),
+                    SizedBox(height: 3),
                     Text(
-                      english
-                          ? 'Unlock cached torrent streams.'
-                          : 'تشغيل التورنتات المتاحة عبر خدمة Debrid.',
+                      NovaStrings.lookup(english, 'message340'),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
               if (connected)
-                const Icon(Icons.check_circle_rounded, color: HorseTheme.gold),
+                Icon(LucideIcons.circleCheck,
+                    color: Theme.of(context).colorScheme.secondary),
             ],
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           if (connected) ...[
             Text(
               '${_serviceName(service)}${user?['username'] == null ? '' : ' · ${user!['username']}'}',
@@ -1182,7 +1264,7 @@ class _DebridCardState extends State<_DebridCard> {
               Padding(
                 padding: const EdgeInsets.only(top: 3),
                 child: Text(
-                  '${english ? 'Plan' : 'الخطة'}: ${user!['premium']}',
+                  '${NovaStrings.lookup(english, 'message341')}: ${user!['premium']}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
@@ -1190,15 +1272,15 @@ class _DebridCardState extends State<_DebridCard> {
               alignment: AlignmentDirectional.centerEnd,
               child: TextButton.icon(
                 onPressed: _busy ? null : _remove,
-                icon: const Icon(Icons.link_off_rounded),
-                label: Text(english ? 'Remove key' : 'إزالة المفتاح'),
+                icon: Icon(LucideIcons.unlink),
+                label: Text(NovaStrings.lookup(english, 'message291')),
               ),
             ),
           ] else ...[
             DropdownButtonFormField<String>(
               initialValue: _service,
-              decoration:
-                  InputDecoration(labelText: english ? 'Service' : 'الخدمة'),
+              decoration: InputDecoration(
+                  labelText: NovaStrings.lookup(english, 'message342')),
               items: const [
                 DropdownMenuItem(
                     value: 'realdebrid', child: Text('Real-Debrid')),
@@ -1209,30 +1291,28 @@ class _DebridCardState extends State<_DebridCard> {
                   ? null
                   : (value) => setState(() => _service = value ?? _service),
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             TextField(
               controller: _key,
               obscureText: true,
               autocorrect: false,
               textDirection: TextDirection.ltr,
               decoration: InputDecoration(
-                labelText: english ? 'API key' : 'مفتاح API',
-                hintText: english
-                    ? 'Paste your service API key'
-                    : 'ألصق مفتاح الخدمة',
+                labelText: NovaStrings.lookup(english, 'message343'),
+                hintText: NovaStrings.lookup(english, 'message344'),
               ),
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
                 onPressed: _busy ? null : _save,
                 icon: _busy
-                    ? const SizedBox.square(
+                    ? SizedBox.square(
                         dimension: 16,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.verified_user_outlined),
-                label: Text(english ? 'Verify and save' : 'التحقق والحفظ'),
+                    : Icon(LucideIcons.shieldCheck),
+                label: Text(NovaStrings.lookup(english, 'message295')),
               ),
             ),
           ],
@@ -1251,10 +1331,10 @@ class _ServiceIcon extends StatelessWidget {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: HorseTheme.gold.withValues(alpha: .11),
+          color: Theme.of(context).colorScheme.secondary.withValues(alpha: .11),
           borderRadius: BorderRadius.circular(13),
         ),
-        child: Icon(icon, color: HorseTheme.gold),
+        child: Icon(icon, color: Theme.of(context).colorScheme.secondary),
       );
 }
 

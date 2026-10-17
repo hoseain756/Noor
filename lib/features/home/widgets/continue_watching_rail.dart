@@ -1,3 +1,6 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -133,10 +136,10 @@ class _ContinueRailState extends State<ContinueWatchingRail> {
     final h = totalMin ~/ 60;
     final m = totalMin % 60;
     final parts = <String>[
-      if (h > 0) '$h${english ? 'h' : 'س'}',
-      if (m > 0 || h == 0) '$m${english ? 'm' : 'د'}',
+      if (h > 0) '$h${NovaStrings.lookup(english, 'message122')}',
+      if (m > 0 || h == 0) '$m${NovaStrings.lookup(english, 'message123')}',
     ];
-    return english ? '${parts.join(' ')} left' : 'تبقى ${parts.join(' ')}';
+    return NovaStrings.lookup(english, 'message124', {'p0': parts.join(' ')});
   }
 
   @override
@@ -154,7 +157,7 @@ class _ContinueRailState extends State<ContinueWatchingRail> {
           padding: EdgeInsets.symmetric(horizontal: metrics.pad),
           child: HomeSectionHeader(
             // Exact site strings (web homeT "continueWatching").
-            title: widget.english ? 'Continue Watching' : 'متابعة المشاهدة',
+            title: NovaStrings.lookup(widget.english, 'message125'),
           ),
         ),
         const SizedBox(height: 12),
@@ -183,9 +186,8 @@ class _ContinueRailState extends State<ContinueWatchingRail> {
                 subtitle: isSeries
                     ? (epName != null && epName.isNotEmpty
                         ? epName
-                        : (widget.english
-                            ? 'Episode ${entry.episode}'
-                            : 'الحلقة ${entry.episode}'))
+                        : (NovaStrings.lookup(widget.english, 'message44',
+                            {'p0': entry.episode})))
                     : _remainingLabel(entry, widget.english),
                 badge: cwUpcomingLabel(
                     enrichment?.nextAirMs, widget.english, DateTime.now()),
@@ -214,9 +216,7 @@ class _ContinueRailState extends State<ContinueWatchingRail> {
                       if (context.mounted) {
                         NoorToast.show(
                           context,
-                          widget.english
-                              ? 'Marked as watched'
-                              : 'تم التحديد كمشاهد',
+                          NovaStrings.lookup(widget.english, 'message94'),
                         );
                       }
                     }),
@@ -289,9 +289,9 @@ class ContinueCard extends StatelessWidget {
   final VoidCallback? onRemove;
 
   // Web token: --cw-progress: #e53935.
-  static const _progressRed = Color(0xFFE53935);
+  static const _progressRed = NovaColors.red;
   // Web token: --cw-fresh-dot: #f5b301.
-  static const _freshDot = Color(0xFFF5B301);
+  static const _freshDot = NovaColors.warning;
 
   @override
   Widget build(BuildContext context) {
@@ -304,7 +304,7 @@ class ContinueCard extends StatelessWidget {
     final fresh = data.fresh;
     final sourceLabel = data.sourceLabel;
     final semantics = [
-      english ? 'Resume' : 'استئناف',
+      NovaStrings.lookup(english, 'message20'),
       item.name,
       if (epTag != null) epTag,
       if (subtitle != null) subtitle,
@@ -321,7 +321,7 @@ class ContinueCard extends StatelessWidget {
       return showModalBottomSheet<void>(
         context: context,
         useSafeArea: true,
-        backgroundColor: HorseTheme.surface,
+        backgroundColor: NovaTheme.of(context).surface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -343,8 +343,8 @@ class ContinueCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 ListTile(
-                  leading: const Icon(Icons.info_outline_rounded),
-                  title: Text(english ? 'View details' : 'عرض التفاصيل'),
+                  leading: const Icon(LucideIcons.info),
+                  title: Text(NovaStrings.lookup(english, 'message126')),
                   onTap: () {
                     close();
                     openDetail();
@@ -352,8 +352,8 @@ class ContinueCard extends StatelessWidget {
                 ),
                 if (onMarkWatched != null)
                   ListTile(
-                    leading: const Icon(Icons.visibility_outlined),
-                    title: Text(english ? 'Mark as watched' : 'تحديد كمشاهد'),
+                    leading: const Icon(LucideIcons.eye),
+                    title: Text(NovaStrings.lookup(english, 'message99')),
                     onTap: () {
                       close();
                       onMarkWatched!();
@@ -362,13 +362,11 @@ class ContinueCard extends StatelessWidget {
                 if (onRemove != null)
                   ListTile(
                     leading: const Icon(
-                      Icons.delete_outline_rounded,
+                      LucideIcons.trash2,
                       color: _progressRed,
                     ),
                     title: Text(
-                      english
-                          ? 'Remove from Continue Watching'
-                          : 'إزالة من متابعة المشاهدة',
+                      NovaStrings.lookup(english, 'message127'),
                       style: const TextStyle(color: _progressRed),
                     ),
                     onTap: () {
@@ -403,14 +401,14 @@ class ContinueCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       image == null
-                          ? const ColoredBox(color: HorseTheme.surface)
-                          : Image.network(
+                          ? ColoredBox(color: NovaTheme.of(context).surface)
+                          : NovaNetworkImage(
                               image,
                               fit: BoxFit.cover,
                               // Task 136: decode at the card's on-screen size.
                               cacheWidth: imageCacheWidth(context, width),
-                              errorBuilder: (_, __, ___) => const ColoredBox(
-                                color: HorseTheme.surface,
+                              errorBuilder: (_, __, ___) => ColoredBox(
+                                color: NovaTheme.of(context).surface,
                               ),
                             ),
                       // Web scrim: to top, 85% black → 45% → transparent.

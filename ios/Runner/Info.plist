@@ -7,7 +7,7 @@
         <key>CFBundleDevelopmentRegion</key>
         <string>$(DEVELOPMENT_LANGUAGE)</string>
         <key>CFBundleDisplayName</key>
-        <string>Noor</string>
+        <string>NOVA</string>
         <key>CFBundleExecutable</key>
         <string>$(EXECUTABLE_NAME)</string>
         <key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
         <key>CFBundleInfoDictionaryVersion</key>
         <string>6.0</string>
         <key>CFBundleName</key>
-        <string>Noor</string>
+        <string>NOVA</string>
         <key>CFBundleURLTypes</key>
         <array>
                 <!-- AniList / MyAnimeList OAuth return (RFC 8252): the
@@ -85,7 +85,7 @@
              icons on the dark canvas). UIStatusBarHidden stays NO so the
              status bar itself is always preserved. -->
         <key>UIStatusBarStyle</key>
-        <string>UIStatusBarStyleDarkContent</string>
+        <string>UIStatusBarStyleLightContent</string>
         <key>UIStatusBarHidden</key>
         <false/>
         <key>UISupportedInterfaceOrientations</key>

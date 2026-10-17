@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/painting.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'catalog_response_cache.dart';
 
 import '../state/app_state.dart';
 import '../torrent/torrent_service.dart';
@@ -104,6 +106,10 @@ class CacheResetService {
   Future<int> performReset({SharedPreferences? prefs}) async {
     final preferences = prefs ?? await SharedPreferences.getInstance();
     var freed = 0;
+    try {
+      await CatalogResponseCache.instance.clear();
+      await DefaultCacheManager().emptyCache();
+    } catch (_) {/* Transient cache cleanup is best effort. */}
     try {
       PaintingBinding.instance.imageCache
         ..clear()

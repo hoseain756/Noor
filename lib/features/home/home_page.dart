@@ -1,3 +1,5 @@
+import '../shell/nova_catalog_refresh.dart';
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -14,6 +16,8 @@ import '../shell/noor_dock_tabs.dart';
 import 'widgets/async_media_section.dart';
 import 'widgets/continue_watching_rail.dart';
 import 'widgets/featured_hero.dart';
+import 'widgets/cinematic_cover_scroll.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../anime/anime_page.dart';
 import '../catalog/catalog_browser_page.dart';
 import '../catalog/catalog_grid_page.dart';
@@ -28,7 +32,15 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with NovaCatalogRefresh<HomePage> {
+  @override
+  bool get catalogRefreshEnabled => widget.active;
+
+  @override
+  void refreshCachedCatalogs() {
+    setState(() => _load(context.read<AppState>()));
+  }
+
   Future<List<MediaItem>>? _featuredSlides;
   Future<List<MediaItem>>? _topTen;
   Future<List<MediaItem>>? _movies;
@@ -136,17 +148,24 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-    _featuredSlides = Future.wait<List<MediaItem>>([
-      _movies!.catchError((Object _) => <MediaItem>[]),
-      _theaters!.catchError((Object _) => <MediaItem>[]),
-      _series!.catchError((Object _) => <MediaItem>[]),
-    ]).then((rows) {
-      final slides = <MediaItem>[];
-      for (final row in rows) {
-        slides.addAll(row.take(3));
-      }
-      return slides.take(8).toList(growable: false);
-    });
+    // First useful catalog wins; a slow addon must not hold the hero hostage.
+    final firstFeatured = Completer<List<MediaItem>>();
+    var finished = 0;
+    for (final source in [_movies!, _theaters!, _series!]) {
+      source
+          .then((items) {
+            if (!firstFeatured.isCompleted && items.isNotEmpty) {
+              firstFeatured.complete(items.take(8).toList(growable: false));
+            }
+          })
+          .catchError((Object _) {})
+          .whenComplete(() {
+            finished++;
+            if (finished == 3 && !firstFeatured.isCompleted)
+              firstFeatured.complete(const []);
+          });
+    }
+    _featuredSlides = firstFeatured.future;
     // Task 122-b (G2): recommendations follow the content-language TMDB
     // locale (was the UI-less 'tmdbLanguage' fallback, always 'en-US').
     final language = app.contentTmdbLocale;
@@ -209,62 +228,69 @@ class _HomePageState extends State<HomePage> {
     // icons (classic header / service message) — the hero itself handles
     // icon readability with its top scrim.
     final safeTop = MediaQuery.paddingOf(context).top;
-    return CustomScrollView(
-      slivers: [
-        if (classicHome)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsetsDirectional.fromSTEB(20, 22 + safeTop, 20, 24),
-              child: Column(
+    final hero = classicHome
+        ? Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text(
-                    english
-                        ? 'Your next story starts here'
-                        : 'حكايتك التالية تبدأ هنا',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    english
-                        ? 'Discover something worth watching.'
-                        : 'اكتشف شيئًا يستحق المشاهدة.',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: HorseTheme.muted),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        if (!classicHome)
-          SliverToBoxAdapter(
-            child: FutureBuilder<List<MediaItem>>(
-              future: _featuredSlides,
-              builder: (context, snapshot) {
-                final featured = snapshot.data;
-                if (featured != null && featured.isNotEmpty) {
-                  return FeaturedHero(
-                    items: featured.take(8).toList(growable: false),
+                  Icon(LucideIcons.sparkles,
+                      size: 40, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(height: 24),
+                  Text(NovaStrings.lookup(english, 'message104'),
+                      style: Theme.of(context).textTheme.headlineLarge),
+                  const SizedBox(height: 12),
+                  Text(NovaStrings.lookup(english, 'message105'),
+                      style: Theme.of(context).textTheme.bodyLarge),
+                ]),
+          )
+        : FutureBuilder<List<MediaItem>>(
+            future: _featuredSlides,
+            builder: (context, snapshot) {
+              final featured = snapshot.data;
+              if (featured != null && featured.isNotEmpty) {
+                return FeaturedHero(
+                    items: featured,
                     autoplayActive: widget.active,
-                    onTap: _open,
-                  );
-                }
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const FeaturedSkeleton();
-                }
-                return Padding(
+                    onTap: _open);
+              }
+              if (snapshot.connectionState == ConnectionState.waiting)
+                return const FeaturedSkeleton();
+              return Padding(
                   padding:
-                      EdgeInsetsDirectional.fromSTEB(20, 28 + safeTop, 20, 0),
-                  child: _ServiceMessage(
-                    english: english,
-                    onRetry: () => setState(() => _load(app)),
-                  ),
-                );
-              },
-            ),
-          ),
+                      EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
+                  child: Center(
+                      child: _ServiceMessage(
+                          english: english,
+                          onRetry: () => setState(() => _load(app)))));
+            },
+          );
+    return CinematicCoverScroll(
+      storageKey: const PageStorageKey('nova-home'),
+      hero: hero,
+      heroHeight: classicHome ? 360 : featuredHeroHeight(context),
+      slivers: [
+        SliverToBoxAdapter(
+            child: Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(24, 24, 24, 32),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            ActionChip(
+                avatar: const Icon(LucideIcons.film, size: 18),
+                label: Text(NovaStrings.lookup(english, 'message106')),
+                onPressed: () => _openSection(
+                    const CatalogBrowserPage(mode: CatalogBrowseMode.movies))),
+            ActionChip(
+                avatar: const Icon(LucideIcons.tv, size: 18),
+                label: Text(NovaStrings.lookup(english, 'message107')),
+                onPressed: () => _openSection(
+                    const CatalogBrowserPage(mode: CatalogBrowseMode.shows))),
+            ActionChip(
+                avatar: const Icon(LucideIcons.sparkles, size: 18),
+                label: Text(NovaStrings.lookup(english, 'message108')),
+                onPressed: () => _openSection(const AnimePage())),
+          ]),
+        )),
         if (app.continueWatching.isNotEmpty)
           SliverToBoxAdapter(
             child: Padding(
@@ -279,7 +305,7 @@ class _HomePageState extends State<HomePage> {
           ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Recommended for you' : 'مقترح لك',
+            title: NovaStrings.lookup(english, 'message109'),
             future: _recommendations!,
             onTap: _open,
             onRetry: () => setState(() => _load(app)),
@@ -288,7 +314,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Top 10 Today' : 'أفضل 10 اليوم',
+            title: NovaStrings.lookup(english, 'message110'),
             future: _topTen!,
             numbered: true,
             onTap: _open,
@@ -303,7 +329,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Trending series' : 'مسلسلات رائجة',
+            title: NovaStrings.lookup(english, 'message111'),
             future: _series!,
             onTap: _open,
             onOpenSection: () => _openSection(
@@ -319,7 +345,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Trending movies' : 'أفلام رائجة',
+            title: NovaStrings.lookup(english, 'message112'),
             future: _movies!,
             onTap: _open,
             onOpenSection: () => _openSection(
@@ -335,7 +361,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Trending anime' : 'أنمي رائج',
+            title: NovaStrings.lookup(english, 'message113'),
             future: _anime!,
             onTap: _open,
             onOpenSection: () => _openSection(const AnimePage()),
@@ -345,7 +371,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'Anime movies' : 'أفلام الأنمي',
+            title: NovaStrings.lookup(english, 'message114'),
             future: _animeMovies!,
             onTap: _open,
             onOpenSection: () => _openSection(const AnimePage()),
@@ -381,7 +407,7 @@ class _HomePageState extends State<HomePage> {
           ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'New episodes' : 'حلقات جديدة',
+            title: NovaStrings.lookup(english, 'message115'),
             future: _newEpisodes!,
             onTap: _open,
             onOpenSection: () => _openSection(
@@ -397,7 +423,7 @@ class _HomePageState extends State<HomePage> {
         ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
-            title: english ? 'In theaters' : 'في السينما',
+            title: NovaStrings.lookup(english, 'message116'),
             future: _theaters!,
             onTap: _open,
             onOpenSection: () => _openSection(
@@ -467,9 +493,7 @@ class _HomePageState extends State<HomePage> {
         final english = context.read<AppState>().english;
         NoorToast.show(
           context,
-          english
-              ? 'A playable Stremio entry was not found for this title.'
-              : 'لم يُعثر على عنوان قابل للتشغيل لهذا العمل.',
+          NovaStrings.lookup(english, 'message117'),
           error: true,
         );
         return;
@@ -548,7 +572,7 @@ class _ServiceMessage extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: HorseTheme.surface,
+            color: NovaTheme.of(context).surface,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Center(
@@ -556,17 +580,15 @@ class _ServiceMessage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  english
-                      ? 'Could not load the catalog'
-                      : 'تعذر تحميل الكتالوج',
+                  NovaStrings.lookup(english, 'message118'),
                   style: Theme.of(context).textTheme.titleMedium,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.refresh),
-                  label: Text(english ? 'Try again' : 'إعادة المحاولة'),
+                  icon: const Icon(LucideIcons.refreshCw),
+                  label: Text(NovaStrings.lookup(english, 'retry')),
                 ),
               ],
             ),

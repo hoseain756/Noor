@@ -1,16 +1,18 @@
-import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
 import '../../core/theme/system_bars.dart';
 import '../../shared/widgets/glass_navigation.dart';
+import '../../shared/widgets/nova_parental_gate.dart';
 import '../anime/anime_page.dart';
 import '../calendar/calendar_page.dart';
 import '../catalog/catalog_browser_page.dart';
+import '../downloads/downloads_page.dart';
 import '../home/home_page.dart';
 import '../kids/kids_page.dart';
 import '../library/library_page.dart';
@@ -25,24 +27,17 @@ import 'search_sheet.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
-
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
   int _selected = 0;
+  final Set<int> _visited = {0};
   bool _chromeVisible = true;
+  bool _checkingGate = false;
+  bool _changingTab = false;
   double _scrollDelta = 0;
-  bool _tabletNavVisible = false;
-
-  // Task 136 (perf): the five kept-alive pages used to be rebuilt from
-  // scratch on EVERY shell setState — including the scroll auto-hide toggles
-  // that fire repeatedly while the user scrolls — and the IndexedStack then
-  // RELAID OUT all five subtrees on every such pass. The page instances now
-  // live in State fields built once (Home is the only page with an input,
-  // and its instance is swapped only when its `active` flag actually flips),
-  // so chrome toggles no longer touch any page's element tree.
   late final Widget _animePage =
       const SafeArea(bottom: false, child: AnimePage());
   late final Widget _kidsPage =
@@ -50,13 +45,19 @@ class _MainShellState extends State<MainShell> {
   late final Widget _libraryPage =
       const SafeArea(bottom: false, child: LibraryPage());
   late final Widget _settingsPage = SafeArea(
-    bottom: false,
-    child: SettingsPage(onOpenLibrary: () => _selectTab(3)),
-  );
-  // Home is intentionally UNWRAPPED by a SafeArea: its featured hero extends
-  // behind the transparent status bar (Task 119) and the page adds its own
-  // `safeTop` padding where content must stay clear of the icons.
+      bottom: false,
+      child: SettingsPage(onOpenLibrary: () => unawaited(_selectTab(3))));
   HomePage _homePage = const HomePage();
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = context.read<AppState>().kidsSession ? 2 : 0;
+    _visited
+      ..clear()
+      ..add(_selected);
+    _homePage = HomePage(active: _selected == 0);
+  }
 
   Widget _pageAt(int index) => switch (index) {
         0 => _homePage,
@@ -66,56 +67,70 @@ class _MainShellState extends State<MainShell> {
         _ => _settingsPage,
       };
 
-  void _selectTab(int index) {
+  Future<bool> _mayLeaveKids() async {
+    if (_selected != 2) return true;
+    if (_checkingGate) return false;
+    _checkingGate = true;
+    try {
+      return await NovaParentalGate.verify(context);
+    } finally {
+      _checkingGate = false;
+    }
+  }
+
+  Future<void> _selectTab(int index) async {
     if (index == _selected) {
       if (!_chromeVisible) setState(() => _chromeVisible = true);
       return;
     }
-    final homeActiveFlips = (index == 0) != _homePage.active;
-    setState(() {
-      _selected = index;
-      _chromeVisible = true;
-      _scrollDelta = 0;
-      if (homeActiveFlips) _homePage = HomePage(active: index == 0);
-    });
+    if (_changingTab) return;
+    _changingTab = true;
+    try {
+      if (!await _mayLeaveKids() || !mounted) return;
+      if (index == 2 && !await NovaParentalGate.ensureConfigured(context))
+        return;
+      if (!mounted) return;
+      await context.read<AppState>().setKidsSession(index == 2);
+      if (!mounted) return;
+      setState(() {
+        _selected = index;
+        _visited.add(index);
+        _chromeVisible = true;
+        _scrollDelta = 0;
+        if ((index == 0) != _homePage.active)
+          _homePage = HomePage(active: index == 0);
+      });
+    } finally {
+      _changingTab = false;
+    }
   }
 
-  /// Scroll auto-hide for the shared chrome (search button + glass dock).
-  ///
-  /// This shell-level NotificationListener already observes every page's
-  /// primary scrollable (the pages are the IndexedStack children), which is
-  /// the per-page `GlassDockScrollHide` wiring done once; the resulting flag
-  /// is fed to `GlassDock.hidden`, which owns its own hide animation. The
-  /// `dockAutoHide` web setting is honored here, exactly as before.
-  bool _onScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (notification is! ScrollUpdateNotification) return false;
-    if (context.read<AppState>().webSettings['dockAutoHide'] == false) {
+  bool _onScroll(ScrollNotification event) {
+    if (event.depth > 0 ||
+        event.metrics.axis != Axis.vertical ||
+        event is! ScrollUpdateNotification) return false;
+    final app = context.read<AppState>();
+    if (_selected == 2 ||
+        app.webSettings['dockAutoHide'] == false ||
+        MediaQuery.sizeOf(context).width >= 840 ||
+        MediaQuery.accessibleNavigationOf(context)) {
+      if (!_chromeVisible) setState(() => _chromeVisible = true);
+      return false;
+    }
+    if (event.metrics.pixels <= event.metrics.minScrollExtent + 24) {
       _scrollDelta = 0;
       if (!_chromeVisible) setState(() => _chromeVisible = true);
       return false;
     }
-
-    if (notification.metrics.pixels <=
-        notification.metrics.minScrollExtent + 1) {
+    final delta = event.scrollDelta ?? 0;
+    _scrollDelta =
+        delta.sign == _scrollDelta.sign ? _scrollDelta + delta : delta;
+    if (_scrollDelta >= 40 && _chromeVisible) {
+      setState(() => _chromeVisible = false);
       _scrollDelta = 0;
-      if (!_chromeVisible) setState(() => _chromeVisible = true);
-      return false;
-    }
-
-    final delta = notification.scrollDelta ?? 0;
-    if (delta > 0) {
-      _scrollDelta = _scrollDelta > 0 ? _scrollDelta + delta : delta;
-      if (_scrollDelta >= 10 && _chromeVisible) {
-        setState(() => _chromeVisible = false);
-        _scrollDelta = 0;
-      }
-    } else if (delta < 0) {
-      _scrollDelta = _scrollDelta < 0 ? _scrollDelta + delta : delta;
-      if (_scrollDelta <= -8 && !_chromeVisible) {
-        setState(() => _chromeVisible = true);
-        _scrollDelta = 0;
-      }
+    } else if (_scrollDelta <= -16 && !_chromeVisible) {
+      setState(() => _chromeVisible = true);
+      _scrollDelta = 0;
     }
     return false;
   }
@@ -124,338 +139,221 @@ class _MainShellState extends State<MainShell> {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        backgroundColor: HorseTheme.surface,
+        constraints: const BoxConstraints(maxWidth: 1100),
         builder: (_) => const SearchSheet(),
       );
 
-  void _openSecondary(Widget page) {
-    setState(() => _tabletNavVisible = false);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  Future<void> _openSecondary(Widget page) async {
+    if (!await _mayLeaveKids() || !mounted) return;
+    if (_selected == 2) {
+      await context.read<AppState>().setKidsSession(false);
+      if (!mounted) return;
+      setState(() {
+        _selected = 0;
+        _visited.add(0);
+        _homePage = const HomePage();
+      });
+    }
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
   @override
   Widget build(BuildContext context) {
-    // Task 122-b (F5): the shell read exactly ONE AppState field — the UI
-    // language — yet `watch` rebuilt the whole shell (and its IndexedStack
-    // of 5 kept-alive tabs) on every notification. Selecting the flag alone
-    // keeps identical output while unrelated notifies skip the shell.
     final english = context.select<AppState, bool>((app) => app.english);
-    final size = MediaQuery.sizeOf(context);
-    // EDGE-TO-EEDGE (user mandate, Task 119): the shell no longer pads EVERY
-    // page away from the status bar. The stack itself is full-bleed so the
-    // page canvas (and the Home hero's artwork) draws behind the fully
-    // transparent system bars. Only the floating chrome and the four
-    // non-home pages carry an explicit status-bar inset (`safeTop`), while
-    // HomePage handles its own safe area internally so its featured hero
-    // bleeds to y=0.
-    final safeTop = MediaQuery.paddingOf(context).top;
-    // RESPONSIVE DECISION (Task 107-d): Noor already ships a distinct tablet
-    // layout at ≥840px (hamburger → slide-in side panel with every primary
-    // tab + secondary page). That panel plays the role the web dock's
-    // ≥1024px side rail plays, so the glass dock mounts on PHONE widths only
-    // (<840) — Noor's own breakpoint convention — and the tablet navigation
-    // is untouched.
-    final tabletLayout = size.width >= 840;
-    final dockTabs = noorDockTabsFor(
-      // The Anime tab is PERMANENT (user mandate, Task 111): no filter drops
-      // it. `hideContent.anime` only filters anime content rows on pages.
-      // `kidsMode` is a dormant web-sync flag with no mobile behavior, so the
-      // kids tab filter and kidsZoom are intentionally not wired.
-      rtl: !english,
-    );
-    final dockActiveId = noorDockTabIdForIndex(_selected);
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
-    // Task 136 (perf): kept-alive pages via per-child Offstage + TickerMode
-    // instead of an IndexedStack. Identical state preservation, but:
-    //  - Offstage SKIPS layout+paint of hidden pages (IndexedStack always
-    //    laid out every child on every pass);
-    //  - TickerMode MUTES hidden pages' animation tickers (a shimmer skeleton
-    //    left behind in a hidden page no longer animates forever — it used to
-    //    burn CPU every frame even off-screen);
-    //  - the page instances are stable State fields (above), so this build
-    //    touches nothing inside any page.
-    final pages = [
-      for (var i = 0; i < 5; i++)
-        TickerMode(
-          enabled: _selected == i,
-          child: Offstage(offstage: _selected != i, child: _pageAt(i)),
-        ),
-    ];
-
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      // Re-assert the transparent system bars whenever the shell is visible
-      // — the player's immersive mode rewrites the global overlay style, and
-      // this restores the edge-to-edge glass look on return (main.dart only
-      // runs once per launch). Icon brightness derives from the LIVE theme
-      // brightness, so the clock/battery/signal stay readable if a light
-      // theme ever ships (dark canvas today → light icons).
-      value: noorSystemBarOverlayStyle(Theme.of(context).brightness),
-      child: Scaffold(
-        // Full-bleed body — no shell SafeArea. Pages own their insets.
-        body: Stack(
-          children: [
+    final reduceSetting = context.select<AppState, bool>(
+        (app) => app.webSettings['reduceMotion'] == true);
+    final reduceTransparency = context.select<AppState, bool>(
+        (app) => app.webSettings['reduceTransparency'] == true);
+    final tablet = MediaQuery.sizeOf(context).width >= 840;
+    final reduce = MediaQuery.disableAnimationsOf(context) || reduceSetting;
+    final duration = reduce ? Duration.zero : const Duration(milliseconds: 220);
+    final app = context.read<AppState>();
+    final pages = Stack(children: [
+      // A tab's API calls and state are created only on its first visit.
+      for (final i in _visited)
+        Positioned.fill(
+            key: ValueKey(i),
+            child: TickerMode(
+                enabled: _selected == i,
+                child: Offstage(offstage: _selected != i, child: _pageAt(i)))),
+    ]);
+    return PopScope(
+      canPop: _selected != 2,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _selected == 2) unawaited(_selectTab(0));
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: noorSystemBarOverlayStyle(Theme.of(context).brightness),
+        child: Scaffold(
+            body: Row(children: [
+          if (tablet)
+            _TabletNavigation(
+                selected: _selected,
+                onTabSelected: (i) => unawaited(_selectTab(i)),
+                onPageSelected: (page) => unawaited(_openSecondary(page)),
+                onSearch: _selected == 2 ? null : _openSearch),
+          Expanded(
+              child: Stack(children: [
             Positioned.fill(
-              child: Center(
-                child: SizedBox(
-                  width: math.min(size.width, 1600),
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: _onScroll,
-                    child: Stack(children: pages),
-                  ),
-                ),
-              ),
-            ),
-            if (_selected != 4)
-              Positioned(
-                // User mandate (Task 115): the glass search button sits at
-                // the PHYSICAL top-right in both locales; on tablets it
-                // clears the hamburger button (right: 16, 48px wide).
-                // Task 119: `safeTop` keeps it clear of the status icons
-                // now that the stack is no longer inside a SafeArea.
-                right: tabletLayout ? 76 : 16,
-                top: safeTop + 12,
-                child: IgnorePointer(
-                  ignoring: !_chromeVisible,
-                  child: AnimatedSlide(
-                    offset:
-                        _chromeVisible ? Offset.zero : const Offset(0, -1.25),
-                    duration: duration,
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: _chromeVisible ? 1 : 0,
-                      duration: duration,
-                      child: GlassSearchButton(
-                        tooltip: english ? 'Search' : 'بحث',
-                        onPressed: _openSearch,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (tabletLayout)
-              Positioned(
-                top: safeTop + 12,
-                right: 16,
-                child: Material(
-                  color: HorseTheme.surface.withValues(alpha: .94),
-                  shape: const CircleBorder(
-                      side: BorderSide(color: HorseTheme.line)),
-                  child: IconButton(
-                    tooltip: english ? 'Open navigation' : 'فتح التنقل',
-                    onPressed: () =>
-                        setState(() => _tabletNavVisible = !_tabletNavVisible),
-                    icon: Icon(_tabletNavVisible
-                        ? Icons.close_rounded
-                        : Icons.menu_rounded),
-                  ),
-                ),
-              ),
-            if (!tabletLayout)
-              // The glass dock (Harbor web port): one sliding pill, scrub
-              // gesture, size ladder, safe area and its own hidden animation
-              // — so it is NOT wrapped in another AnimatedSlide/Opacity pair.
-              // Player/detail pages are pushed as full routes on top of the
-              // shell, which unmounts the dock (the web `showChrome` rule).
+                child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll, child: pages)),
+            if (!tablet && _selected == 0)
               PositionedDirectional(
-                start: 0,
-                end: 0,
-                bottom: 0,
-                child: GlassDock(
-                  tabs: dockTabs,
-                  activeId: dockActiveId,
-                  onTabSelected: (DockTab tab) =>
-                      _selectTab(noorDockIndexForTabId(tab.view)),
-                  languageCode: english ? 'en' : 'ar',
-                  hidden: !_chromeVisible,
-                ),
-              ),
-            if (tabletLayout && _tabletNavVisible) ...[
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => setState(() => _tabletNavVisible = false),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: .42)),
-                ),
-              ),
-              AnimatedPositionedDirectional(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                start: 12,
-                top: safeTop + 68,
-                bottom: 12,
-                width: 286,
-                child: _TabletNavigation(
-                  selected: _selected,
-                  english: english,
-                  onClose: () => setState(() => _tabletNavVisible = false),
-                  onTabSelected: _selectTab,
-                  onPageSelected: _openSecondary,
-                ),
-              ),
-            ],
-          ],
-        ),
+                  end: 20,
+                  top: MediaQuery.paddingOf(context).top + 12,
+                  child: IgnorePointer(
+                      ignoring: !_chromeVisible,
+                      child: AnimatedOpacity(
+                          opacity: _chromeVisible ? 1 : 0,
+                          duration: duration,
+                          child: GlassSearchButton(
+                              tooltip: app.tr('message679'),
+                              onPressed: _openSearch)))),
+            if (!tablet)
+              PositionedDirectional(
+                  start: 0,
+                  end: 0,
+                  bottom: 0,
+                  child: GlassDock(
+                      tabs: noorDockTabsFor(rtl: !english),
+                      activeId: noorDockTabIdForIndex(_selected),
+                      onTabSelected: (DockTab tab) => unawaited(
+                          _selectTab(noorDockIndexForTabId(tab.view))),
+                      languageCode: english ? 'en' : 'ar',
+                      hidden: !_chromeVisible,
+                      reduceMotion: reduce,
+                      reduceTransparency: reduceTransparency)),
+          ])),
+        ])),
       ),
     );
   }
 }
 
 class _TabletNavigation extends StatelessWidget {
-  const _TabletNavigation({
-    required this.selected,
-    required this.english,
-    required this.onClose,
-    required this.onTabSelected,
-    required this.onPageSelected,
-  });
-
+  const _TabletNavigation(
+      {required this.selected,
+      required this.onTabSelected,
+      required this.onPageSelected,
+      required this.onSearch});
   final int selected;
-  final bool english;
-  final VoidCallback onClose;
   final ValueChanged<int> onTabSelected;
   final ValueChanged<Widget> onPageSelected;
+  final VoidCallback? onSearch;
 
   @override
   Widget build(BuildContext context) {
-    final primary = english
-        ? const ['Home', 'Anime', 'Kids', 'My Library', 'Settings']
-        : const ['الرئيسية', 'أنمي', 'الأطفال', 'مكتبتي', 'الإعدادات'];
+    final app = context.read<AppState>();
+    final theme = Theme.of(context);
+    final expanded = MediaQuery.sizeOf(context).width >= 1200;
+    final tabs = noorDockTabsFor(rtl: !app.english);
     final secondary = <(IconData, String, Widget)>[
       (
-        Icons.explore_outlined,
-        english ? 'Discover' : 'اكتشف',
+        LucideIcons.compass,
+        app.tr('message576'),
         const CatalogBrowserPage(mode: CatalogBrowseMode.discover)
       ),
       (
-        Icons.movie_outlined,
-        english ? 'Movies' : 'الأفلام',
+        LucideIcons.film,
+        app.tr('message577'),
         const CatalogBrowserPage(mode: CatalogBrowseMode.movies)
       ),
       (
-        Icons.tv_outlined,
-        english ? 'Series' : 'المسلسلات',
+        LucideIcons.tv,
+        app.tr('message578'),
         const CatalogBrowserPage(mode: CatalogBrowseMode.shows)
       ),
       (
-        Icons.grid_view_rounded,
-        english ? 'Add-on catalogs' : 'كتالوجات الإضافات',
+        LucideIcons.layoutGrid,
+        app.tr('message680'),
         const CatalogBrowserPage(mode: CatalogBrowseMode.catalogs)
       ),
+      (LucideIcons.radio, app.tr('message658'), const LiveTvPage()),
+      (LucideIcons.calendarDays, app.tr('message565'), const CalendarPage()),
+      (LucideIcons.download, app.tr('downloads'), const DownloadsPage()),
       (
-        Icons.live_tv_outlined,
-        english ? 'Live TV' : 'البث المباشر',
-        const LiveTvPage()
-      ),
-      (
-        Icons.calendar_month_outlined,
-        english ? 'Calendar' : 'التقويم',
-        const CalendarPage()
-      ),
-      (
-        Icons.query_stats_rounded,
-        english ? 'Viewing statistics' : 'إحصائيات المشاهدة',
+        LucideIcons.chartNoAxesCombined,
+        app.tr('message681'),
         const StatsPage()
       ),
-      (
-        Icons.extension_outlined,
-        english ? 'Add-ons' : 'الإضافات',
-        const AddonsPage()
-      ),
+      (LucideIcons.puzzle, app.tr('message220'), const AddonsPage()),
     ];
-    const icons = [
-      Icons.home_rounded,
-      Icons.auto_awesome_rounded,
-      Icons.child_care_rounded,
-      Icons.video_library_rounded,
-      Icons.settings_rounded,
-    ];
-    return Material(
-      elevation: 16,
-      color: HorseTheme.surface,
-      borderRadius: BorderRadius.circular(24),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(18, 12, 8, 12),
-            child: Row(
-              children: [
-                const Icon(Icons.brightness_7_rounded, color: HorseTheme.gold),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Text('Noor',
-                        style: Theme.of(context).textTheme.titleLarge)),
-                IconButton(
-                    tooltip: english ? 'Close navigation' : 'إغلاق التنقل',
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded)),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(10),
-              children: [
-                for (var index = 0; index < primary.length; index++)
-                  _NavigationItem(
-                    icon: icons[index],
-                    label: primary[index],
-                    selected: selected == index,
-                    onTap: () => onTabSelected(index),
-                  ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(14, 18, 14, 8),
-                  child: Text(english ? 'MORE' : 'المزيد',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: HorseTheme.muted, letterSpacing: 1.1)),
-                ),
-                for (final item in secondary)
-                  _NavigationItem(
-                    icon: item.$1,
-                    label: item.$2,
-                    selected: false,
-                    onTap: () => onPageSelected(item.$3),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    Widget destination(
+            IconData icon, String label, bool active, VoidCallback tap) =>
+        Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(12, 4, 12, 4),
+          child: Tooltip(
+              message: label,
+              child: Semantics(
+                  selected: active,
+                  child: Material(
+                      color: active
+                          ? theme.colorScheme.primaryContainer
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: tap,
+                        child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: expanded
+                                ? Row(children: [
+                                    Icon(icon,
+                                        size: 22,
+                                        color: active
+                                            ? theme
+                                                .colorScheme.onPrimaryContainer
+                                            : theme
+                                                .colorScheme.onSurfaceVariant),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                        child: Text(label,
+                                            style: theme.textTheme.labelLarge))
+                                  ])
+                                : Icon(icon,
+                                    size: 24,
+                                    color: active
+                                        ? theme.colorScheme.onPrimaryContainer
+                                        : theme.colorScheme.onSurfaceVariant)),
+                      )))),
+        );
+    return SizedBox(
+        width: expanded ? 240 : 84,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerLow,
+              border: BorderDirectional(
+                  end: BorderSide(
+                      color: theme.colorScheme.outlineVariant
+                          .withValues(alpha: .45)))),
+          child: SafeArea(
+              child: ListView(children: [
+            Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(16, 24, 16, 24),
+                child: Image.asset(
+                    'assets/brand/android/play_store/no_background_red_512.png',
+                    height: 32,
+                    errorBuilder: (_, __, ___) => Text(expanded ? 'NOVA' : 'N',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: theme.colorScheme.secondary)))),
+            if (onSearch != null)
+              destination(
+                  LucideIcons.search, app.tr('message679'), false, onSearch!),
+            for (final tab in tabs)
+              destination(
+                  tab.iconOutline,
+                  tab.label(arabic: !app.english),
+                  noorDockIndexForTabId(tab.view) == selected,
+                  () => onTabSelected(noorDockIndexForTabId(tab.view))),
+            const Padding(padding: EdgeInsets.all(16), child: Divider()),
+            for (final item in secondary)
+              destination(
+                  item.$1, item.$2, false, () => onPageSelected(item.$3)),
+            const SizedBox(height: 24),
+          ])),
+        ));
   }
-}
-
-class _NavigationItem extends StatelessWidget {
-  const _NavigationItem(
-      {required this.icon,
-      required this.label,
-      required this.selected,
-      required this.onTap});
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: ListTile(
-          minLeadingWidth: 28,
-          minTileHeight: 48,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          selected: selected,
-          selectedTileColor: HorseTheme.gold.withValues(alpha: .15),
-          leading:
-              Icon(icon, color: selected ? HorseTheme.gold : HorseTheme.muted),
-          title: Text(label,
-              style: TextStyle(
-                  color: selected ? HorseTheme.gold : HorseTheme.ink,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
-          onTap: onTap,
-        ),
-      );
 }

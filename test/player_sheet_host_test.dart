@@ -25,16 +25,19 @@ void main() {
     bool refreshing = false,
     VoidCallback? onClose,
     EdgeInsets padding = EdgeInsets.zero,
+    TextDirection direction = TextDirection.ltr,
   }) {
     // Mirror the page's real overlay: right-half Positioned inside a Stack.
     // [padding] simulates the system MediaQuery the panel would see on a real
     // device (e.g. a landscape camera cutout reported on one display edge).
     return MaterialApp(
+      builder: (context, child) =>
+          Directionality(textDirection: direction, child: child!),
       home: Scaffold(
         body: Stack(
           children: [
-            Positioned(
-              right: 0,
+            PositionedDirectional(
+              end: 0,
               top: 0,
               bottom: 0,
               width: playerPanelWidth(888),
@@ -66,24 +69,22 @@ void main() {
 
   Finder headerButton(String label) => find.bySemanticsLabel(label);
 
-  testWidgets('panel width is exactly HALF the landscape screen',
+  testWidgets('panel width adapts and stays bounded for readability',
       (tester) async {
-    // 888 / 2 = 444 — the user mandate ("نصف الشاشة الأيمن كاملاً").
-    expect(playerPanelWidth(888), 444.0);
-    // Narrow phones never go below 300dp; tablets never past 640dp.
-    expect(playerPanelWidth(560), 300.0);
-    expect(playerPanelWidth(1400), 640.0);
+    expect(playerPanelWidth(888), closeTo(426.24, .01));
+    expect(playerPanelWidth(560), 360.0);
+    expect(playerPanelWidth(1400), 560.0);
   });
 
-  testWidgets('panel occupies the RIGHT half, full height', (tester) async {
+  testWidgets('landscape panel occupies the logical end, full height',
+      (tester) async {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
     final box = tester.getRect(find.byType(PlayerSidePanel));
-    // Full height, right half: x spans [444, 888].
     expect(box.top, 0);
     expect(box.bottom, 412);
-    expect(box.left, 444);
+    expect(box.left, closeTo(888 - playerPanelWidth(888), .01));
     expect(box.right, 888);
   });
 
@@ -91,12 +92,11 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    // <520 dp height ⇒ titleMedium + tighter paddings (no overflow errors —
     // pumpAndSettle above would have thrown on a RenderFlex overflow).
     final title = tester.widget<Text>(find.text('Panel'));
     expect(
       title.style,
-      Theme.of(tester.element(find.text('Panel'))).textTheme.titleMedium,
+      Theme.of(tester.element(find.text('Panel'))).textTheme.titleLarge,
     );
   });
 
@@ -168,13 +168,11 @@ void main() {
       );
 
   testWidgets(
-      'Task 140: content stretches FLUSH to the mid-screen edge — a '
+      'NOVA inner gutter ignores opposite-edge cutouts — a '
       'landscape camera cutout reported on the display\'s LEFT side never '
       'opens a phantom dead strip inside the panel', (tester) async {
     final semantics = tester.ensureSemantics();
     // SM-A217F-class rotation: the punch-hole cutout shows up as the
-    // SCREEN's left padding. The panel's left edge is MID-SCREEN, so that
-    // inset must be dropped (user mandate: "لا أريد أن تتواجد فراغات").
     // The old SafeArea chrome would have pushed content ~40dp+18dp inward.
     await tester.pumpWidget(
       host(padding: const EdgeInsets.only(left: 40)),
@@ -182,33 +180,43 @@ void main() {
     await tester.pumpAndSettle();
 
     final panel = tester.getRect(find.byType(PlayerSidePanel));
-    expect(panel.left, 444);
+    expect(panel.left, closeTo(888 - playerPanelWidth(888), .01));
 
-    // Body rows AND header icons start exactly at the mid-screen edge and
-    // run to the glass edge (no right inset reported in this rotation).
     final row = tester.getRect(bodyRow('Row 0'));
-    expect(row.left, 444);
-    expect(row.right, 888);
+    expect(row.left, closeTo(888 - playerPanelWidth(888) + 24, .01));
+    expect(row.right, 888 - 24);
 
     final close = tester.getRect(headerButton('Close'));
-    expect(close.right, 888);
+    expect(close.right, 888 - 24);
     semantics.dispose();
   });
 
   testWidgets(
       'Task 140: real screen-edge insets are still honored — with the '
       'camera on the RIGHT the content avoids the punch hole, while the '
-      'mid-screen edge stays flush', (tester) async {
+      'inner edge keeps its design gutter', (tester) async {
     await tester.pumpWidget(
       host(padding: const EdgeInsets.only(left: 40, right: 36)),
     );
     await tester.pumpAndSettle();
 
-    // LEFT: always flush (mid-screen edge — never inset, cutout or not).
     final row = tester.getRect(bodyRow('Row 0'));
-    expect(row.left, 444);
-    // RIGHT: the panel's real screen edge keeps its system inset so no
+    expect(row.left, closeTo(888 - playerPanelWidth(888) + 24, .01));
     // content ever sits under the physical camera hole in this rotation.
-    expect(row.right, 888 - 36);
+    expect(row.right, 888 - 36 - 24);
+  });
+
+  testWidgets('RTL panel honors the actual left screen cutout only',
+      (tester) async {
+    await tester.pumpWidget(host(
+        direction: TextDirection.rtl,
+        padding: const EdgeInsets.only(left: 40, right: 36)));
+    await tester.pumpAndSettle();
+    final panel = tester.getRect(find.byType(PlayerSidePanel));
+    final row = tester.getRect(bodyRow('Row 0'));
+    expect(panel.left, 0);
+    expect(row.left, 64);
+    expect(row.right, closeTo(playerPanelWidth(888) - 24, .01));
+    expect(tester.takeException(), isNull);
   });
 }

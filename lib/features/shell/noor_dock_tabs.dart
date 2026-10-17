@@ -23,6 +23,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'dock_tab.dart';
 import 'glass_dock.dart';
@@ -36,29 +37,22 @@ const List<DockTab> kNoorDockTabs = [
     view: 'library',
     labelEn: 'My Library',
     labelAr: 'مكتبتي',
-    iconOutline: Icons.video_library_outlined,
-    iconFilled: Icons.video_library,
+    iconOutline: LucideIcons.library,
+    iconFilled: LucideIcons.library,
   ),
 ];
 
 /// On-screen order, left → right: Settings | Library | Kids | Anime | Home.
 const List<String> kNoorDockOrderLtr = [
-  DockTab.settingsId,
-  'library',
-  DockTab.kidsId,
-  DockTab.animeId,
   DockTab.homeId,
+  DockTab.animeId,
+  DockTab.kidsId,
+  'library',
+  DockTab.settingsId,
 ];
 
-/// Same visual order for RTL rows (a Row under RTL `Directionality` lays its
-/// array out right → left).
-const List<String> kNoorDockOrderRtl = [
-  DockTab.homeId,
-  DockTab.animeId,
-  DockTab.kidsId,
-  'library',
-  DockTab.settingsId,
-];
+// Logical order remains stable; Directionality mirrors the actual layout.
+const List<String> kNoorDockOrderRtl = kNoorDockOrderLtr;
 
 /// Builds Noor's dock tabs: explicit per-direction order. The Anime tab is
 /// permanent (user mandate, Task 111) — no filter ever drops it. Never
@@ -66,7 +60,10 @@ const List<String> kNoorDockOrderRtl = [
 List<DockTab> noorDockTabsFor({required bool rtl}) {
   final byId = {for (final tab in kNoorDockTabs) tab.id: tab};
   final order = rtl ? kNoorDockOrderRtl : kNoorDockOrderLtr;
-  return [for (final id in order) if (byId[id] != null) byId[id]!];
+  return [
+    for (final id in order)
+      if (byId[id] != null) byId[id]!
+  ];
 }
 
 /// MainShell `_selected` index → dock tab id (IndexedStack order: home, anime,

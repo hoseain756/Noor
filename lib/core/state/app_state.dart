@@ -1,9 +1,12 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:ui' show PlatformDispatcher, Locale;
+import '../../l10n/nova_strings.dart';
 
 import '../api/noor_api.dart';
 import '../data/catalog_repository.dart';
@@ -24,7 +27,12 @@ class AppState extends ChangeNotifier {
   /// Mobile-only keys extend it where native playback has additional controls.
   static final Map<String, dynamic> defaultSettings = {
     'profileId': 'default', 'region': 'US',
-    'preferredLanguages': <String>['English'], 'uiLanguage': 'ar',
+    'preferredLanguages': <String>['English'], 'uiLanguage': 'system',
+    'themeMode': 'dark', 'reduceMotion': false, 'reduceTransparency': false,
+    'traktScrobbling': true, 'simklScrobbling': true,
+    'traktWatchlistSync': true, 'anilistWatchlistSync': true,
+    'malWatchlistSync': true,
+    'anilistProgressSync': true, 'malProgressSync': true,
     'contentLanguage': 'ar',
     'homeMode': 'harbor', 'homeShowAllAddonRows': false,
     'hideWatchedInCatalogs': false, 'tmdbKey': '',
@@ -80,7 +88,20 @@ class AppState extends ChangeNotifier {
   final NoorSyncService sync = NoorSyncService.instance;
   SharedPreferences? _preferences;
   bool initialized = false;
-  bool english = false;
+  bool english = PlatformDispatcher.instance.locale.languageCode != 'ar';
+  bool kidsSession = false;
+
+  Future<void> setKidsSession(bool value) async {
+    kidsSession = value;
+    await _preferences?.setBool('nova.kids.active', value);
+    notifyListeners();
+  }
+
+  String tr(String key, [Map<String, Object?> args = const {}]) =>
+      NovaStrings(english ? const Locale('en') : const Locale('ar'))
+          .text(key, args);
+
+  String t(String en, String ar) => english ? en : ar;
 
   /// Accountless identity: UUID v4 generated once, persisted in secure
   /// storage, and used as the sync key (there is no user account).
@@ -169,9 +190,13 @@ class AppState extends ChangeNotifier {
   Future<void> initialize() async {
     await api.initialize();
     _preferences = await SharedPreferences.getInstance();
+    kidsSession = _preferences!.getBool('nova.kids.active') ?? false;
     final savedEnglish = _preferences!.getBool('horse.mobile.english');
-    english = savedEnglish ?? false;
+    english =
+        savedEnglish ?? PlatformDispatcher.instance.locale.languageCode != 'ar';
     final savedSettings = _preferences!.getString(settingsStorageKey);
+    if (savedSettings == null)
+      webSettings['contentLanguage'] = english ? 'en' : 'ar';
     if (savedSettings != null) {
       try {
         final decoded = jsonDecode(savedSettings);
@@ -202,8 +227,10 @@ class AppState extends ChangeNotifier {
     // write or sync push can serialize them again.
     webSettings = {...webSettings, 'tmdbKey': '', 'tmdbUserKey': ''};
     await _persistSettings();
-    if (savedEnglish == null) english = webSettings['uiLanguage'] == 'en';
-    webSettings['uiLanguage'] = english ? 'en' : 'ar';
+    if (savedEnglish == null && webSettings['uiLanguage'] != 'system') {
+      english = webSettings['uiLanguage'] == 'en';
+    }
+    webSettings['uiLanguage'] = (english ? 'en' : 'ar');
     linkedServices = _decodeMap(
       _preferences!.getString('horse.mobile.linked-services'),
     );
@@ -260,7 +287,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> setLanguage(bool useEnglish) async {
     english = useEnglish;
-    webSettings['uiLanguage'] = useEnglish ? 'en' : 'ar';
+    webSettings['uiLanguage'] = (useEnglish ? 'en' : 'ar');
     // Task 122-b perf fix: flip the locale FIRST so the MaterialApp repaints
     // immediately (Task 118 pattern); the persisted values are unchanged —
     // prefs bool + settings bucket + the settings sync push.
@@ -731,6 +758,21 @@ class AppState extends ChangeNotifier {
     await _saveAddons();
   }
 
+  Future<void> reorderAddons(int oldIndex, int newIndex) async {
+    final ordered = [...addons]..sort((a, b) => a.order.compareTo(b.order));
+    if (oldIndex < 0 ||
+        oldIndex >= ordered.length ||
+        newIndex < 0 ||
+        newIndex > ordered.length) return;
+    if (newIndex > oldIndex) newIndex--;
+    final moved = ordered.removeAt(oldIndex);
+    ordered.insert(newIndex, moved);
+    addons = [
+      for (var i = 0; i < ordered.length; i++) ordered[i].copyWith(order: i)
+    ];
+    await _saveAddons();
+  }
+
   Future<void> setAddonEnabled(String id, bool enabled) async {
     addons = addons
         .map(
@@ -750,6 +792,7 @@ class AppState extends ChangeNotifier {
     // POST /sync/watchlist[//remove]). Best-effort push: only imdb-id items
     // map to Trakt, and a failure never disturbs the local library.
     if (linkedServices['trakt']?['linked'] == true &&
+        webSettings['traktWatchlistSync'] != false &&
         item.id.startsWith('tt')) {
       unawaited(
         api.pushTraktWatchlist(type: item.type, imdb: item.id, add: adding),
@@ -759,13 +802,17 @@ class AppState extends ChangeNotifier {
     // for anything carrying a provider id. Each integration pushes on its
     // own; removal only ever deletes pure planning rows provider-side.
     final anilistId = item.anilistId;
-    if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
+    if (anilistId != null &&
+        linkedServices['anilist']?['linked'] == true &&
+        webSettings['anilistWatchlistSync'] != false) {
       unawaited(
         api.pushAniListWatchlist(mediaId: anilistId, add: adding),
       );
     }
     final malId = item.idMal;
-    if (malId != null && linkedServices['mal']?['linked'] == true) {
+    if (malId != null &&
+        linkedServices['mal']?['linked'] == true &&
+        webSettings['malWatchlistSync'] != false) {
       unawaited(api.pushMalWatchlist(malId: malId, add: adding));
     }
   }
@@ -1007,7 +1054,9 @@ class AppState extends ChangeNotifier {
     if (!isMovie && episode == null) return;
     if (isMovie && !finished) return;
     final anilistId = item.anilistId;
-    if (anilistId != null && linkedServices['anilist']?['linked'] == true) {
+    if (anilistId != null &&
+        linkedServices['anilist']?['linked'] == true &&
+        webSettings['anilistProgressSync'] != false) {
       unawaited(
         api.pushAniListProgress(
           mediaId: anilistId,
@@ -1017,7 +1066,9 @@ class AppState extends ChangeNotifier {
       );
     }
     final malId = item.idMal;
-    if (malId != null && linkedServices['mal']?['linked'] == true) {
+    if (malId != null &&
+        linkedServices['mal']?['linked'] == true &&
+        webSettings['malProgressSync'] != false) {
       unawaited(
         api.pushMalProgress(
           malId: malId,
@@ -1222,7 +1273,7 @@ class AppState extends ChangeNotifier {
         return {
           'settings': {
             ..._settingsWithoutSecrets(),
-            'uiLanguage': english ? 'en' : 'ar',
+            'uiLanguage': (english ? 'en' : 'ar'),
           },
         };
       case NoorSyncService.bucketAddons:

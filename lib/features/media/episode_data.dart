@@ -23,8 +23,9 @@ class EpisodeProgress {
   final int positionMs;
   final int durationMs;
 
-  double get progress =>
-      durationMs > 0 ? (positionMs / durationMs).clamp(0.0, 1.0).toDouble() : 0.0;
+  double get progress => durationMs > 0
+      ? (positionMs / durationMs).clamp(0.0, 1.0).toDouble()
+      : 0.0;
 }
 
 /// Canonical episode order: season ascending, then episode ascending.
@@ -51,7 +52,8 @@ Map<String, EpisodeProgress> episodeProgressMap({
   required List<WatchHistoryEntry> entries,
   String? itemId,
 }) {
-  final ordered = [...entries]..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
+  final ordered = [...entries]
+    ..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
   final map = <String, EpisodeProgress>{};
   for (final entry in ordered) {
     final progress = EpisodeProgress(
@@ -64,7 +66,10 @@ Map<String, EpisodeProgress> episodeProgressMap({
     }
     final season = entry.season;
     final episode = entry.episode;
-    if (itemId != null && itemId.isNotEmpty && season != null && episode != null) {
+    if (itemId != null &&
+        itemId.isNotEmpty &&
+        season != null &&
+        episode != null) {
       map.putIfAbsent('$itemId:$season:$episode', () => progress);
     }
   }
@@ -125,7 +130,8 @@ int? defaultSeason({
   if (seasons.isEmpty) return null;
 
   // 1) Continue-watching season.
-  final entries = [...history]..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
+  final entries = [...history]
+    ..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
   for (final entry in entries) {
     final season = entry.season;
     if (season == null || !seasons.contains(season)) continue;
@@ -174,8 +180,7 @@ int? parseRuntimeMinutes(String? raw) {
   var total = 0;
   var matched = false;
   final hours = RegExp(r'(\d+)\s*(?:h|hr|hrs|hours?)\b').firstMatch(text);
-  final minutes =
-      RegExp(r'(\d+)\s*(?:m|min|mins|minutes?)\b').firstMatch(text);
+  final minutes = RegExp(r'(\d+)\s*(?:m|min|mins|minutes?)\b').firstMatch(text);
   if (hours != null) {
     total += int.parse(hours.group(1)!) * 60;
     matched = true;
@@ -193,8 +198,18 @@ int? parseRuntimeMinutes(String? raw) {
 }
 
 const List<String> _monthAbbreviations = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// "12 Mar 2024" — English month abbreviation, LATIN digits in every locale

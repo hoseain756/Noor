@@ -1,9 +1,11 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/track/track_link.dart';
 import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/noor_toast.dart';
@@ -19,7 +21,8 @@ Future<void> showAnimeTrackerSheet(BuildContext context, MediaItem item) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+    useSafeArea: true,
+    constraints: const BoxConstraints(maxWidth: 720),
     builder: (_) => _TrackerSheet(item: item),
   );
 }
@@ -34,20 +37,12 @@ class _TrackerSheet extends StatefulWidget {
 }
 
 class _TrackerSheetState extends State<_TrackerSheet> {
-  static const _statusLabels = <AnimeTrackStatus, (String, String)>{
-    AnimeTrackStatus.watching: ('Watching', 'أشاهده'),
-    AnimeTrackStatus.completed: ('Completed', 'أكملته'),
-    AnimeTrackStatus.planning: ('Plan to watch', 'أنوي مشاهدته'),
-    AnimeTrackStatus.paused: ('Paused', 'متوقف مؤقتًا'),
-    AnimeTrackStatus.dropped: ('Dropped', 'ألقيتُه'),
-    AnimeTrackStatus.rewatching: ('Rewatching', 'أعيد مشاهدته'),
-  };
-
   AnimeTrackStatus? _status;
   int _progress = 0;
   double _score = 0;
   bool _loading = true;
   bool _saving = false;
+  bool _loadFailed = false;
 
   @override
   void initState() {
@@ -56,6 +51,10 @@ class _TrackerSheetState extends State<_TrackerSheet> {
   }
 
   Future<void> _preload() async {
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
     final app = context.read<AppState>();
     try {
       final preview = await app.api.animeTrackerPreview(
@@ -72,12 +71,17 @@ class _TrackerSheetState extends State<_TrackerSheet> {
               .where((s) => s.name == statusName)
               .firstOrNull;
           _progress = (entry['progress'] as num?)?.toInt() ?? 0;
-          _score = (entry['score10'] as num?)?.toDouble() ?? 0;
+          _score =
+              ((entry['score10'] as num?)?.toDouble() ?? 0).clamp(0.0, 10.0);
         }
         _loading = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _loadFailed = true;
+        });
     }
   }
 
@@ -99,9 +103,7 @@ class _TrackerSheetState extends State<_TrackerSheet> {
     if (outcomes.isEmpty) {
       NoorToast.show(
         context,
-        english
-            ? 'Link AniList or MyAnimeList in Integrations first.'
-            : 'اربط AniList أو MyAnimeList من صفحة التكاملات أولًا.',
+        NovaStrings.lookup(english, 'message542'),
         error: true,
       );
       return;
@@ -109,10 +111,8 @@ class _TrackerSheetState extends State<_TrackerSheet> {
     NoorToast.show(
       context,
       allFail
-          ? (english
-              ? 'Could not reach the tracker — try again.'
-              : 'تعذر الوصول للموقع — أعد المحاولة.')
-          : (english ? 'Anime list updated.' : 'تم تحديث قائمة الأنمي.'),
+          ? (NovaStrings.lookup(english, 'message543'))
+          : (NovaStrings.lookup(english, 'message544')),
       error: allFail,
     );
     if (anyOk) Navigator.of(context).pop();
@@ -121,12 +121,23 @@ class _TrackerSheetState extends State<_TrackerSheet> {
   Future<void> _remove() async {
     if (_saving) return;
     final app = context.read<AppState>();
-    setState(() {
-      _saving = true;
-      _status = null;
-      _progress = 0;
-      _score = 0;
-    });
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+              icon: const Icon(LucideIcons.listMinus),
+              title: Text(app.tr('message545')),
+              content: Text(app.tr('message546')),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: Text(app.tr('cancel'))),
+                FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: Text(app.tr('remove')))
+              ],
+            ));
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
     final outcomes = await app.saveAnimeEntry(item: widget.item);
     if (!mounted) return;
     setState(() => _saving = false);
@@ -135,10 +146,8 @@ class _TrackerSheetState extends State<_TrackerSheet> {
     NoorToast.show(
       context,
       anyOk
-          ? (english ? 'Removed from your lists.' : 'تمت الإزالة من قوائمك.')
-          : (english
-              ? 'Could not reach the tracker — try again.'
-              : 'تعذر الوصول للموقع — أعد المحاولة.'),
+          ? (NovaStrings.lookup(english, 'message547'))
+          : (NovaStrings.lookup(english, 'message543')),
       error: !anyOk,
     );
     if (anyOk) Navigator.of(context).pop();
@@ -147,183 +156,184 @@ class _TrackerSheetState extends State<_TrackerSheet> {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final english = app.english;
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 560),
-        margin: const EdgeInsets.all(14),
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: HorseTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: HorseTheme.line),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (widget.item.poster != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.network(
-                        widget.item.poster!,
-                        width: 46,
-                        height: 64,
-                        fit: BoxFit.cover,
-                        // Task 136: decode at the 46px thumbnail size.
-                        cacheWidth: imageCacheWidth(context, 46),
-                        errorBuilder: (_, __, ___) => const SizedBox(width: 46),
-                      ),
-                    ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      widget.item.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-              if (app.api.isLinked('anilist') || app.api.isLinked('mal')) ...[
-                const SizedBox(height: 4),
-                Text(
-                  english
-                      ? 'Saved to every connected tracker.'
-                      : 'يُحفظ في كل المواقع المرتبطة.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: HorseTheme.muted,
-                      ),
-                ),
-              ],
-              const SizedBox(height: 14),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.all(28),
-                  child: Center(
-                    child: SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                )
-              else ...[
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [
-                    for (final entry in _statusLabels.entries)
-                      ChoiceChip(
-                        label: Text(
-                          english ? entry.value.$1 : entry.value.$2,
-                        ),
-                        selected: _status == entry.key,
-                        onSelected: (_) => setState(() => _status = entry.key),
-                      ),
-                  ],
-                ),
-                if (_status != null &&
-                    _status != AnimeTrackStatus.completed) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          english ? 'Episodes watched' : 'الحلقات المُشاهدة',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      IconButton.outlined(
-                        onPressed: _progress > 0
-                            ? () => setState(() => _progress--)
-                            : null,
-                        icon: const Icon(Icons.remove_rounded, size: 19),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 13),
-                        child: Text(
-                          '$_progress',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      IconButton.outlined(
-                        onPressed: () => setState(() => _progress++),
-                        icon: const Icon(Icons.add_rounded, size: 19),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 14),
-                Row(
-                  children: [
+    final theme = Theme.of(context);
+    final statuses = <(AnimeTrackStatus, String, IconData)>[
+      (AnimeTrackStatus.watching, app.tr('message548'), LucideIcons.play),
+      (AnimeTrackStatus.completed, app.tr('message549'), LucideIcons.check),
+      (AnimeTrackStatus.planning, app.tr('message550'), LucideIcons.bookmark),
+      (AnimeTrackStatus.paused, app.tr('message551'), LucideIcons.pause),
+      (AnimeTrackStatus.dropped, app.tr('message552'), LucideIcons.x),
+      (AnimeTrackStatus.rewatching, app.tr('message553'), LucideIcons.repeat),
+    ];
+    return SizedBox(
+        height: MediaQuery.sizeOf(context).height * .88,
+        child: SafeArea(
+            top: false,
+            child: Column(children: [
+              Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 16, 16, 8),
+                  child: Row(children: [
                     Expanded(
-                      child: Text(
-                        english ? 'Score (0–10)' : 'التقييم (من 0 إلى 10)',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                    Text(
-                      _score > 0 ? _score.toStringAsFixed(0) : '—',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: HorseTheme.gold,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                  ],
-                ),
-                Slider(
-                  value: _score,
-                  min: 0,
-                  max: 10,
-                  divisions: 10,
-                  onChanged: (value) => setState(() => _score = value),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : _save,
-                        icon: _saving
-                            ? const SizedBox.square(
-                                dimension: 15,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.save_rounded),
-                        label: Text(
-                          english ? 'Save to lists' : 'حفظ في القوائم',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    TextButton.icon(
-                      onPressed: _saving ? null : _remove,
-                      icon: const Icon(Icons.playlist_remove_rounded),
-                      label: Text(english ? 'Remove' : 'إزالة'),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
+                        child: Text(app.tr('message554'),
+                            style: theme.textTheme.titleLarge)),
+                    IconButton(
+                        tooltip: app.tr('close'),
+                        onPressed:
+                            _saving ? null : () => Navigator.pop(context),
+                        icon: const Icon(LucideIcons.x)),
+                  ])),
+              Expanded(
+                  child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              if (widget.item.poster != null)
+                                ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: NovaNetworkImage(widget.item.poster!,
+                                        width: 76,
+                                        height: 108,
+                                        fit: BoxFit.cover,
+                                        cacheWidth:
+                                            imageCacheWidth(context, 76),
+                                        errorBuilder: (_, __, ___) =>
+                                            const SizedBox(
+                                                width: 76, height: 108))),
+                              const SizedBox(width: 20),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                    Text(widget.item.name,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.titleLarge
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.w800)),
+                                    const SizedBox(height: 8),
+                                    Text(app.tr('message555'),
+                                        style: theme.textTheme.bodySmall),
+                                  ])),
+                            ]),
+                            const SizedBox(height: 32),
+                            if (_loading)
+                              const LinearProgressIndicator()
+                            else if (_loadFailed)
+                              Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(app.tr('message556')),
+                                    const SizedBox(height: 16),
+                                    OutlinedButton.icon(
+                                        onPressed: _preload,
+                                        icon: const Icon(LucideIcons.refreshCw),
+                                        label: Text(app.tr('message174'))),
+                                  ])
+                            else ...[
+                              Text(app.tr('message557'),
+                                  style: theme.textTheme.titleMedium),
+                              const SizedBox(height: 12),
+                              Wrap(spacing: 8, runSpacing: 8, children: [
+                                for (final entry in statuses)
+                                  ChoiceChip(
+                                      avatar: Icon(entry.$3, size: 18),
+                                      label: Text(entry.$2),
+                                      selected: _status == entry.$1,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 12),
+                                      onSelected: _saving
+                                          ? null
+                                          : (_) => setState(
+                                              () => _status = entry.$1))
+                              ]),
+                              const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 24),
+                                  child: Divider()),
+                              if (_status != null &&
+                                  _status != AnimeTrackStatus.completed) ...[
+                                Text(app.tr('message558'),
+                                    style: theme.textTheme.titleMedium),
+                                const SizedBox(height: 16),
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                                  IconButton.filledTonal(
+                                      tooltip: app.tr('message559'),
+                                      onPressed: _saving || _progress <= 0
+                                          ? null
+                                          : () => setState(() => _progress--),
+                                      icon: const Icon(LucideIcons.minus)),
+                                  Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 24),
+                                      child: Semantics(
+                                          liveRegion: true,
+                                          child: Text('$_progress',
+                                              style: theme
+                                                  .textTheme.headlineMedium
+                                                  ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w800)))),
+                                  IconButton.filledTonal(
+                                      tooltip: app.tr('message560'),
+                                      onPressed: _saving
+                                          ? null
+                                          : () => setState(() => _progress++),
+                                      icon: const Icon(LucideIcons.plus)),
+                                ]),
+                                const SizedBox(height: 24),
+                              ],
+                              Row(children: [
+                                Expanded(
+                                    child: Text(app.tr('message561'),
+                                        style: theme.textTheme.titleMedium)),
+                                Text(
+                                    _score > 0
+                                        ? '${_score.toStringAsFixed(0)} / 10'
+                                        : app.tr('message562'),
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                        color: theme.colorScheme.secondary))
+                              ]),
+                              Slider(
+                                  value: _score,
+                                  min: 0,
+                                  max: 10,
+                                  divisions: 10,
+                                  semanticFormatterCallback: (value) =>
+                                      '${value.toInt()} / 10',
+                                  onChanged: _saving
+                                      ? null
+                                      : (value) =>
+                                          setState(() => _score = value)),
+                            ],
+                          ]))),
+              const Divider(height: 1),
+              Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        TextButton.icon(
+                            onPressed: _saving || _loading || _loadFailed
+                                ? null
+                                : _remove,
+                            icon: const Icon(LucideIcons.listMinus),
+                            label: Text(app.tr('remove'))),
+                        FilledButton.icon(
+                            onPressed: _saving || _loading || _loadFailed
+                                ? null
+                                : _save,
+                            icon: _saving
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : const Icon(LucideIcons.check),
+                            label: Text(app.tr('message563'))),
+                      ])),
+            ])));
   }
 }

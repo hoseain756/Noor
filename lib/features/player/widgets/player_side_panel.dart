@@ -22,11 +22,12 @@
 /// right / bottom) keep their system insets.
 library;
 
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/theme/horse_theme.dart';
 import '../engine/playback_engine.dart';
+import '../../../shared/widgets/shimmer_box.dart';
 import 'player_sheets.dart'
     show SheetSelectChip, SubtitleChoice, subtitleLanguageName;
 
@@ -36,7 +37,7 @@ enum PlayerPanelKind { audio, subtitles, streams, settings }
 /// Panel width: exactly HALF the screen, clamped for readability — narrow
 /// landscape phones never go below 300dp, large tablets never past 640dp.
 double playerPanelWidth(double screenWidth) =>
-    (screenWidth * .5).clamp(300.0, 640.0);
+    (screenWidth * .48).clamp(360.0, 560.0).clamp(0.0, screenWidth);
 
 /// The chrome every picker panel shares: header (title · optional action ·
 /// refresh · close) over a body. [onRefresh] is supplied whenever the
@@ -63,65 +64,65 @@ class PlayerSidePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).height < 520;
-    final insets = MediaQuery.paddingOf(context);
+    final size = MediaQuery.sizeOf(context);
+    final portrait = size.width < 600 && size.height > size.width;
+    final scheme = Theme.of(context).colorScheme;
+    final padding = MediaQuery.paddingOf(context);
+    final rtl = Directionality.of(context) == TextDirection.rtl;
     return Material(
-      color: HorseTheme.raised,
-      elevation: 14,
-      shadowColor: Colors.black54,
+      color: scheme.surface,
+      elevation: 12,
+      shadowColor: scheme.shadow.withValues(alpha: .24),
+      borderRadius: portrait
+          ? const BorderRadiusDirectional.vertical(top: Radius.circular(28))
+          : BorderRadius.zero,
+      clipBehavior: Clip.antiAlias,
       child: Padding(
-        // Task 140 (user mandate): ZERO horizontal chrome padding — the body
-        // (search field, list rows, header icons) stretches flush to BOTH
-        // panel edges. The LEFT inset is always dropped (the edge is at
-        // mid-screen — a landscape camera cutout on the display's left side
-        // must never open a phantom strip here); top / right / bottom keep
-        // their real system insets so content never sits under the punch
-        // hole or gesture areas when the phone is rotated the other way.
-        padding: EdgeInsets.fromLTRB(
-          0,
-          insets.top + (compact ? 10 : 14),
-          insets.right,
-          insets.bottom + (compact ? 10 : 14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
+        padding: EdgeInsetsDirectional.fromSTEB(
+            24,
+            portrait ? 12 : padding.top + 16,
+            24 +
+                (portrait
+                    ? 0
+                    : rtl
+                        ? padding.left
+                        : padding.right),
+            padding.bottom + 16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (portrait) ...[
+            Center(
+                child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: scheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(4)))),
+            const SizedBox(height: 16)
+          ],
+          Row(children: [
+            Expanded(
+                child: Text(title,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: compact
-                        ? Theme.of(context).textTheme.titleMedium
-                        : Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                if (headerAction != null) ...[
-                  headerAction!,
-                  const SizedBox(width: 4),
-                ],
-                if (onRefresh != null) ...[
-                  _PanelIconButton(
+                    style: Theme.of(context).textTheme.titleLarge)),
+            _PanelIconButton(
+                icon: LucideIcons.x,
+                semanticLabel: NovaStrings.lookup(english, 'close'),
+                onTap: onClose),
+          ]),
+          if (headerAction != null || onRefresh != null)
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              if (headerAction != null) headerAction!,
+              if (onRefresh != null)
+                _PanelIconButton(
                     icon: LucideIcons.refreshCw,
                     spinning: refreshing,
-                    semanticLabel: english ? 'Refresh' : 'تحديث',
-                    onTap: refreshing ? null : onRefresh,
-                  ),
-                  const SizedBox(width: 4),
-                ],
-                _PanelIconButton(
-                  icon: LucideIcons.x,
-                  semanticLabel: english ? 'Close' : 'إغلاق',
-                  onTap: onClose,
-                ),
-              ],
-            ),
-            SizedBox(height: compact ? 8 : 12),
-            Expanded(child: child),
-          ],
-        ),
+                    semanticLabel: NovaStrings.lookup(english, 'message68'),
+                    onTap: refreshing ? null : onRefresh),
+            ]),
+          const SizedBox(height: 16),
+          Expanded(child: child),
+        ]),
       ),
     );
   }
@@ -145,20 +146,22 @@ class _PanelIconButton extends StatelessWidget {
         button: true,
         label: semanticLabel,
         child: InkWell(
-          customBorder: const CircleBorder(),
+          customBorder: CircleBorder(),
           onTap: onTap,
           child: SizedBox(
-            width: 32,
-            height: 32,
+            width: 48,
+            height: 48,
             child: spinning
-                ? const Padding(
+                ? Padding(
                     padding: EdgeInsets.all(8),
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: HorseTheme.gold,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   )
-                : Icon(icon, size: 18, color: Colors.white70),
+                : Icon(icon,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -176,12 +179,14 @@ class PanelSettingsButton extends StatelessWidget {
         button: true,
         label: 'Subtitle style & timing',
         child: InkWell(
-          customBorder: const CircleBorder(),
+          customBorder: CircleBorder(),
           onTap: onTap,
-          child: const SizedBox(
-            width: 32,
-            height: 32,
-            child: Icon(LucideIcons.settings2, size: 18, color: Colors.white70),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(LucideIcons.settings2,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -199,7 +204,9 @@ class _PanelNote extends StatelessWidget {
           child: Text(
             text,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white38, fontSize: 13),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 13),
           ),
         ),
       );
@@ -211,15 +218,10 @@ class PanelLoading extends StatelessWidget {
   const PanelLoading({super.key});
 
   @override
-  Widget build(BuildContext context) => const Center(
-        child: SizedBox(
-          width: 26,
-          height: 26,
-          child: CircularProgressIndicator(
-            color: HorseTheme.gold,
-            strokeWidth: 2,
-          ),
-        ),
+  Widget build(BuildContext context) => ListView.separated(
+        itemCount: 5,
+        separatorBuilder: (_, __) => const SizedBox(height: 16),
+        itemBuilder: (_, __) => const ShimmerBox(height: 72),
       );
 }
 
@@ -266,7 +268,7 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
       if (track.title?.isNotEmpty == true) track.title!,
     ];
     if (parts.isEmpty) {
-      return widget.english ? 'Track ${track.id}' : 'مسار ${track.id}';
+      return NovaStrings.lookup(widget.english, 'message69', {'p0': track.id});
     }
     return parts.join(' · ');
   }
@@ -277,7 +279,7 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
         subtitleLanguageName(track.language!),
       if (track.codec?.isNotEmpty == true) track.codec!.toUpperCase(),
       if (track.channelscount != null)
-        '${track.channelscount}${widget.english ? 'ch' : ' قنوات'}',
+        '${track.channelscount}${NovaStrings.lookup(widget.english, 'message70')}',
     ];
     return parts.join(' · ');
   }
@@ -286,8 +288,9 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
     final groups = <String, List<AudioTrack>>{};
     for (final track in widget.tracks) {
       final code = (track.language ?? '').trim();
-      final key =
-          code.isEmpty ? (widget.english ? 'default' : 'افتراضي') : code;
+      final key = code.isEmpty
+          ? (NovaStrings.lookup(widget.english, 'message71'))
+          : code;
       groups.putIfAbsent(key, () => []).add(track);
     }
     return groups;
@@ -295,18 +298,18 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
 
   String _groupTitle(String code) {
     if (code == 'default' || code == 'افتراضي') {
-      return widget.english ? 'Default' : 'افتراضي';
+      return NovaStrings.lookup(widget.english, 'message2');
     }
     final name = subtitleLanguageName(code);
     return name.isEmpty ? code : '$name · $code';
   }
 
   String _delayLabel(int ms) {
-    if (ms == 0) return widget.english ? 'No delay' : 'بدون تأخير';
+    if (ms == 0) return NovaStrings.lookup(widget.english, 'message72');
     final abs = ms.abs();
     return ms < 0
-        ? (widget.english ? 'Ahead $abs ms' : 'تقديم $abs ms')
-        : (widget.english ? 'Delay $abs ms' : 'تأخير $abs ms');
+        ? (NovaStrings.lookup(widget.english, 'message47', {'p0': abs}))
+        : (NovaStrings.lookup(widget.english, 'message48', {'p0': abs}));
   }
 
   @override
@@ -314,11 +317,7 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
     final groups = _groups.entries.toList();
     if (widget.tracks.isEmpty) {
       return _PanelNote(
-        widget.english
-            ? 'No selectable audio tracks in this stream. Dubs may be '
-                'available as separate sources.'
-            : 'لا توجد مسارات صوتية قابلة للاختيار في هذا المصدر. '
-                'قد يتوفر الدبلاج ضمن مصادر أخرى.',
+        NovaStrings.lookup(widget.english, 'message73'),
       );
     }
     return Column(
@@ -327,8 +326,8 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
         Expanded(
           child: ListView.separated(
             itemCount: groups.length,
-            separatorBuilder: (_, __) =>
-                const Divider(color: HorseTheme.line, height: 1),
+            separatorBuilder: (_, __) => Divider(
+                color: Theme.of(context).colorScheme.outlineVariant, height: 1),
             itemBuilder: (context, index) {
               final entry = groups[index];
               return Column(
@@ -336,11 +335,11 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 8, 4, 2),
                     child: Text(
                       _groupTitle(entry.key),
-                      style: const TextStyle(
-                        color: HorseTheme.gold,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
                         letterSpacing: .5,
@@ -349,7 +348,7 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
                   ),
                   for (final track in entry.value)
                     ListTile(
-                      dense: true,
+                      dense: false,
                       selected: track.id == widget.selected.id,
                       leading: Icon(
                         track.id == widget.selected.id
@@ -357,23 +356,26 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
                             : LucideIcons.circle,
                         size: 20,
                         color: track.id == widget.selected.id
-                            ? HorseTheme.gold
-                            : Colors.white38,
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                       title: Text(
                         _label(track),
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14),
+                        style: TextStyle(fontSize: 14),
                       ),
                       subtitle: _info(track).isEmpty
                           ? null
                           : Text(
                               _info(track),
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white38, fontSize: 12),
+                              style: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                  fontSize: 12),
                             ),
                       onTap: () => widget.onPick(track),
                     ),
@@ -382,52 +384,27 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
             },
           ),
         ),
-        const Divider(color: HorseTheme.line, height: 1),
+        Divider(color: Theme.of(context).colorScheme.outlineVariant, height: 1),
         Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Row(
-            children: [
-              const Icon(LucideIcons.timer, size: 18, color: Colors.white54),
-              const SizedBox(width: 8),
-              Text(
-                widget.english ? 'Audio delay' : 'تأخير الصوت',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              _StepperButton(
-                icon: LucideIcons.minus,
-                onTap: () => _shift(-100),
-              ),
-              Container(
-                constraints: const BoxConstraints(minWidth: 96),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .05),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: HorseTheme.line),
-                ),
-                child: Text(
-                  _delayLabel(_delayMs),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: HorseTheme.gold,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              _StepperButton(
-                icon: LucideIcons.plus,
-                onTap: () => _shift(100),
-              ),
-            ],
-          ),
-        ),
+            padding: const EdgeInsetsDirectional.only(top: 16),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(NovaStrings.lookup(widget.english, 'message74'),
+                  style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Row(children: [
+                _StepperButton(
+                    icon: LucideIcons.minus, onTap: () => _shift(-100)),
+                Expanded(
+                    child: Text(_delayLabel(_delayMs),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w700))),
+                _StepperButton(
+                    icon: LucideIcons.plus, onTap: () => _shift(100)),
+              ]),
+            ])),
       ],
     );
   }
@@ -442,12 +419,13 @@ class _StepperButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InkWell(
-        customBorder: const CircleBorder(),
+        customBorder: CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(icon, size: 20, color: Colors.white70),
+          width: 48,
+          height: 48,
+          child: Icon(icon,
+              size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       );
 }
@@ -512,9 +490,8 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
                 ? track.title!
                 : track.language?.isNotEmpty == true
                     ? subtitleLanguageName(track.language!)
-                    : (widget.english
-                        ? 'Track ${track.id}'
-                        : 'مسار ${track.id}'))
+                    : (NovaStrings.lookup(
+                        widget.english, 'message69', {'p0': track.id})))
             .split('\n')
             .first,
         subtitle: [
@@ -536,7 +513,7 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
         groupKey: lang.isEmpty ? 'all' : lang,
         title: label.isEmpty
             ? (lang.isEmpty
-                ? (widget.english ? 'Addon subtitle' : 'ترجمة إضافة')
+                ? (NovaStrings.lookup(widget.english, 'message75'))
                 : name)
             : label,
         subtitle: [
@@ -581,10 +558,10 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
 
   String _groupTitle(String key) {
     if (key == 'embedded') {
-      return widget.english ? 'In this file' : 'داخل الملف';
+      return NovaStrings.lookup(widget.english, 'message76');
     }
     if (key == 'all') {
-      return widget.english ? 'Unknown language' : 'لغة غير معروفة';
+      return NovaStrings.lookup(widget.english, 'message77');
     }
     final name = subtitleLanguageName(key);
     return name.isEmpty ? key : '$name · $key';
@@ -606,24 +583,26 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
         open ? _expanded.remove(key) : _expanded.add(key);
       }),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(6, 9, 6, 7),
+        padding: const EdgeInsetsDirectional.fromSTEB(6, 9, 6, 7),
         child: Row(
           children: [
             AnimatedRotation(
               turns: open ? 0 : -.25,
-              duration: const Duration(milliseconds: 160),
-              child: const Icon(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 160),
+              child: Icon(
                 LucideIcons.chevronDown,
                 size: 18,
-                color: HorseTheme.gold,
+                color: Theme.of(context).colorScheme.primary,
               ),
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Expanded(
               child: Text(
                 _groupTitle(key),
-                style: const TextStyle(
-                  color: HorseTheme.gold,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
                   letterSpacing: .4,
@@ -633,14 +612,18 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .06),
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: .06),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: HorseTheme.line),
+                border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant),
               ),
               child: Text(
                 '$count',
-                style: const TextStyle(
-                  color: Colors.white54,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   fontFeatures: [FontFeature.tabularFigures()],
@@ -656,7 +639,7 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
   Widget _choiceRow(SubtitleChoice choice) {
     final isSelected = choice.track.id == widget.selected.id;
     return ListTile(
-      dense: true,
+      dense: false,
       selected: isSelected,
       leading: Icon(
         isSelected
@@ -665,20 +648,24 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
                 ? LucideIcons.cloudDownload
                 : LucideIcons.circle),
         size: 20,
-        color: isSelected ? HorseTheme.gold : Colors.white38,
+        color: isSelected
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.onSurfaceVariant,
       ),
       title: Text(
         choice.title,
-        maxLines: 1,
+        maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 14),
+        style: TextStyle(fontSize: 14),
       ),
       subtitle: choice.subtitle?.isEmpty != true
           ? Text(
               choice.subtitle!,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white38, fontSize: 12),
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12),
             )
           : null,
       onTap: () => widget.onPick(choice.track),
@@ -708,73 +695,80 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
             isDense: true,
-            prefixIcon: const Icon(LucideIcons.search, size: 20),
+            prefixIcon: Icon(LucideIcons.search, size: 20),
             suffixIcon: _search.text.isEmpty
                 ? null
                 : IconButton(
                     visualDensity: VisualDensity.compact,
-                    icon: const Icon(LucideIcons.x, size: 16),
+                    icon: Icon(LucideIcons.x, size: 16),
                     onPressed: () {
                       _search.clear();
                       setState(() {});
                     },
                   ),
-            hintText:
-                widget.english ? 'Search subtitles…' : 'ابحث في الترجمات…',
+            hintText: NovaStrings.lookup(widget.english, 'message78'),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: HorseTheme.line),
+              borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: HorseTheme.line),
+              borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: HorseTheme.gold, width: 1.4),
+              borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary, width: 1.4),
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        const Divider(color: HorseTheme.line, height: 14),
+        SizedBox(height: 10),
+        Divider(
+            color: Theme.of(context).colorScheme.outlineVariant, height: 14),
         Expanded(
           child: widget.loadingExternal
-              ? const PanelLoading()
+              ? PanelLoading()
               : totalVisible == 0
                   ? _PanelNote(
                       query.isEmpty
-                          ? (widget.english
-                              ? 'No subtitles found for this title.'
-                              : 'لم يتم العثور على ترجمات لهذا العمل.')
-                          : (widget.english
-                              ? 'No matches for your search.'
-                              : 'لا توجد نتائج مطابقة لبحثك.'),
+                          ? (NovaStrings.lookup(widget.english, 'message79'))
+                          : (NovaStrings.lookup(widget.english, 'message80')),
                     )
                   : ListView(
                       children: [
                         ListTile(
-                          dense: true,
+                          dense: false,
                           selected: offSelected,
                           leading: Icon(
                             offSelected
                                 ? LucideIcons.circleDot
                                 : LucideIcons.captionsOff,
                             size: 20,
-                            color:
-                                offSelected ? HorseTheme.gold : Colors.white38,
+                            color: offSelected
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                           ),
                           title: Text(
-                            widget.english ? 'Off' : 'إيقاف',
-                            style: const TextStyle(fontSize: 14),
+                            NovaStrings.lookup(widget.english, 'message4'),
+                            style: TextStyle(fontSize: 14),
                           ),
                           onTap: () => widget.onPick(off),
                         ),
-                        const Divider(color: HorseTheme.line, height: 1),
+                        Divider(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                            height: 1),
                         for (final entry in visibleGroups.entries) ...[
                           _languageHeader(entry.key, entry.value.length),
                           if (_isOpen(entry.key, visibleGroups))
                             ...entry.value.map(_choiceRow),
-                          const Divider(color: HorseTheme.line, height: 1),
+                          Divider(
+                              color:
+                                  Theme.of(context).colorScheme.outlineVariant,
+                              height: 1),
                         ],
                       ],
                     ),
@@ -790,90 +784,97 @@ class _SubtitleTracksPanelBodyState extends State<SubtitleTracksPanelBody> {
 /// page owns loading + refresh; the spinner lives INSIDE the panel). Rows
 /// that no playback path supports stay visible but disabled. Picking hands
 /// the stream back for resolution — never a silent auto-pick.
-class StreamsPanelBody extends StatelessWidget {
-  const StreamsPanelBody({
-    super.key,
-    required this.english,
-    required this.streams,
-    required this.currentStream,
-    required this.onPick,
-  });
-
+class StreamsPanelBody extends StatefulWidget {
+  const StreamsPanelBody(
+      {super.key,
+      required this.english,
+      required this.streams,
+      required this.currentStream,
+      required this.onPick});
   final bool english;
   final List<Map<String, dynamic>> streams;
-
-  /// The currently playing stream map — highlighted when present in the list.
   final Map<String, dynamic>? currentStream;
   final ValueChanged<Map<String, dynamic>> onPick;
+  @override
+  State<StreamsPanelBody> createState() => _StreamsPanelBodyState();
+}
 
-  bool _isDirect(Map<String, dynamic> stream) =>
-      stream['url'] is String && (stream['url'] as String).startsWith('http');
-
-  bool _isPlayable(Map<String, dynamic> stream) =>
-      _isDirect(stream) || stream['infoHash'] is String;
-
+class _StreamsPanelBodyState extends State<StreamsPanelBody> {
+  String _query = '';
   @override
   Widget build(BuildContext context) {
-    if (streams.isEmpty) {
-      return _PanelNote(
-        english
-            ? 'No sources available for this title yet — try the refresh '
-                'button.'
-            : 'لا توجد مصادر متاحة لهذا العمل بعد — جرّب زر التحديث.',
-      );
-    }
-    return ListView.separated(
-      itemCount: streams.length,
-      separatorBuilder: (_, __) =>
-          const Divider(color: HorseTheme.line, height: 1),
-      itemBuilder: (context, index) {
-        final stream = streams[index];
-        final title = (stream['title'] ??
-                stream['name'] ??
-                stream['description'] ??
-                'Stream')
-            .toString()
-            .split('\n')
-            .first;
-        // Highlight by identity AND by content: a refreshed list re-creates
-        // every row, so the currently-playing source must still light up
-        // (same url / infoHash ⇒ same stream).
-        final current = currentStream;
-        final isSelected = identical(stream, current) ||
-            (current != null &&
-                stream['url'] == current['url'] &&
-                stream['infoHash'] == current['infoHash']);
-        final playable = _isPlayable(stream);
-        return ListTile(
-          dense: true,
-          selected: isSelected,
-          enabled: playable,
-          leading: Icon(
-            isSelected ? LucideIcons.circleDot : LucideIcons.circlePlay,
-            color: isSelected
-                ? HorseTheme.gold
-                : (playable ? HorseTheme.muted : Colors.white24),
-            size: 22,
-          ),
-          title: Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 14,
-              color: playable ? null : Colors.white24,
-            ),
-          ),
-          subtitle: Text(
-            stream['addonName']?.toString() ?? '',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white38, fontSize: 12),
-          ),
-          onTap: playable ? () => onPick(stream) : null,
-        );
-      },
-    );
+    final scheme = Theme.of(context).colorScheme;
+    final streams = widget.streams
+        .where((stream) =>
+            '${stream['title']} ${stream['name']} ${stream['addonName']}'
+                .toLowerCase()
+                .contains(_query.trim().toLowerCase()))
+        .toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+          onChanged: (value) => setState(() => _query = value),
+          decoration: InputDecoration(
+              prefixIcon: const Icon(LucideIcons.search),
+              hintText: NovaStrings.lookup(widget.english, 'message677'))),
+      const SizedBox(height: 16),
+      Text(
+          NovaStrings.lookup(
+              widget.english, 'message678', {'p0': streams.length}),
+          style: Theme.of(context)
+              .textTheme
+              .labelLarge
+              ?.copyWith(color: scheme.onSurfaceVariant)),
+      const SizedBox(height: 8),
+      Expanded(
+          child: streams.isEmpty
+              ? _PanelNote(NovaStrings.lookup(widget.english, 'message81'))
+              : ListView.separated(
+                  itemCount: streams.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final stream = streams[index];
+                    final playable = stream['url'] is String &&
+                            (stream['url'] as String).startsWith('http') ||
+                        stream['infoHash'] is String;
+                    final current = widget.currentStream;
+                    final selected = identical(stream, current) ||
+                        current != null &&
+                            stream['url'] == current['url'] &&
+                            stream['infoHash'] == current['infoHash'];
+                    return ListTile(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                              color: selected
+                                  ? scheme.primary
+                                  : scheme.outlineVariant)),
+                      tileColor: selected
+                          ? scheme.primaryContainer
+                          : scheme.surfaceContainerLow,
+                      contentPadding: const EdgeInsets.all(16),
+                      selected: selected,
+                      enabled: playable,
+                      leading: Icon(
+                          selected ? LucideIcons.circleCheck : LucideIcons.play,
+                          color: selected
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant),
+                      title: Text(
+                          (stream['title'] ?? stream['name'] ?? '')
+                              .toString()
+                              .split('\n')
+                              .first,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
+                      subtitle: Padding(
+                          padding: const EdgeInsetsDirectional.only(top: 8),
+                          child: Text(stream['addonName']?.toString() ?? '',
+                              style:
+                                  TextStyle(color: scheme.onSurfaceVariant))),
+                      onTap: playable ? () => widget.onPick(stream) : null,
+                    );
+                  })),
+    ]);
   }
 }
 
@@ -921,25 +922,26 @@ class PlayerSettingsPanelBody extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 4),
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
+          padding: const EdgeInsetsDirectional.fromSTEB(4, 2, 4, 0),
           child: Text(
-            english ? 'Speed' : 'السرعة',
-            style: const TextStyle(
-              color: Colors.white38,
+            NovaStrings.lookup(english, 'message82'),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 11,
               fontWeight: FontWeight.w600,
               letterSpacing: .8,
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         GridView.count(
-          crossAxisCount: 3,
+          crossAxisCount:
+              MediaQuery.textScalerOf(context).scale(16) > 24 ? 2 : 3,
           shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+          physics: NeverScrollableScrollPhysics(),
           mainAxisSpacing: 6,
           crossAxisSpacing: 6,
-          childAspectRatio: 2.6,
+          childAspectRatio: 1.6,
           padding: EdgeInsets.zero,
           children: [
             for (final value in _speeds)
@@ -950,105 +952,113 @@ class PlayerSettingsPanelBody extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+          padding: const EdgeInsetsDirectional.fromSTEB(4, 0, 4, 0),
           child: Text(
-            english ? 'Video fit' : 'ملاءمة الفيديو',
-            style: const TextStyle(
-              color: Colors.white38,
+            NovaStrings.lookup(english, 'message83'),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 11,
               fontWeight: FontWeight.w600,
               letterSpacing: .8,
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         GridView.count(
-          crossAxisCount: 3,
+          crossAxisCount:
+              MediaQuery.textScalerOf(context).scale(16) > 24 ? 2 : 3,
           shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+          physics: NeverScrollableScrollPhysics(),
           mainAxisSpacing: 6,
           crossAxisSpacing: 6,
-          childAspectRatio: 2.2,
+          childAspectRatio: 1.6,
           padding: EdgeInsets.zero,
           children: [
             SheetSelectChip(
-              label: english ? 'Fit' : 'احتواء',
+              label: NovaStrings.lookup(english, 'message84'),
               selected: fit == BoxFit.contain,
               onTap: () => onFit(BoxFit.contain),
             ),
             SheetSelectChip(
-              label: english ? 'Fill' : 'ملء',
+              label: NovaStrings.lookup(english, 'message85'),
               selected: fit == BoxFit.cover,
               onTap: () => onFit(BoxFit.cover),
             ),
             SheetSelectChip(
-              label: english ? 'Stretch' : 'تمديد',
+              label: NovaStrings.lookup(english, 'message86'),
               selected: fit == BoxFit.fill,
               onTap: () => onFit(BoxFit.fill),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         ListTile(
-          dense: true,
-          leading: const Icon(LucideIcons.audioLines,
-              size: 20, color: Colors.white70),
+          dense: false,
+          leading: Icon(LucideIcons.audioLines,
+              size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
           title: Text(
-            english ? 'Audio track' : 'المسار الصوتي',
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            NovaStrings.lookup(english, 'message87'),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
           ),
           subtitle: Text(
             audioLabel,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white38, fontSize: 12),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12),
           ),
-          trailing: const Icon(
+          trailing: Icon(
             LucideIcons.chevronRight,
             size: 20,
-            color: Colors.white24,
+            color: Theme.of(context).colorScheme.outline,
           ),
           onTap: onOpenAudio,
         ),
         ListTile(
-          dense: true,
-          leading:
-              const Icon(LucideIcons.captions, size: 20, color: Colors.white70),
+          dense: false,
+          leading: Icon(LucideIcons.captions,
+              size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
           title: Text(
-            english ? 'Subtitles' : 'الترجمة',
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            NovaStrings.lookup(english, 'message7'),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
           ),
           subtitle: Text(
             subtitleLabel,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white38, fontSize: 12),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12),
           ),
-          trailing: const Icon(
+          trailing: Icon(
             LucideIcons.chevronRight,
             size: 20,
-            color: Colors.white24,
+            color: Theme.of(context).colorScheme.outline,
           ),
           onTap: onOpenSubtitles,
         ),
         if (hasEpisodes)
           ListTile(
-            dense: true,
-            leading: const Icon(
+            dense: false,
+            leading: Icon(
               LucideIcons.listVideo,
               size: 20,
-              color: Colors.white70,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             title: Text(
-              english ? 'Episodes' : 'الحلقات',
-              style: const TextStyle(color: Colors.white, fontSize: 14),
+              NovaStrings.lookup(english, 'message43'),
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
             ),
-            trailing: const Icon(
+            trailing: Icon(
               LucideIcons.chevronRight,
               size: 20,
-              color: Colors.white24,
+              color: Theme.of(context).colorScheme.outline,
             ),
             onTap: onOpenEpisodes,
           ),

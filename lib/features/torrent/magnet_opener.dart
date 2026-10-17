@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -11,6 +12,8 @@ import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../player/video_player_page.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../shared/widgets/shimmer_box.dart';
 
 /// Set while the magnet sheet is on screen so a second incoming link
 /// (e.g. another tap on a magnet URL) does not stack sheets.
@@ -43,9 +46,7 @@ Future<void> openMagnetFlow(
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          english
-              ? 'Torrent streaming needs a device with the built-in torrent engine (Android) or a connected Debrid service.'
-              : 'البث عبر التورنت يحتاج جهازًا يدعم محرك التورنت المدمج (أندرويد) أو خدمة Debrid متصلة.',
+          NovaStrings.lookup(english, 'message706'),
         ),
       ),
     );
@@ -57,8 +58,9 @@ Future<void> openMagnetFlow(
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 800),
       useSafeArea: true,
-      backgroundColor: HorseTheme.surface,
+      backgroundColor: NovaTheme.of(context).surface,
       barrierColor: Colors.black54,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -149,9 +151,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
     final magnet = _normalize(_controller.text);
     if (magnet == null) {
       setState(() {
-        _error = _english
-            ? 'Paste a magnet link or a 40-character info hash.'
-            : 'الصق رابط magnet أو معرّف info hash بطول 40 حرفًا.';
+        _error = NovaStrings.lookup(_english, 'message707');
       });
       return;
     }
@@ -172,9 +172,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         _ticker?.cancel();
         setState(() {
           _stage = _Stage.input;
-          _error = _english
-              ? 'No playable video files found in this torrent.'
-              : 'لا توجد ملفات فيديو قابلة للتشغيل في هذا التورنت.';
+          _error = NovaStrings.lookup(_english, 'message708');
         });
         return;
       }
@@ -194,18 +192,15 @@ class _MagnetSheetState extends State<_MagnetSheet> {
       if (!mounted) return;
       setState(() {
         _stage = _Stage.input;
-        _error = _english
-            ? 'Could not fetch torrent info: ${error.message}'
-            : 'تعذّر جلب معلومات التورنت: ${error.message}';
+        _error =
+            NovaStrings.lookup(_english, 'message709', {'p0': error.message});
       });
     } catch (_) {
       _ticker?.cancel();
       if (!mounted) return;
       setState(() {
         _stage = _Stage.input;
-        _error = _english
-            ? 'Could not fetch torrent info. Check the link and your connection.'
-            : 'تعذّر جلب معلومات التورنت. تحقق من الرابط والاتصال.';
+        _error = NovaStrings.lookup(_english, 'message710');
       });
     }
   }
@@ -281,9 +276,8 @@ class _MagnetSheetState extends State<_MagnetSheet> {
       if (!mounted) return;
       setState(() {
         _stage = _restoreStage();
-        _error = english
-            ? 'Failed to start the stream: ${error.message}'
-            : 'فشل بدء البث: ${error.message}';
+        _error =
+            NovaStrings.lookup(english, 'message711', {'p0': error.message});
       });
     } catch (_) {
       if (!mounted) return;
@@ -291,9 +285,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
       if (!mounted) return;
       setState(() {
         _stage = _restoreStage();
-        _error = english
-            ? 'Failed to start the stream. Try again.'
-            : 'فشل بدء البث. حاول مرة أخرى.';
+        _error = NovaStrings.lookup(english, 'message712');
       });
     }
   }
@@ -334,77 +326,88 @@ class _MagnetSheetState extends State<_MagnetSheet> {
   @override
   Widget build(BuildContext context) {
     final english = _english;
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: SafeArea(
+    final scheme = Theme.of(context).colorScheme;
+    final index = switch (_stage) {
+      _Stage.input => 0,
+      _Stage.resolving => 0,
+      _Stage.files => 1,
+      _Stage.preparing => 2
+    };
+    final stages = [
+      NovaStrings.lookup(english, 'message38'),
+      NovaStrings.lookup(english, 'message713'),
+      NovaStrings.lookup(english, 'message714')
+    ];
+    return SafeArea(
         top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: HorseTheme.line,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: HorseTheme.gold.withValues(alpha: .14),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.bolt_rounded,
-                      color: HorseTheme.gold,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      english ? 'Open torrent' : 'فتح تورنت',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                english
-                    ? 'Paste a magnet link — it plays directly on this device, no account needed.'
-                    : 'الصق رابط magnet — يعمل مباشرة على هذا الجهاز بدون حساب.',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: HorseTheme.muted),
-              ),
-              const SizedBox(height: 16),
-              switch (_stage) {
-                _Stage.input => _buildInput(english),
-                _Stage.resolving => _buildResolving(english),
-                _Stage.files => _buildFiles(english),
-                _Stage.preparing => _buildPreparing(english),
-              },
-            ],
+        child: Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * .88),
+            child: SingleChildScrollView(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 32),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(children: [
+                      Icon(LucideIcons.magnet,
+                          color: scheme.secondary, size: 32),
+                      const SizedBox(width: 16),
+                      Expanded(
+                          child: Text(NovaStrings.lookup(english, 'message715'),
+                              style:
+                                  Theme.of(context).textTheme.headlineSmall)),
+                      IconButton(
+                          onPressed: _cancelPreparing,
+                          tooltip: NovaStrings.lookup(english, 'close'),
+                          icon: const Icon(LucideIcons.x))
+                    ]),
+                    const SizedBox(height: 16),
+                    Text(NovaStrings.lookup(english, 'message716'),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
+                    const SizedBox(height: 24),
+                    Wrap(spacing: 16, runSpacing: 12, children: [
+                      for (var i = 0; i < stages.length; i++)
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          CircleAvatar(
+                              radius: 14,
+                              backgroundColor: i == index
+                                  ? scheme.primary
+                                  : scheme.surfaceContainerHigh,
+                              child: Text('${i + 1}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: i == index
+                                          ? scheme.onPrimary
+                                          : scheme.onSurfaceVariant))),
+                          const SizedBox(width: 8),
+                          Text(stages[i],
+                              style: TextStyle(
+                                  fontWeight: i == index
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  color: i == index
+                                      ? scheme.onSurface
+                                      : scheme.onSurfaceVariant))
+                        ])
+                    ]),
+                    const SizedBox(height: 32),
+                    switch (_stage) {
+                      _Stage.input => _buildInput(english),
+                      _Stage.resolving => _buildResolving(english),
+                      _Stage.files => _buildFiles(english),
+                      _Stage.preparing => _buildPreparing(english)
+                    },
+                  ]),
+            ),
           ),
-        ),
-      ),
-    );
+        ));
   }
 
   Widget _buildInput(bool english) {
@@ -414,32 +417,32 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         TextField(
           controller: _controller,
           focusNode: _focusNode,
-          maxLines: 3,
+          maxLines: 4,
+          textDirection: TextDirection.ltr,
           minLines: 1,
           style: const TextStyle(fontSize: 13.5, height: 1.35),
           decoration: InputDecoration(
-            hintText: english
-                ? 'magnet:?xt=urn:btih:…  or info hash'
-                : 'magnet:?xt=urn:btih:…  أو info hash',
-            hintStyle: const TextStyle(color: HorseTheme.muted, fontSize: 12.5),
+            hintText: NovaStrings.lookup(english, 'message717'),
+            hintStyle:
+                TextStyle(color: NovaTheme.of(context).muted, fontSize: 12.5),
             filled: true,
-            fillColor: HorseTheme.raised,
+            fillColor: NovaTheme.of(context).raised,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: HorseTheme.line),
+              borderSide: BorderSide(color: NovaTheme.of(context).line),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: HorseTheme.line),
+              borderSide: BorderSide(color: NovaTheme.of(context).line),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: HorseTheme.gold),
+              borderSide: BorderSide(color: NovaTheme.of(context).gold),
             ),
             suffixIcon: IconButton(
-              tooltip: english ? 'Paste' : 'لصق',
+              tooltip: NovaStrings.lookup(english, 'message718'),
               onPressed: () async {
                 final data = await Clipboard.getData(Clipboard.kTextPlain);
                 final text = data?.text?.trim();
@@ -448,8 +451,8 @@ class _MagnetSheetState extends State<_MagnetSheet> {
                   if (mounted) setState(() => _error = null);
                 }
               },
-              icon: const Icon(Icons.content_paste_rounded,
-                  size: 20, color: HorseTheme.muted),
+              icon: Icon(LucideIcons.clipboard,
+                  size: 20, color: NovaTheme.of(context).muted),
             ),
           ),
           onSubmitted: (_) => _start(),
@@ -458,14 +461,14 @@ class _MagnetSheetState extends State<_MagnetSheet> {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.error_outline_rounded,
-                  color: Color(0xFFE0705A), size: 17),
+              const Icon(LucideIcons.circleAlert,
+                  color: NovaColors.error, size: 17),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   _error!,
                   style: const TextStyle(
-                    color: Color(0xFFE0705A),
+                    color: NovaColors.error,
                     fontSize: 12.5,
                   ),
                 ),
@@ -476,17 +479,17 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         const SizedBox(height: 14),
         FilledButton.icon(
           style: FilledButton.styleFrom(
-            backgroundColor: HorseTheme.gold,
-            foregroundColor: const Color(0xFF16130D),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
             padding: const EdgeInsets.symmetric(vertical: 13),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(13),
             ),
           ),
           onPressed: _start,
-          icon: const Icon(Icons.play_arrow_rounded, size: 21),
+          icon: const Icon(LucideIcons.play, size: 21),
           label: Text(
-            english ? 'Stream' : 'تشغيل',
+            NovaStrings.lookup(english, 'message719'),
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
           ),
         ),
@@ -499,26 +502,23 @@ class _MagnetSheetState extends State<_MagnetSheet> {
       padding: const EdgeInsets.symmetric(vertical: 18),
       child: Column(
         children: [
-          const SizedBox.square(
-            dimension: 30,
-            child: CircularProgressIndicator(strokeWidth: 2.6),
-          ),
+          const Column(children: [
+            ShimmerBox(height: 56),
+            SizedBox(height: 12),
+            ShimmerBox(height: 56)
+          ]),
           const SizedBox(height: 16),
           Text(
-            english
-                ? 'Fetching torrent info…  ${_elapsed}s'
-                : 'جارٍ جلب معلومات التورنت…  ${_elapsed}s',
+            NovaStrings.lookup(english, 'message720', {'p0': _elapsed}),
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            english
-                ? 'Talking to the swarm — usually a few seconds.'
-                : 'الاتصال بالشبكة — عادةً يستغرق ثوانٍ قليلة.',
+            NovaStrings.lookup(english, 'message721'),
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: HorseTheme.muted),
+                ?.copyWith(color: NovaTheme.of(context).muted),
           ),
           const SizedBox(height: 16),
           TextButton(
@@ -526,7 +526,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
               _ticker?.cancel();
               Navigator.of(context).pop();
             },
-            child: Text(english ? 'Cancel' : 'إلغاء'),
+            child: Text(NovaStrings.lookup(english, 'cancel')),
           ),
         ],
       ),
@@ -543,14 +543,14 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: HorseTheme.raised,
+            color: NovaTheme.of(context).raised,
             borderRadius: BorderRadius.circular(13),
-            border: Border.all(color: HorseTheme.line),
+            border: Border.all(color: NovaTheme.of(context).line),
           ),
           child: Row(
             children: [
-              const Icon(Icons.movie_outlined,
-                  color: HorseTheme.gold, size: 19),
+              Icon(LucideIcons.film,
+                  color: NovaTheme.of(context).gold, size: 19),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -568,7 +568,8 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         ),
         const SizedBox(height: 12),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 260),
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * .42),
           child: ListView.separated(
             shrinkWrap: true,
             itemCount: videos.length,
@@ -578,12 +579,14 @@ class _MagnetSheetState extends State<_MagnetSheet> {
               final selected = file.index == _selectedFile;
               return Material(
                 color: selected
-                    ? HorseTheme.gold.withValues(alpha: .12)
-                    : HorseTheme.raised,
+                    ? NovaTheme.of(context).gold.withValues(alpha: .12)
+                    : NovaTheme.of(context).raised,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                   side: BorderSide(
-                    color: selected ? HorseTheme.gold : HorseTheme.line,
+                    color: selected
+                        ? NovaTheme.of(context).gold
+                        : NovaTheme.of(context).line,
                   ),
                 ),
                 child: InkWell(
@@ -596,9 +599,11 @@ class _MagnetSheetState extends State<_MagnetSheet> {
                       children: [
                         Icon(
                           selected
-                              ? Icons.check_circle_rounded
-                              : Icons.radio_button_unchecked_rounded,
-                          color: selected ? HorseTheme.gold : HorseTheme.muted,
+                              ? LucideIcons.circleCheck
+                              : LucideIcons.circle,
+                          color: selected
+                              ? NovaTheme.of(context).gold
+                              : NovaTheme.of(context).muted,
                           size: 20,
                         ),
                         const SizedBox(width: 10),
@@ -613,8 +618,8 @@ class _MagnetSheetState extends State<_MagnetSheet> {
                         const SizedBox(width: 8),
                         Text(
                           _formatSize(file.size),
-                          style: const TextStyle(
-                            color: HorseTheme.muted,
+                          style: TextStyle(
+                            color: NovaTheme.of(context).muted,
                             fontSize: 12,
                           ),
                         ),
@@ -629,17 +634,17 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         const SizedBox(height: 14),
         FilledButton.icon(
           style: FilledButton.styleFrom(
-            backgroundColor: HorseTheme.gold,
-            foregroundColor: const Color(0xFF16130D),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
             padding: const EdgeInsets.symmetric(vertical: 13),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(13),
             ),
           ),
           onPressed: () => _play(meta, _selectedFile),
-          icon: const Icon(Icons.play_arrow_rounded, size: 21),
+          icon: const Icon(LucideIcons.play, size: 21),
           label: Text(
-            english ? 'Play selected' : 'تشغيل المحدد',
+            NovaStrings.lookup(english, 'message722'),
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
           ),
         ),
@@ -652,29 +657,28 @@ class _MagnetSheetState extends State<_MagnetSheet> {
       padding: const EdgeInsets.symmetric(vertical: 18),
       child: Column(
         children: [
-          const SizedBox.square(
-            dimension: 30,
-            child: CircularProgressIndicator(strokeWidth: 2.6),
-          ),
+          const Column(children: [
+            ShimmerBox(height: 56),
+            SizedBox(height: 12),
+            ShimmerBox(height: 56)
+          ]),
           const SizedBox(height: 16),
           Text(
-            english ? 'Preparing the stream…' : 'جارٍ تجهيز البث…',
+            NovaStrings.lookup(english, 'message650'),
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            english
-                ? 'Connecting to peers and buffering the first pieces.'
-                : 'الاتصال بالمشاركين وتحميل الأجزاء الأولى.',
+            NovaStrings.lookup(english, 'message723'),
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: HorseTheme.muted),
+                ?.copyWith(color: NovaTheme.of(context).muted),
           ),
           const SizedBox(height: 16),
           TextButton(
             onPressed: _cancelPreparing,
-            child: Text(english ? 'Cancel' : 'إلغاء'),
+            child: Text(NovaStrings.lookup(english, 'cancel')),
           ),
         ],
       ),

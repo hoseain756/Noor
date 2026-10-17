@@ -59,7 +59,14 @@ class TrackLink {
 
 /// Canonical anime watch statuses the app UI exposes; every provider maps to
 /// and from these.
-enum AnimeTrackStatus { watching, completed, planning, paused, dropped, rewatching }
+enum AnimeTrackStatus {
+  watching,
+  completed,
+  planning,
+  paused,
+  dropped,
+  rewatching
+}
 
 /// App status → AniList MediaListStatus.
 const Map<AnimeTrackStatus, String> kAniListStatus = {
@@ -207,11 +214,8 @@ String? extractAniListAccessToken(String input) {
   }
   if (text.contains('access_token=')) {
     final index = text.indexOf('access_token=');
-    final token = text
-        .substring(index + 'access_token='.length)
-        .split('&')
-        .first
-        .trim();
+    final token =
+        text.substring(index + 'access_token='.length).split('&').first.trim();
     return token.isEmpty ? null : token;
   }
   // Anything else is treated as the bare token the user copied by hand.

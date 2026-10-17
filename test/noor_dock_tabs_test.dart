@@ -4,12 +4,12 @@ import 'package:noor_mobile/features/shell/noor_dock_tabs.dart';
 
 void main() {
   group('Noor dock tab set', () {
-    test('five tabs in Settings|Library|Kids|Anime|Home visual order, both directions',
+    test('five tabs preserve logical order so Directionality mirrors them once',
         () {
       final ltr = noorDockTabsFor(rtl: false);
       expect(
         ltr.map((t) => t.id).toList(),
-        ['settings', 'library', 'kids', 'anime', 'home'],
+        ['home', 'anime', 'kids', 'library', 'settings'],
       );
       final rtl = noorDockTabsFor(rtl: true);
       expect(

@@ -8,6 +8,7 @@ import '../oauth/oauth_redirect.dart';
 import '../trakt/trakt_pkce.dart';
 import '../trakt/trakt_tokens.dart';
 import '../track/track_link.dart';
+import '../data/catalog_response_cache.dart';
 
 /// Website-free API layer for Noor.
 ///
@@ -74,7 +75,8 @@ class NoorApi {
   // authorize + token + revoke live on the auth host; data endpoints stay
   // on api.trakt.tv. PKCE never sends a client_secret (deprecated for user
   // sign-in; the user's app is PKCE-only and has none to send).
-  static const String traktAuthorizeUrl = 'https://auth.trakt.tv/oauth/authorize';
+  static const String traktAuthorizeUrl =
+      'https://auth.trakt.tv/oauth/authorize';
   static const String traktTokenUrl = 'https://auth.trakt.tv/oauth/token';
   static const String traktRevokeUrl = 'https://auth.trakt.tv/oauth/revoke';
 
@@ -122,7 +124,8 @@ class NoorApi {
       'https://anilist.co/api/v2/oauth/authorize';
   static const String malAuthorizeEndpoint =
       'https://myanimelist.net/v1/oauth2/authorize';
-  static const String malTokenEndpoint = 'https://myanimelist.net/v1/oauth2/token';
+  static const String malTokenEndpoint =
+      'https://myanimelist.net/v1/oauth2/token';
   static const String malApiBase = 'https://api.myanimelist.net/v2';
 
   /// App-identifier redirect URI both trackers return to (registered as
@@ -309,11 +312,18 @@ class NoorApi {
   /// GETs [url] directly and returns the decoded JSON body (or plain text
   /// when the payload is not JSON).
   Future<dynamic> proxyGet(String url, {Map<String, String>? headers}) async {
-    final response = await _client.get<dynamic>(
-      url,
-      options: Options(headers: headers),
-    );
-    return response.data;
+    Future<dynamic> load() async {
+      final response =
+          await _client.get<dynamic>(url, options: Options(headers: headers));
+      return response.data;
+    }
+
+    final path = Uri.tryParse(url)?.path ?? '';
+    if ((headers == null || headers.isEmpty) &&
+        (path.contains('/catalog/') || path.contains('/meta/'))) {
+      return CatalogResponseCache.instance.get(url, load);
+    }
+    return load();
   }
 
   /// GETs [url] directly and returns the raw body as text (M3U / XML sources).
@@ -557,8 +567,7 @@ class NoorApi {
       final votes = _asInt(data['imdbVotes']);
       num? tomatoes;
       num? metacritic;
-      for (final entry
-          in (data['Ratings'] as List? ?? const <dynamic>[])) {
+      for (final entry in (data['Ratings'] as List? ?? const <dynamic>[])) {
         if (entry is! Map) continue;
         final source = entry['Source']?.toString();
         if (source == 'Rotten Tomatoes') {
@@ -693,8 +702,8 @@ class NoorApi {
           _asDouble(data['rating']);
       if (score == null && data['scores'] is Map) {
         final scores = Map<String, dynamic>.from(data['scores'] as Map);
-        score = _asDouble(scores['score_average']) ??
-            _asDouble(scores['average']);
+        score =
+            _asDouble(scores['score_average']) ?? _asDouble(scores['average']);
       }
       if (score == null) return null;
       return <String, dynamic>{'rating': score, 'votes': null};
@@ -948,8 +957,7 @@ class NoorApi {
       data: 'magnets[]=${Uri.encodeComponent(magnet)}',
       options: _debridFormOptions(const <String, String>{}),
     );
-    final magnets =
-        _asMap(_asMap(uploaded.data)?['data'])?['magnets'] as List?;
+    final magnets = _asMap(_asMap(uploaded.data)?['data'])?['magnets'] as List?;
     if (magnets == null || magnets.isEmpty) return null;
     final magnetId = _asMap(magnets.first)?['id']?.toString();
     if (magnetId == null || magnetId.isEmpty) return null;
@@ -963,8 +971,7 @@ class NoorApi {
         'https://api.alldebrid.com/v4/magnet/status',
         queryParameters: <String, String>{...base, 'id': magnetId},
       );
-      final rows =
-          _asMap(_asMap(response.data)?['data'])?['magnets'] as List?;
+      final rows = _asMap(_asMap(response.data)?['data'])?['magnets'] as List?;
       if (rows == null || rows.isEmpty) return null;
       magnetInfo = _asMap(rows.first);
       final code = (magnetInfo?['statusCode'] as num?)?.toInt() ?? -1;
@@ -1126,9 +1133,8 @@ class NoorApi {
     final wanted = filename?.trim().toLowerCase() ?? '';
     if (wanted.isNotEmpty) {
       for (var i = 0; i < files.length; i++) {
-        final path = files[i]['path']?.toString() ??
-            files[i]['name']?.toString() ??
-            '';
+        final path =
+            files[i]['path']?.toString() ?? files[i]['name']?.toString() ?? '';
         final base = path.split('/').last.toLowerCase();
         if (base.contains(wanted)) return i;
       }
@@ -1374,8 +1380,9 @@ class NoorApi {
     return TrackLink.resolvePendingService(
       anilistPending: anilistAlive,
       malPending: malAlive,
-      malStateMatches:
-          savedMalState != null && savedMalState.isNotEmpty && savedMalState == state,
+      malStateMatches: savedMalState != null &&
+          savedMalState.isNotEmpty &&
+          savedMalState == state,
       callbackHasState: state != null && state.isNotEmpty,
     );
   }
@@ -1495,7 +1502,10 @@ class NoorApi {
       final payload = _asMap(response.data);
       final token = payload?['access_token']?.toString() ?? '';
       if (token.isEmpty) {
-        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+        return <String, dynamic>{
+          'status': 'error',
+          'reason': 'exchange_failed'
+        };
       }
       await _storeServiceToken('mal', token);
       final refresh = payload?['refresh_token']?.toString();
@@ -1564,9 +1574,7 @@ class NoorApi {
         code == 'unauthorized_client') {
       return <String, dynamic>{'status': 'error', 'reason': 'invalid_client'};
     }
-    if (status == 400 ||
-        code == 'invalid_grant' ||
-        code == 'invalid_request') {
+    if (status == 400 || code == 'invalid_grant' || code == 'invalid_request') {
       return <String, dynamic>{'status': 'error', 'reason': 'invalid_grant'};
     }
     return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
@@ -1873,7 +1881,9 @@ mutation ($id: Int) {
         ? 'TV'
         : mediaType == 'MOVIE'
             ? 'MOVIE'
-            : (mediaType == 'OVA' || mediaType == 'ONA' || mediaType == 'SPECIAL'
+            : (mediaType == 'OVA' ||
+                    mediaType == 'ONA' ||
+                    mediaType == 'SPECIAL'
                 ? mediaType
                 : null);
     if (format == null) return null; // music videos and unknown formats
@@ -2128,8 +2138,7 @@ mutation ($id: Int) {
         'mal',
         current?['status']?.toString(),
       );
-      final progress =
-          (current?['num_episodes_watched'] as num?)?.toInt() ?? 0;
+      final progress = (current?['num_episodes_watched'] as num?)?.toInt() ?? 0;
       if ((status != null && status != AnimeTrackStatus.planning) ||
           progress > 0) {
         return true; // protect real progress
@@ -2175,7 +2184,8 @@ mutation ($id: Int) {
     }
   }
 
-  Future<bool> pushMalScore({required int malId, required double score10}) async {
+  Future<bool> pushMalScore(
+      {required int malId, required double score10}) async {
     if (!isLinked('mal')) return false;
     final token = await _validMalAccessToken();
     if (token == null) return false;
@@ -2225,8 +2235,7 @@ mutation ($id: Int) {
               'mal',
               status['status']?.toString(),
             )?.name,
-            'progress':
-                (status['num_episodes_watched'] as num?)?.toInt() ?? 0,
+            'progress': (status['num_episodes_watched'] as num?)?.toInt() ?? 0,
             'score10': score10FromMal(status['score'] as num?),
           };
         }
@@ -2359,8 +2368,7 @@ query ($userId: Int) {
       'mal',
       list?['status']?.toString(),
     );
-    final progress =
-        (list?['num_episodes_watched'] as num?)?.toInt() ?? 0;
+    final progress = (list?['num_episodes_watched'] as num?)?.toInt() ?? 0;
     final isMovie = node?['media_type']?.toString().toLowerCase() == 'movie';
     final base = <String, dynamic>{
       'type': isMovie ? 'movie' : 'series',
@@ -2412,9 +2420,8 @@ query ($userId: Int) {
   Future<Map<String, dynamic>?> startTraktLink() async {
     try {
       final method = await traktLinkMethod();
-      final redirect = method == 'relay'
-          ? traktRedirectUri
-          : traktLegacySchemeRedirectUri;
+      final redirect =
+          method == 'relay' ? traktRedirectUri : traktLegacySchemeRedirectUri;
       final verifier = TraktPkce.generateVerifier();
       final state = TraktPkce.generateState();
       final challenge = TraktPkce.challengeS256(verifier);
@@ -2639,7 +2646,10 @@ query ($userId: Int) {
         tokens = TraktTokenSet.fromResponse(_asMap(response.data) ?? const {});
       } on FormatException {
         await _clearTraktPkce();
-        return <String, dynamic>{'status': 'error', 'reason': 'exchange_failed'};
+        return <String, dynamic>{
+          'status': 'error',
+          'reason': 'exchange_failed'
+        };
       }
       await _storeTraktTokens(tokens);
       await _clearTraktPkce();
@@ -2854,8 +2864,12 @@ query ($userId: Int) {
         'ids': <String, dynamic>{'imdb': imdb},
       };
       final body = type.toLowerCase() == 'series'
-          ? <String, dynamic>{'shows': <dynamic>[entry]}
-          : <String, dynamic>{'movies': <dynamic>[entry]};
+          ? <String, dynamic>{
+              'shows': <dynamic>[entry]
+            }
+          : <String, dynamic>{
+              'movies': <dynamic>[entry]
+            };
       await _client.post<dynamic>(
         '$traktBaseUrl/sync/watchlist${add ? '' : '/remove'}',
         data: body,
@@ -2921,9 +2935,8 @@ query ($userId: Int) {
           },
         ),
       );
-      final items = response.data is List
-          ? response.data as List
-          : const <dynamic>[];
+      final items =
+          response.data is List ? response.data as List : const <dynamic>[];
       return items
           .map(_mapTraktItem)
           .whereType<Map<String, dynamic>>()
@@ -3018,9 +3031,7 @@ query ($userId: Int) {
         final dedupeKey = '${section.value}|${imdb ?? title.toLowerCase()}';
         if (!seen.add(dedupeKey)) continue;
         final watchedAt = _epochMillis(
-          entry['watched_at'] ??
-              entry['last_watched_at'] ??
-              entry['added_at'],
+          entry['watched_at'] ?? entry['last_watched_at'] ?? entry['added_at'],
         );
         result.add(<String, dynamic>{
           'type': section.value,

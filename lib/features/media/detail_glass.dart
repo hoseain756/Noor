@@ -45,37 +45,14 @@ class GlassPillSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(borderRadius);
-    return DecoratedBox(
-      // 1px white/15 ring painted above the clipped glass + the old
-      // back-pill soft shadow — the pre-118 decoration verbatim.
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        border: Border.all(color: Colors.white.withValues(alpha: .15)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .35),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: Stack(
-          children: [
-            // Static glass fill (was a live blur-12/14 backdrop — Task 136).
-            Positioned.fill(
-              child: ColoredBox(
-                color: Colors.black.withValues(alpha: .72),
-              ),
-            ),
-            // Content on top of the glass stack — the NON-positioned child
-            // (it defines the pill's intrinsic size; the fill layers adapt).
-            child,
-          ],
-        ),
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.circular(borderRadius > 20 ? 16 : borderRadius),
+          side: BorderSide(color: scheme.outlineVariant)),
+      child: child,
     );
   }
 }
@@ -212,39 +189,19 @@ class _GlassMenuPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const radius = BorderRadius.all(Radius.circular(16));
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        border: Border.all(color: Colors.white.withValues(alpha: .08)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .45),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        // Task 136 (perf): the blur-24 backdrop is gone — the .95 surface
-        // fill covered it almost completely, so the GPU paid a full gaussian
-        // pass for a nearly invisible effect every frame the menu scrolled.
-        child: ColoredBox(
-          // bg-elevated/95 → HorseTheme.surface (#131617) at .95.
-          color: HorseTheme.surface.withValues(alpha: .95),
-          child: Material(
-            type: MaterialType.transparency,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: maxHeight),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(6),
-                child: child,
-              ),
-            ),
-          ),
-        ),
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      elevation: 8,
+      shadowColor: scheme.shadow.withValues(alpha: .20),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: scheme.outlineVariant)),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: SingleChildScrollView(
+              padding: const EdgeInsets.all(8), child: child)),
     );
   }
 }
@@ -268,7 +225,7 @@ class GlassMenuItem extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 44),
+        constraints: const BoxConstraints(minHeight: 48),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         alignment: AlignmentDirectional.centerStart,
         child: Row(
@@ -278,12 +235,12 @@ class GlassMenuItem extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                maxLines: 1,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
-                  color: HorseTheme.ink,
+                  color: NovaTheme.of(context).ink,
                 ),
               ),
             ),

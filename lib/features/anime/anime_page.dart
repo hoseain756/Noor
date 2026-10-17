@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import '../shell/nova_catalog_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +8,8 @@ import '../../core/state/app_state.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../settings/integrations_page.dart';
+import '../shell/nova_browse_widgets.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../shell/noor_dock_tabs.dart';
 import '../media/media_detail_page.dart';
 import 'anime_search_sheet.dart';
@@ -17,9 +21,14 @@ class AnimePage extends StatefulWidget {
   State<AnimePage> createState() => _AnimePageState();
 }
 
-class _AnimePageState extends State<AnimePage> {
+class _AnimePageState extends State<AnimePage>
+    with NovaCatalogRefresh<AnimePage> {
+  @override
+  void refreshCachedCatalogs() => _retry();
+
   late Future<List<MediaItem>> _items;
   final Set<String> _resolving = {};
+  String _filter = 'all';
 
   @override
   void initState() {
@@ -40,8 +49,7 @@ class _AnimePageState extends State<AnimePage> {
     // home page uses, scoped here so the tab is self-sufficient).
     final watching =
         app.linkedCatalogItems['anilist-watching'] ?? const <MediaItem>[];
-    final planning =
-        app.linkedCatalogItems['anilist'] ?? const <MediaItem>[];
+    final planning = app.linkedCatalogItems['anilist'] ?? const <MediaItem>[];
     final anilistLinked = app.linkedServices['anilist']?['linked'] == true;
     return FutureBuilder<List<MediaItem>>(
       future: _items,
@@ -52,76 +60,79 @@ class _AnimePageState extends State<AnimePage> {
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(20, 24, 20, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            english ? 'Anime, your way' : 'الأنمي على طريقتك',
-                            style: Theme.of(context).textTheme.headlineSmall,
-                          ),
-                        ),
-                        IconButton.filledTonal(
-                          tooltip: english
-                              ? 'Search anime on AniList'
-                              : 'ابحث عن الأنمي في AniList',
-                          onPressed: () => showAnimeSearchSheet(context),
-                          icon: const Icon(Icons.search_rounded),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      english
-                          ? 'Trending anime movies and series, powered by AniList.'
-                          : 'أفلام ومسلسلات الأنمي الرائجة من AniList.',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: HorseTheme.muted),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+                child: NovaBrowseHeader(
+              eyebrow: app.tr('message521'),
+              title: app.tr('message522'),
+              subtitle: app.tr('message523'),
+              actions: [
+                FilledButton.tonalIcon(
+                    onPressed: () => showAnimeSearchSheet(context),
+                    icon: const Icon(LucideIcons.search),
+                    label: Text(app.tr('message524')))
+              ],
+            )),
+            SliverToBoxAdapter(
+                child: Padding(
+                    padding:
+                        const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+                    child: Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final entry in [
+                        ('all', app.tr('message525')),
+                        ('series', app.tr('message107')),
+                        ('movie', app.tr('message526')),
+                      ])
+                        ChoiceChip(
+                            label: Text(entry.$2),
+                            selected: _filter == entry.$1,
+                            onSelected: (_) =>
+                                setState(() => _filter = entry.$1))
+                    ]))),
+            if (items.isNotEmpty)
+              SliverToBoxAdapter(
+                  child: NovaBrowseFeature(
+                item: (_filter == 'series' && series.isNotEmpty)
+                    ? series.first
+                    : (_filter == 'movie' && movies.isNotEmpty)
+                        ? movies.first
+                        : items.first,
+                label: app.tr('message130'),
+                actionLabel: app.tr('message527'),
+                onOpen: () => _open((_filter == 'series' && series.isNotEmpty)
+                    ? series.first
+                    : (_filter == 'movie' && movies.isNotEmpty)
+                        ? movies.first
+                        : items.first),
+              )),
             // Personal AniList rails — rendered above the public catalogs
             // so the linked account's own lists lead the tab. `anilist:`
             // identities resolve through _open like every other card.
-            if (anilistLinked && watching.isNotEmpty)
+            if (_filter == 'all' && anilistLinked && watching.isNotEmpty)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsetsDirectional.only(
                     bottom: MediaRail.sectionSpacing(context),
                   ),
                   child: MediaRail(
-                    title: english
-                        ? 'Watching · AniList'
-                        : 'أتابعها الآن · AniList',
+                    title: NovaStrings.lookup(english, 'message528'),
                     items: watching,
                     onTap: _open,
                   ),
                 ),
               ),
-            if (anilistLinked && planning.isNotEmpty)
+            if (_filter == 'all' && anilistLinked && planning.isNotEmpty)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsetsDirectional.only(
                     bottom: MediaRail.sectionSpacing(context),
                   ),
                   child: MediaRail(
-                    title: english
-                        ? 'Plan to watch · AniList'
-                        : 'أخطط لمشاهدتها · AniList',
+                    title: NovaStrings.lookup(english, 'message529'),
                     items: planning,
                     onTap: _open,
                   ),
                 ),
               ),
-            if (!anilistLinked)
+            if (_filter == 'all' && !anilistLinked)
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsetsDirectional.fromSTEB(20, 0, 20, 18),
@@ -130,32 +141,23 @@ class _AnimePageState extends State<AnimePage> {
               ),
             if (snapshot.connectionState == ConnectionState.waiting &&
                 items.isEmpty)
-              SliverToBoxAdapter(
-                child: _CatalogState(
-                  icon: Icons.auto_awesome_outlined,
-                  message: english ? 'Loading anime…' : 'جارٍ تحميل الأنمي…',
-                  loading: true,
-                ),
-              )
+              const SliverToBoxAdapter(
+                  child: SizedBox(height: 440, child: NovaBrowseSkeleton()))
             else if (snapshot.hasError)
               SliverToBoxAdapter(
                 child: _CatalogState(
-                  icon: Icons.cloud_off_outlined,
-                  message: english
-                      ? 'Anime could not be loaded. Check your connection and try again.'
-                      : 'تعذر تحميل الأنمي. تحقق من الاتصال ثم أعد المحاولة.',
-                  actionLabel: english ? 'Retry' : 'إعادة المحاولة',
+                  icon: LucideIcons.cloudOff,
+                  message: NovaStrings.lookup(english, 'message530'),
+                  actionLabel: NovaStrings.lookup(english, 'message120'),
                   onRetry: _retry,
                 ),
               )
             else if (items.isEmpty)
               SliverToBoxAdapter(
                 child: _CatalogState(
-                  icon: Icons.search_off_rounded,
-                  message: english
-                      ? 'No anime titles are available right now.'
-                      : 'لا تتوفر عناوين أنمي حاليًا.',
-                  actionLabel: english ? 'Refresh' : 'تحديث',
+                  icon: LucideIcons.searchX,
+                  message: NovaStrings.lookup(english, 'message531'),
+                  actionLabel: NovaStrings.lookup(english, 'message68'),
                   onRetry: _retry,
                 ),
               )
@@ -166,33 +168,37 @@ class _AnimePageState extends State<AnimePage> {
                     bottom: MediaRail.sectionSpacing(context),
                   ),
                   child: MediaRail(
-                    title: english ? 'Trending anime' : 'أنمي رائج',
-                    items: items.take(14).toList(),
+                    title: NovaStrings.lookup(english, 'message113'),
+                    items: items
+                        .where(
+                            (item) => _filter == 'all' || item.type == _filter)
+                        .take(14)
+                        .toList(),
                     onTap: _open,
                   ),
                 ),
               ),
-              if (series.isNotEmpty)
+              if (_filter != 'movie' && series.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsetsDirectional.only(
                       bottom: MediaRail.sectionSpacing(context),
                     ),
                     child: MediaRail(
-                      title: english ? 'Anime series' : 'مسلسلات الأنمي',
+                      title: NovaStrings.lookup(english, 'message532'),
                       items: series,
                       onTap: _open,
                     ),
                   ),
                 ),
-              if (movies.isNotEmpty)
+              if (_filter != 'series' && movies.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsetsDirectional.only(
                       bottom: MediaRail.sectionSpacing(context),
                     ),
                     child: MediaRail(
-                      title: english ? 'Anime movies' : 'أفلام الأنمي',
+                      title: NovaStrings.lookup(english, 'message114'),
                       items: movies,
                       onTap: _open,
                     ),
@@ -222,9 +228,7 @@ class _AnimePageState extends State<AnimePage> {
       if (resolved == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(app.english
-                ? 'A playable Stremio entry was not found for this title.'
-                : 'لم يُعثر على عنوان قابل للتشغيل لهذا العمل.'),
+            content: Text(NovaStrings.lookup(app.english, 'message117')),
           ),
         );
         return;
@@ -252,14 +256,12 @@ class _CatalogState extends StatelessWidget {
   const _CatalogState({
     required this.icon,
     required this.message,
-    this.loading = false,
     this.actionLabel,
     this.onRetry,
   });
 
   final IconData icon;
   final String message;
-  final bool loading;
   final String? actionLabel;
   final VoidCallback? onRetry;
 
@@ -273,20 +275,14 @@ class _CatalogState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (loading)
-                const CircularProgressIndicator(
-                  color: HorseTheme.gold,
-                  strokeWidth: 2,
-                )
-              else
-                Icon(icon, size: 36, color: HorseTheme.gold),
+              Icon(icon, size: 36, color: NovaTheme.of(context).gold),
               const SizedBox(height: 14),
               Text(message, textAlign: TextAlign.center),
               if (onRetry != null && actionLabel != null) ...[
                 const SizedBox(height: 14),
                 OutlinedButton.icon(
                   onPressed: onRetry,
-                  icon: const Icon(Icons.refresh_rounded),
+                  icon: const Icon(LucideIcons.refreshCw),
                   label: Text(actionLabel!),
                 ),
               ],
@@ -325,19 +321,19 @@ class _AniListLinkPrompt extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: HorseTheme.gold.withValues(alpha: .14),
+                  color: NovaTheme.of(context).gold.withValues(alpha: .14),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.auto_awesome_rounded,
+                child: Icon(
+                  LucideIcons.sparkles,
                   size: 22,
-                  color: HorseTheme.gold,
+                  color: NovaTheme.of(context).gold,
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  english ? 'Link your AniList account' : 'اربط حساب AniList',
+                  NovaStrings.lookup(english, 'message533'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
@@ -345,13 +341,11 @@ class _AniListLinkPrompt extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            english
-                ? 'Your Watching and Plan-to-watch lists appear here right after linking.'
-                : 'قوائم «أتابعها الآن» و«أخطط لمشاهدتها» من حسابك تظهر هنا بعد الربط مباشرةً.',
+            NovaStrings.lookup(english, 'message534'),
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: HorseTheme.muted),
+                ?.copyWith(color: NovaTheme.of(context).muted),
           ),
           const SizedBox(height: 12),
           Align(
@@ -362,7 +356,7 @@ class _AniListLinkPrompt extends StatelessWidget {
                   builder: (_) => const IntegrationsPage(),
                 ),
               ),
-              child: Text(english ? 'Link account' : 'ربط الحساب'),
+              child: Text(NovaStrings.lookup(english, 'message535')),
             ),
           ),
         ],

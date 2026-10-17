@@ -1,5 +1,6 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +13,9 @@ import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/image_decode.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../shell/noor_dock_tabs.dart';
+import '../shell/nova_browse_widgets.dart';
+import '../downloads/downloads_page.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../player/video_player_page.dart';
 import '../torrent/magnet_opener.dart';
 import 'custom_lists_page.dart';
@@ -26,243 +30,142 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage> {
   int _tab = 0;
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final english = app.english;
-    final width = MediaQuery.sizeOf(context).width;
-    final maxCardWidth = width >= 800 ? 184.0 : 160.0;
-    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final posterExtent = maxCardWidth / .72;
-    final showPosterTitles = app.webSettings['hidePosterTitles'] != true;
-    final cardTextHeight =
-        showPosterTitles ? 8 + 36 * textScale + 3 + 14 * textScale + 12 : 0.0;
-    final cardExtent = showPosterTitles
-        ? math.max(296.0, posterExtent + cardTextHeight)
-        : posterExtent;
     final librarySort = app.webSettings['librarySort']?.toString() ?? 'recent';
-    final watchlist = [...app.watchlist]..sort((a, b) => switch (librarySort) {
-          'title' => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          'year' => (int.tryParse(b.releaseInfo ?? '') ?? 0)
-              .compareTo(int.tryParse(a.releaseInfo ?? '') ?? 0),
-          _ => 0,
-        });
-    final history = [...app.history]..sort((a, b) => switch (librarySort) {
-          'title' =>
-            a.item.name.toLowerCase().compareTo(b.item.name.toLowerCase()),
-          'year' => (int.tryParse(b.item.releaseInfo ?? '') ?? 0)
-              .compareTo(int.tryParse(a.item.releaseInfo ?? '') ?? 0),
-          _ => b.watchedAt.compareTo(a.watchedAt),
-        });
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
+    final watchlist = app.watchlist
+        .where((item) => item.name.toLowerCase().contains(_query))
+        .toList()
+      ..sort((a, b) => switch (librarySort) {
+            'title' => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+            'year' => (int.tryParse(b.releaseInfo ?? '') ?? 0)
+                .compareTo(int.tryParse(a.releaseInfo ?? '') ?? 0),
+            _ => 0,
+          });
+    final history = app.history
+        .where((entry) => entry.item.name.toLowerCase().contains(_query))
+        .toList()
+      ..sort((a, b) => switch (librarySort) {
+            'title' =>
+              a.item.name.toLowerCase().compareTo(b.item.name.toLowerCase()),
+            'year' => (int.tryParse(b.item.releaseInfo ?? '') ?? 0)
+                .compareTo(int.tryParse(a.item.releaseInfo ?? '') ?? 0),
+            _ => b.watchedAt.compareTo(a.watchedAt),
+          });
+    return CustomScrollView(slivers: [
+      SliverToBoxAdapter(
+          child: NovaBrowseHeader(
+              eyebrow: app.tr('message636'),
+              title: app.tr('message637'),
+              subtitle: app.tr('message638'),
+              actions: [
+            FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => const DownloadsPage())),
+                icon: const Icon(LucideIcons.download),
+                label: Text(app.tr('downloads'))),
+            OutlinedButton.icon(
+                onPressed: () => unawaited(openMagnetFlow(context)),
+                icon: const Icon(LucideIcons.magnet),
+                label: Text(app.tr('message639'))),
+          ])),
+      SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            english ? 'My library' : 'مكتبتي',
-                            style: Theme.of(context).textTheme.headlineSmall,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            english
-                                ? 'Keep your watchlist, collections and recent plays together.'
-                                : 'اجمع قوائمك وآخر ما شغّلته في مكان واحد.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: HorseTheme.muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    _OpenTorrentButton(english: english),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: HorseTheme.surface,
-                    borderRadius: BorderRadius.circular(14),
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final entry in [
+                  (
+                    0,
+                    app.tr('message640'),
+                    watchlist.length,
+                    LucideIcons.bookmark
                   ),
-                  child: Row(
-                    children: [
-                      _LibraryTab(
-                        label: english ? 'Watchlist' : 'قائمتي',
-                        count: watchlist.length,
-                        selected: _tab == 0,
-                        onTap: () => setState(() => _tab = 0),
-                      ),
-                      _LibraryTab(
-                        label: english ? 'History' : 'المشاهدة',
-                        count: history.length,
-                        selected: _tab == 1,
-                        onTap: () => setState(() => _tab = 1),
-                      ),
-                      _LibraryTab(
-                        label: english ? 'Lists' : 'قوائم',
-                        count: app.customLists.length,
-                        selected: _tab == 2,
-                        onTap: () => setState(() => _tab = 2),
-                      ),
-                    ],
+                  (
+                    1,
+                    app.tr('message641'),
+                    history.length,
+                    LucideIcons.history
                   ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_tab == 0) ...[
-          if (watchlist.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyLibrary(
-                icon: Icons.bookmark_border_rounded,
-                title: english ? 'Nothing saved yet' : 'لم تحفظ أي عنوان بعد',
-                body: english
-                    ? 'Open a title and tap “My list” to keep it here.'
-                    : 'افتح أي عنوان واضغط «قائمتي» لحفظه هنا.',
-              ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 30),
-              sliver: SliverGrid.builder(
-                itemCount: watchlist.length,
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: maxCardWidth,
-                  mainAxisExtent: cardExtent,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 16,
-                ),
-                itemBuilder: (context, index) =>
-                    _WatchlistCard(item: watchlist[index]),
-              ),
-            ),
-        ] else if (_tab == 1) ...[
-          if (history.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyLibrary(
-                icon: Icons.history_rounded,
-                title: english ? 'No recent plays' : 'لا يوجد سجل مشاهدة',
-                body: english
-                    ? 'Titles you play will appear here.'
-                    : 'ستظهر هنا العناوين التي تشغّلها.',
-              ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 30),
-              sliver: SliverList.separated(
-                itemCount: history.length,
-                separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: HorseTheme.line),
-                itemBuilder: (context, index) =>
-                    _HistoryRow(entry: history[index]),
-              ),
-            ),
-        ] else ...[
-          const SliverToBoxAdapter(child: CustomListsPanel()),
-        ],
+                  (
+                    2,
+                    app.tr('message642'),
+                    app.customLists.length,
+                    LucideIcons.library
+                  ),
+                ])
+                  ChoiceChip(
+                      avatar: Icon(entry.$4, size: 18),
+                      label: Text('${entry.$2} · ${entry.$3}'),
+                      selected: _tab == entry.$1,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      onSelected: (_) => setState(() {
+                            _tab = entry.$1;
+                          })),
+              ]))),
+      if (_tab != 2)
         SliverToBoxAdapter(
-          child: SizedBox(
-            height: glassDockContentClearance(context),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _LibraryTab extends StatelessWidget {
-  const _LibraryTab({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 500 ||
-        MediaQuery.textScalerOf(context).scale(14) / 14 >= 1.5;
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(11),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          decoration: BoxDecoration(
-            color: selected ? const Color(0xFF28231B) : Colors.transparent,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: compact
-              ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      style: TextStyle(
-                        color: selected ? HorseTheme.gold : HorseTheme.muted,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: selected ? HorseTheme.gold : HorseTheme.muted,
-                      ),
-                    ),
-                  ],
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: selected ? HorseTheme.gold : HorseTheme.muted,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: selected ? HorseTheme.gold : HorseTheme.muted,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    );
+            child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+                child: TextField(
+                    onChanged: (value) =>
+                        setState(() => _query = value.trim().toLowerCase()),
+                    decoration: InputDecoration(
+                        prefixIcon: const Icon(LucideIcons.search),
+                        hintText: app.tr('message643'))))),
+      if (_tab == 0) ...[
+        if (watchlist.isEmpty)
+          SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyLibrary(
+                  icon: LucideIcons.bookmark,
+                  title: _query.isEmpty
+                      ? app.tr('message104')
+                      : app.tr('message644'),
+                  body: app.tr('message645')))
+        else
+          SliverPadding(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+              sliver: SliverLayoutBuilder(builder: (context, constraints) {
+                final columns =
+                    (constraints.crossAxisExtent / 190).floor().clamp(2, 7);
+                final width =
+                    (constraints.crossAxisExtent - (columns - 1) * 20) /
+                        columns;
+                return SliverGrid.builder(
+                    itemCount: watchlist.length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        mainAxisExtent: width / .72 +
+                            78 * MediaQuery.textScalerOf(context).scale(1),
+                        crossAxisSpacing: 20,
+                        mainAxisSpacing: 24),
+                    itemBuilder: (_, i) => _WatchlistCard(item: watchlist[i]));
+              })),
+      ] else if (_tab == 1) ...[
+        if (history.isEmpty)
+          SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyLibrary(
+                  icon: LucideIcons.history,
+                  title: app.tr('message646'),
+                  body: app.tr('message647')))
+        else
+          SliverPadding(
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+              sliver: SliverList.separated(
+                  itemCount: history.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  itemBuilder: (_, i) => _HistoryRow(entry: history[i]))),
+      ] else
+        const CustomListsPanel(),
+      SliverToBoxAdapter(
+          child: SizedBox(height: glassDockContentClearance(context))),
+    ]);
   }
 }
 
@@ -289,10 +192,19 @@ class _WatchlistCard extends StatelessWidget {
               child: IconButton(
                 iconSize: 18,
                 constraints:
-                    const BoxConstraints.tightFor(width: 38, height: 38),
-                onPressed: () => context.read<AppState>().toggleWatchlist(item),
-                icon:
-                    const Icon(Icons.bookmark_rounded, color: HorseTheme.gold),
+                    const BoxConstraints.tightFor(width: 48, height: 48),
+                tooltip: context.read<AppState>().tr('message648'),
+                onPressed: () {
+                  final app = context.read<AppState>();
+                  app.toggleWatchlist(item);
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(app.tr('message649')),
+                      action: SnackBarAction(
+                          label: app.tr('message618'),
+                          onPressed: () => app.toggleWatchlist(item))));
+                },
+                icon: Icon(LucideIcons.bookmark,
+                    color: NovaTheme.of(context).gold),
               ),
             ),
           ),
@@ -319,7 +231,7 @@ Future<void> _openTorrentHistoryEntry(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) => AlertDialog(
-      backgroundColor: HorseTheme.surface,
+      backgroundColor: NovaTheme.of(context).surface,
       content: Row(
         children: [
           const SizedBox.square(
@@ -329,7 +241,7 @@ Future<void> _openTorrentHistoryEntry(
           const SizedBox(width: 16),
           Expanded(
             child: Text(
-              english ? 'Preparing the stream…' : 'جارٍ تجهيز البث…',
+              NovaStrings.lookup(english, 'message650'),
               style: Theme.of(dialogContext).textTheme.bodyMedium,
             ),
           ),
@@ -341,7 +253,7 @@ Future<void> _openTorrentHistoryEntry(
             cancelled = true;
             Navigator.of(dialogContext).pop();
           },
-          child: Text(english ? 'Cancel' : 'إلغاء'),
+          child: Text(NovaStrings.lookup(english, 'cancel')),
         ),
       ],
     ),
@@ -383,9 +295,7 @@ Future<void> _openTorrentHistoryEntry(
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          english
-              ? 'Could not resume this torrent: ${error.message}'
-              : 'تعذّر استئناف هذا التورنت: ${error.message}',
+          NovaStrings.lookup(english, 'message651', {'p0': error.message}),
         ),
       ),
     );
@@ -394,9 +304,7 @@ Future<void> _openTorrentHistoryEntry(
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          english
-              ? 'Could not resume this torrent. Try again.'
-              : 'تعذّر استئناف هذا التورنت. حاول مرة أخرى.',
+          NovaStrings.lookup(english, 'message652'),
         ),
       ),
     );
@@ -429,17 +337,17 @@ class _HistoryRow extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: SizedBox(
-                width: 54,
-                height: 76,
+                width: 88,
+                height: 124,
                 child: isTorrent
                     ? Stack(
                         fit: StackFit.expand,
                         children: [
-                          const ColoredBox(
-                            color: HorseTheme.raised,
+                          ColoredBox(
+                            color: NovaTheme.of(context).raised,
                             child: Icon(
-                              Icons.movie_outlined,
-                              color: HorseTheme.gold,
+                              LucideIcons.film,
+                              color: NovaTheme.of(context).gold,
                             ),
                           ),
                           PositionedDirectional(
@@ -451,9 +359,9 @@ class _HistoryRow extends StatelessWidget {
                                 color: Colors.black.withValues(alpha: .55),
                                 borderRadius: BorderRadius.circular(7),
                               ),
-                              child: const Icon(
-                                Icons.bolt_rounded,
-                                color: HorseTheme.gold,
+                              child: Icon(
+                                LucideIcons.zap,
+                                color: NovaTheme.of(context).gold,
                                 size: 13,
                               ),
                             ),
@@ -461,23 +369,23 @@ class _HistoryRow extends StatelessWidget {
                         ],
                       )
                     : item.poster == null
-                        ? const ColoredBox(
-                            color: HorseTheme.raised,
+                        ? ColoredBox(
+                            color: NovaTheme.of(context).raised,
                             child: Icon(
-                              Icons.movie_outlined,
-                              color: HorseTheme.gold,
+                              LucideIcons.film,
+                              color: NovaTheme.of(context).gold,
                             ),
                           )
-                        : Image.network(
+                        : NovaNetworkImage(
                             item.poster!,
                             fit: BoxFit.cover,
                             // Task 136: decode at the 54px history thumb.
-                            cacheWidth: imageCacheWidth(context, 54),
-                            errorBuilder: (_, __, ___) => const ColoredBox(
-                              color: HorseTheme.raised,
+                            cacheWidth: imageCacheWidth(context, 88),
+                            errorBuilder: (_, __, ___) => ColoredBox(
+                              color: NovaTheme.of(context).raised,
                               child: Icon(
-                                Icons.movie_outlined,
-                                color: HorseTheme.gold,
+                                LucideIcons.film,
+                                color: NovaTheme.of(context).gold,
                               ),
                             ),
                           ),
@@ -496,7 +404,7 @@ class _HistoryRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${item.type == 'series' ? (english ? 'Series' : 'مسلسل') : (english ? 'Movie' : 'فيلم')} · ${MaterialLocalizations.of(context).formatMediumDate(date)}',
+                    '${item.type == 'series' ? (NovaStrings.lookup(english, 'message129')) : (NovaStrings.lookup(english, 'message128'))} · ${MaterialLocalizations.of(context).formatMediumDate(date)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   if (entry.durationMs > 0) ...[
@@ -504,15 +412,19 @@ class _HistoryRow extends StatelessWidget {
                     LinearProgressIndicator(
                       value: progress,
                       minHeight: 3,
-                      backgroundColor: HorseTheme.line,
-                      color: HorseTheme.gold,
+                      backgroundColor: NovaTheme.of(context).line,
+                      color: NovaTheme.of(context).gold,
                     ),
                   ],
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(Icons.chevron_left_rounded, color: HorseTheme.muted),
+            Icon(
+                Directionality.of(context) == TextDirection.rtl
+                    ? LucideIcons.chevronLeft
+                    : LucideIcons.chevronRight,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -540,10 +452,10 @@ class _EmptyLibrary extends StatelessWidget {
                 width: 58,
                 height: 58,
                 decoration: BoxDecoration(
-                  color: HorseTheme.surface,
+                  color: NovaTheme.of(context).surface,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: Icon(icon, color: HorseTheme.gold, size: 27),
+                child: Icon(icon, color: NovaTheme.of(context).gold, size: 27),
               ),
               const SizedBox(height: 15),
               Text(title, style: Theme.of(context).textTheme.titleMedium),
@@ -557,44 +469,4 @@ class _EmptyLibrary extends StatelessWidget {
           ),
         ),
       );
-}
-
-/// Gold-tinted entry pill that opens the paste-a-magnet torrent flow.
-class _OpenTorrentButton extends StatelessWidget {
-  const _OpenTorrentButton({required this.english});
-
-  final bool english;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: HorseTheme.gold.withValues(alpha: .14),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(13),
-        side: BorderSide(color: HorseTheme.gold.withValues(alpha: .45)),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(13),
-        onTap: () => unawaited(openMagnetFlow(context)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.bolt_rounded, color: HorseTheme.gold, size: 18),
-              const SizedBox(width: 7),
-              Text(
-                english ? 'Torrent' : 'تورنت',
-                style: const TextStyle(
-                  color: HorseTheme.gold,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

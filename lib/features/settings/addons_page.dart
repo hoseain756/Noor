@@ -1,15 +1,16 @@
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/models/addon.dart';
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
 import '../../shared/widgets/image_decode.dart';
 import 'widgets/settings_tiles.dart';
 
 class AddonsPage extends StatefulWidget {
   const AddonsPage({super.key});
-
   @override
   State<AddonsPage> createState() => _AddonsPageState();
 }
@@ -19,16 +20,14 @@ class _AddonsPageState extends State<AddonsPage> {
   bool _busy = false;
   String? _message;
   bool _messageError = false;
-
   static const _suggestions = [
     ('Cinemeta', 'https://v3-cinemeta.strem.io/manifest.json'),
     ('OpenSubtitles', 'https://opensubtitles-v3.strem.io/manifest.json'),
     (
       'Stremio Add-on Catalog',
-      'https://addon-list.stremio.workers.dev/manifest.json',
+      'https://addon-list.stremio.workers.dev/manifest.json'
     ),
   ];
-
   @override
   void dispose() {
     _url.dispose();
@@ -36,29 +35,37 @@ class _AddonsPageState extends State<AddonsPage> {
   }
 
   Future<void> _install([String? value]) async {
+    if (_busy) return;
+    final app = context.read<AppState>();
     final url = (value ?? _url.text).trim();
-    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !['https', 'http', 'stremio'].contains(uri.scheme) ||
+        uri.host.isEmpty) {
+      setState(() {
+        _message = app.tr('message218');
+        _messageError = true;
+      });
+      return;
+    }
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      await context.read<AppState>().installAddon(url);
+      await app.installAddon(url);
       if (!mounted) return;
       _url.clear();
       setState(() {
-        _message = context.read<AppState>().english
-            ? 'Add-on installed and synced.'
-            : 'تم تثبيت الإضافة ومزامنتها.';
+        _message = app.tr('message219');
         _messageError = false;
       });
     } catch (error) {
-      if (mounted) {
+      if (mounted)
         setState(() {
           _message = error.toString().replaceFirst('Exception: ', '');
           _messageError = true;
         });
-      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -66,289 +73,298 @@ class _AddonsPageState extends State<AddonsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Task 122-c F4: the addons list IS this page's purpose — scoped select
-    // on (english, addons identity). Every addon mutation in AppState
-    // replaces the list, so this matches the old watch's update set while
-    // skipping unrelated notifies.
-    final (english, addons) = context.select<AppState, (bool, List<Addon>)>(
+    final (_, addons) = context.select<AppState, (bool, List<Addon>)>(
         (app) => (app.english, app.addons));
-    // Task 122-c hygiene: sort a LOCAL copy — never mutate app.addons in
-    // the middle of a build.
-    final sortedAddons = List.of(addons)
-      ..sort((a, b) => a.order.compareTo(b.order));
+    final app = context.read<AppState>();
+    final sorted = List.of(addons)..sort((a, b) => a.order.compareTo(b.order));
     return Scaffold(
-      appBar: AppBar(title: Text(english ? 'Add-ons' : 'الإضافات')),
-      body: Center(
-        child: ConstrainedBox(
+        appBar: AppBar(title: Text(app.tr('message220'))),
+        body: Center(
+            child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
-            children: [
-              Text(
-                english
-                    ? 'Bring your own catalog and streams.'
-                    : 'أضف الكتالوجات ومصادر البث التي تفضّلها.',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 7),
-              Text(
-                english
-                    ? 'Noor uses the open Stremio add-on protocol. Add-ons provide catalogs, streams, and subtitles.'
-                    : 'يستخدم Noor بروتوكول إضافات Stremio المفتوح. توفّر الإضافات الكتالوجات ومصادر البث والترجمات.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: HorseTheme.muted),
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(17),
-                decoration: BoxDecoration(
-                  color: HorseTheme.surface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: HorseTheme.line),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: CustomScrollView(slivers: [
+            SliverPadding(
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 0),
+                sliver: SliverToBoxAdapter(
+                    child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      english
-                          ? 'Install from manifest URL'
-                          : 'التثبيت عبر رابط manifest',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 12),
+                    SettingsPageIntro(
+                        title: app.tr('message221'),
+                        description: app.tr('message222'),
+                        icon: LucideIcons.puzzle),
+                    Text(app.tr('message223'),
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 16),
                     TextField(
-                      controller: _url,
-                      keyboardType: TextInputType.url,
-                      textDirection: TextDirection.ltr,
-                      autocorrect: false,
-                      onSubmitted: (_) => _install(),
-                      decoration: InputDecoration(
-                        hintText: 'https://addon.example/manifest.json',
-                        suffixIcon: IconButton(
-                          onPressed: _busy ? null : _install,
-                          icon: const Icon(Icons.add_rounded),
-                        ),
-                      ),
-                    ),
+                        controller: _url,
+                        keyboardType: TextInputType.url,
+                        textDirection: TextDirection.ltr,
+                        autocorrect: false,
+                        onSubmitted: (_) => _install(),
+                        decoration: InputDecoration(
+                            labelText: app.tr('message224'),
+                            hintText: 'https://addon.example/manifest.json',
+                            prefixIcon: const Icon(LucideIcons.link))),
                     const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final suggestion in _suggestions)
-                          ActionChip(
+                    FilledButton.icon(
+                        onPressed: _busy ? null : _install,
+                        icon: _busy
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(LucideIcons.plus),
+                        label: Text(app.tr('message225'))),
+                    const SizedBox(height: 16),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final suggestion in _suggestions)
+                        ActionChip(
                             label: Text(suggestion.$1),
                             onPressed:
-                                _busy ? null : () => _install(suggestion.$2),
-                          ),
-                      ],
-                    ),
-                    if (_busy)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 14),
-                        child: LinearProgressIndicator(
-                          minHeight: 2,
-                          color: HorseTheme.gold,
-                        ),
-                      ),
+                                _busy ? null : () => _install(suggestion.$2))
+                    ]),
                     if (_message != null)
                       Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Text(
-                          _message!,
-                          style: TextStyle(
-                            color: _messageError
-                                ? HorseTheme.danger
-                                : HorseTheme.gold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
+                          padding: const EdgeInsetsDirectional.only(top: 16),
+                          child: Semantics(
+                              liveRegion: true,
+                              child: SettingsInfoBanner(
+                                  message: _message!,
+                                  error: _messageError,
+                                  icon: _messageError
+                                      ? LucideIcons.circleAlert
+                                      : LucideIcons.circleCheck))),
+                    const SizedBox(height: 32),
+                    Text(app.tr('message226', {'p0': addons.length}),
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Text(app.tr('message227'),
+                        style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 16),
+                    if (sorted.isEmpty)
+                      SettingsInfoBanner(
+                          icon: LucideIcons.puzzle,
+                          message: app.tr('message228')),
                   ],
-                ),
-              ),
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      english ? 'Installed' : 'المثبتة',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  Text(
-                    '${addons.length}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (addons.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: HorseTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    english
-                        ? 'No add-ons yet. Public catalogs still work; install a stream add-on to watch titles.'
-                        : 'لا توجد إضافات بعد. الكتالوجات العامة تعمل، وثبّت إضافة بث لتشغيل العناوين.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                )
-              else
-                for (final addon in sortedAddons) _AddonRow(addon: addon),
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1815),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 19,
-                      color: HorseTheme.gold,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        english
-                            ? 'Add-ons are independent services. Noor only loads catalog metadata and plays sources you choose.'
-                            : 'الإضافات خدمات مستقلة. يعرض Noor بيانات الكتالوج ويشغّل المصدر الذي تختاره.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+                ))),
+            SliverPadding(
+                padding: const EdgeInsetsDirectional.symmetric(horizontal: 24),
+                sliver: SliverReorderableList(
+                    itemCount: sorted.length,
+                    onReorderItem: (oldIndex, newIndex) => app.reorderAddons(
+                        oldIndex,
+                        newIndex > oldIndex ? newIndex + 1 : newIndex),
+                    itemBuilder: (context, index) {
+                      final addon = sorted[index];
+                      return _AddonRow(
+                          key: ValueKey(addon.id),
+                          addon: addon,
+                          index: index,
+                          count: sorted.length);
+                    })),
+            SliverPadding(
+                padding: const EdgeInsets.all(24),
+                sliver: SliverToBoxAdapter(
+                    child: SettingsInfoBanner(message: app.tr('message229')))),
+          ]),
+        )));
   }
 }
 
 class _AddonRow extends StatelessWidget {
-  const _AddonRow({required this.addon});
+  const _AddonRow(
+      {super.key,
+      required this.addon,
+      required this.index,
+      required this.count});
   final Addon addon;
+  final int index, count;
   @override
   Widget build(BuildContext context) {
     final app = context.read<AppState>();
-    final english = app.english;
-    final resources = (addon.manifest['resources'] as List? ?? const [])
-        .map(
-          (value) =>
-              value is Map ? value['name']?.toString() ?? '' : value.toString(),
-        )
-        .where((value) => value.isNotEmpty)
-        .toSet();
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HorseTheme.line),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 5, 8, 5),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: HorseTheme.raised,
-            borderRadius: BorderRadius.circular(13),
-          ),
-          child: addon.manifest['logo'] is String
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(13),
-                  child: Image.network(
-                    addon.manifest['logo'] as String,
-                    fit: BoxFit.cover,
-                    // Task 136: decode at the 44px addon tile size.
-                    cacheWidth: imageCacheWidth(context, 44),
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.extension_rounded,
-                      color: HorseTheme.gold,
-                    ),
-                  ),
-                )
-              : const Icon(Icons.extension_rounded, color: HorseTheme.gold),
-        ),
-        title: Text(
-          addon.name,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 5),
-          child: Text(
-            resources.isEmpty
-                ? '${addon.catalogs.length} ${english ? 'catalogs' : 'كتالوج'}'
-                : resources.join(' · '),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-        trailing: SizedBox(
-          width: 88,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              SettingsOptimisticSwitch(
-                value: addon.enabled,
-                onChanged: (value) => app.setAddonEnabled(addon.id, value),
-              ),
-              IconButton(
-                tooltip: english ? 'Remove' : 'إزالة',
-                onPressed: () => _confirmRemove(context, addon),
-                icon: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: HorseTheme.muted,
-                  size: 20,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return Padding(
+        padding: const EdgeInsetsDirectional.only(bottom: 12),
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => _AddonDetailsPage(addonId: addon.id))),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(children: [
+                  Row(children: [
+                    ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                            width: 48,
+                            height: 48,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            child: addon.manifest['logo'] is String
+                                ? NovaNetworkImage(
+                                    addon.manifest['logo'] as String,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: imageCacheWidth(context, 48),
+                                    errorBuilder: (_, __, ___) =>
+                                        const Icon(LucideIcons.puzzle))
+                                : const Icon(LucideIcons.puzzle))),
+                    const SizedBox(width: 16),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text(addon.name,
+                              style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 4),
+                          Text(
+                              app.tr('message230', {
+                                'p0': index + 1,
+                                'p1': addon.catalogs.length
+                              }),
+                              style: Theme.of(context).textTheme.bodySmall),
+                        ])),
+                    Semantics(
+                        label: app.tr('message231', {'p0': addon.name}),
+                        child: SettingsOptimisticSwitch(
+                            value: addon.enabled,
+                            onChanged: (v) =>
+                                app.setAddonEnabled(addon.id, v))),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                        child: Text(
+                            addon.enabled
+                                ? app.tr('message232')
+                                : app.tr('message233'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .secondary))),
+                    IconButton(
+                        tooltip: app.tr('message234'),
+                        onPressed: index == 0
+                            ? null
+                            : () => app.reorderAddons(index, index - 1),
+                        icon: const Icon(LucideIcons.arrowUp, size: 18)),
+                    IconButton(
+                        tooltip: app.tr('message235'),
+                        onPressed: index == count - 1
+                            ? null
+                            : () => app.reorderAddons(index, index + 2),
+                        icon: const Icon(LucideIcons.arrowDown, size: 18)),
+                    ReorderableDragStartListener(
+                        index: index,
+                        child: Tooltip(
+                            message: app.tr('message236'),
+                            child: const SizedBox.square(
+                                dimension: 48,
+                                child:
+                                    Icon(LucideIcons.gripVertical, size: 20)))),
+                  ]),
+                ]),
+              )),
+        ));
   }
+}
 
-  Future<void> _confirmRemove(BuildContext context, Addon addon) async {
-    final english = context.read<AppState>().english;
-    final remove = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(english ? 'Remove add-on?' : 'إزالة الإضافة؟'),
-        content: Text(
-          english
-              ? '“${addon.name}” will be removed from this account.'
-              : 'ستتم إزالة «${addon.name}» من هذا الحساب.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(english ? 'Cancel' : 'إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(english ? 'Remove' : 'إزالة'),
-          ),
-        ],
-      ),
-    );
-    if (remove == true && context.mounted) {
-      await context.read<AppState>().removeAddon(addon.id);
-    }
+class _AddonDetailsPage extends StatelessWidget {
+  const _AddonDetailsPage({required this.addonId});
+  final String addonId;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final addon = app.addons.where((a) => a.id == addonId).firstOrNull;
+    if (addon == null)
+      return Scaffold(
+          appBar: AppBar(), body: Center(child: Text(app.tr('message237'))));
+    final configurable =
+        (addon.manifest['behaviorHints'] as Map?)?['configurable'] == true;
+    return Scaffold(
+        appBar: AppBar(title: Text(addon.name)),
+        body: Center(
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: ListView(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
+                  children: [
+                    SettingsPageIntro(
+                        title: addon.name,
+                        description:
+                            addon.manifest['description']?.toString() ??
+                                app.tr('message238'),
+                        icon: LucideIcons.puzzle),
+                    SettingsContentSection(
+                        title: app.tr('message239'),
+                        children: [
+                          SettingsOptimisticSwitchTile(
+                              title: Text(app.tr('message240')),
+                              subtitle: Text(app.tr('message241')),
+                              value: addon.enabled,
+                              onChanged: (v) =>
+                                  app.setAddonEnabled(addon.id, v)),
+                          if (configurable)
+                            SettingsTile(
+                                icon: LucideIcons.slidersHorizontal,
+                                title: app.tr('message242'),
+                                subtitle: app.tr('message243'),
+                                onTap: () async {
+                                  final opened = await launchUrl(
+                                      Uri.parse('${addon.baseUrl}/configure'),
+                                      mode: LaunchMode.externalApplication);
+                                  if (!opened && context.mounted)
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                            content:
+                                                Text(app.tr('message244'))));
+                                }),
+                          SettingsTile(
+                              icon: LucideIcons.copy,
+                              title: app.tr('message245'),
+                              onTap: () async {
+                                await Clipboard.setData(
+                                    ClipboardData(text: addon.transportUrl));
+                                if (context.mounted)
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                          content: Text(app.tr('message246'))));
+                              }),
+                        ]),
+                    if (addon.catalogs.isNotEmpty)
+                      SettingsContentSection(
+                          title: app.tr('message247'),
+                          children: [
+                            for (final catalog in addon.catalogs)
+                              ListTile(
+                                  title: Text(catalog.name),
+                                  subtitle: Text(catalog.type),
+                                  leading: const Icon(LucideIcons.library))
+                          ]),
+                    if (!configurable)
+                      SettingsInfoBanner(message: app.tr('message248')),
+                    const SizedBox(height: 32),
+                    OutlinedButton.icon(
+                        icon: const Icon(LucideIcons.trash2),
+                        label: Text(app.tr('message249')),
+                        onPressed: () async {
+                          final remove = await confirmSettingsAction(context,
+                              title: app.tr('message250'),
+                              message: app.tr('message251', {'p0': addon.name}),
+                              confirm: app.tr('remove'),
+                              cancel: app.tr('cancel'));
+                          if (remove) {
+                            await app.removeAddon(addon.id);
+                            if (context.mounted) Navigator.pop(context);
+                          }
+                        }),
+                  ],
+                ))));
   }
 }

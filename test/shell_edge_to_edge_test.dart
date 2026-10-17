@@ -118,18 +118,10 @@ void main() {
       reason: 'HomePage content must start at y=0 (edge-to-edge hero)',
     );
 
-    // 2) The four non-home tabs keep the previous top inset via SafeArea.
-    //    The shell keeps the unselected tabs alive but OFFSTAGE, so every
-    //    finder here must include offstage widgets.
+    // Tabs remain unmounted until their first visit; lazy startup must not
+    // fetch Kids/Library/Settings merely because the shell became visible.
     for (final page in const [AnimePage, KidsPage, LibraryPage, SettingsPage]) {
-      expect(
-        find.ancestor(
-          of: find.byType(page, skipOffstage: false),
-          matching: find.byType(SafeArea, skipOffstage: false),
-        ),
-        findsWidgets,
-        reason: '$page must keep its status-bar inset',
-      );
+      expect(find.byType(page, skipOffstage: false), findsNothing);
     }
     expect(
       find.ancestor(
@@ -153,5 +145,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     await tester.pump(const Duration(milliseconds: 120));
     expect(tester.takeException(), isNull);
+
+    await tester.drag(homeScroll, const Offset(0, 140));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('مكتبتي'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(LibraryPage), findsOneWidget);
+    expect(find.ancestor(of: find.byType(LibraryPage), matching: find.byType(SafeArea)), findsWidgets);
+    expect(tester.getTopLeft(find.byType(LibraryPage)).dy, 44);
+    expect(find.byType(AnimePage, skipOffstage: false), findsNothing);
+    expect(find.byType(KidsPage, skipOffstage: false), findsNothing);
+    expect(tester.takeException(), isNull);
+
   });
 }

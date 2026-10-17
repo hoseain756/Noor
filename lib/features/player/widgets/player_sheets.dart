@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/state/app_state.dart';
-import '../../../core/theme/horse_theme.dart';
+import '../../../core/theme/nova_theme.dart';
 import '../../../shared/widgets/color_picker_dialog.dart';
 import '../engine/playback_engine.dart';
 import 'subtitle_overlay.dart' show SubtitleStyle;
@@ -71,13 +72,15 @@ Future<T?> showPlayerSheet<T>(
   required WidgetBuilder builder,
 }) {
   final size = MediaQuery.sizeOf(context);
-  if (size.width >= 900) {
+  if (size.width >= 700 || size.width > size.height) {
     return showGeneralDialog<T>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'Player panel',
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 220),
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Theme.of(context).colorScheme.shadow.withValues(alpha: .32),
+      transitionDuration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
         final curved =
             CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
@@ -85,7 +88,9 @@ Future<T?> showPlayerSheet<T>(
           opacity: curved,
           child: SlideTransition(
             position: Tween<Offset>(
-              begin: const Offset(0, .06),
+              begin: Offset(
+                  Directionality.of(context) == TextDirection.rtl ? -.06 : .06,
+                  0),
               end: Offset.zero,
             ).animate(curved),
             child: Align(
@@ -93,14 +98,20 @@ Future<T?> showPlayerSheet<T>(
               child: Padding(
                 padding: const EdgeInsets.all(18),
                 child: Material(
-                  color: HorseTheme.raised.withValues(alpha: .98),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerLow
+                      .withValues(alpha: .98),
                   borderRadius: BorderRadius.circular(22),
                   clipBehavior: Clip.antiAlias,
                   elevation: 12,
-                  shadowColor: Colors.black54,
+                  shadowColor: Theme.of(context)
+                      .colorScheme
+                      .shadow
+                      .withValues(alpha: .32),
                   child: SizedBox(
-                    width: 400,
-                    height: size.height * .86,
+                    width: (size.width * .48).clamp(360.0, 560.0),
+                    height: size.height - 32,
                     child: builder(dialogContext),
                   ),
                 ),
@@ -113,12 +124,15 @@ Future<T?> showPlayerSheet<T>(
   }
   return showModalBottomSheet<T>(
     context: context,
-    backgroundColor: HorseTheme.raised,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
     isScrollControlled: true,
-    constraints: BoxConstraints(maxHeight: size.height * .66),
-    shape: const RoundedRectangleBorder(
+    constraints: BoxConstraints(maxHeight: size.height * .86),
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
+    sheetAnimationStyle: MediaQuery.disableAnimationsOf(context)
+        ? AnimationStyle.noAnimation
+        : null,
     builder: builder,
   );
 }
@@ -151,37 +165,37 @@ class SheetScaffold extends StatelessWidget {
     // Compact geometry for short landscape phone screens (~360–412 dp tall):
     // smaller paddings, header and close target leave the list usable.
     final compact = MediaQuery.sizeOf(context).height < 520;
-    final EdgeInsets insets = expanded
-        ? EdgeInsets.fromLTRB(
+    final EdgeInsetsGeometry insets = expanded
+        ? EdgeInsetsDirectional.fromSTEB(
             compact ? 14 : 18,
             compact ? 10 : 16,
             compact ? 14 : 18,
             compact ? 12 : 20,
           )
-        : const EdgeInsets.fromLTRB(18, 16, 18, 20);
+        : const EdgeInsetsDirectional.fromSTEB(18, 16, 18, 20);
     final header = Row(
       children: [
-        Text(
+        Expanded(
+            child: Text(
           title,
-          style: compact && expanded
-              ? Theme.of(context).textTheme.titleMedium
-              : Theme.of(context).textTheme.titleLarge,
-        ),
-        const Spacer(),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleLarge,
+        )),
         if (headerAction != null) ...[
           headerAction!,
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
         ],
         InkWell(
-          customBorder: const CircleBorder(),
+          customBorder: CircleBorder(),
           onTap: () => Navigator.of(context).pop(),
           child: SizedBox(
-            width: compact && expanded ? 30 : 34,
-            height: compact && expanded ? 30 : 34,
+            width: 48,
+            height: 48,
             child: Icon(
               LucideIcons.x,
               size: compact && expanded ? 17 : 18,
-              color: Colors.white54,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ),
@@ -195,7 +209,7 @@ class SheetScaffold extends StatelessWidget {
         SizedBox(height: compact && expanded ? 10 : 14),
         expanded ? Expanded(child: child) : Flexible(child: child),
         if (footer != null) ...[
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           footer!,
         ],
       ],
@@ -205,7 +219,7 @@ class SheetScaffold extends StatelessWidget {
           ? Padding(padding: insets, child: column)
           : ConstrainedBox(
               constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * .72,
+                maxHeight: MediaQuery.sizeOf(context).height * .82,
               ),
               child: Padding(padding: insets, child: column),
             ),
@@ -233,26 +247,39 @@ class SheetSelectChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: selected
-            ? HorseTheme.gold.withValues(alpha: .18)
-            : Colors.white.withValues(alpha: .05),
-        borderRadius: BorderRadius.circular(999),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: Center(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: selected ? HorseTheme.gold : Colors.white70,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
+  Widget build(BuildContext context) => ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Material(
+          color: selected
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Theme.of(context).colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                  color: selected
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.outlineVariant)),
+          child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap,
+              child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Center(
+                      child: Text(label,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelLarge
+                              ?.copyWith(
+                                  color: selected
+                                      ? Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant))))),
         ),
       );
 }
@@ -295,14 +322,16 @@ class _DelayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-        message: english ? '±100 ms' : '±100 ms',
+        message: NovaStrings.lookup(english, 'message42'),
         child: InkWell(
-          customBorder: const CircleBorder(),
+          customBorder: CircleBorder(),
           onTap: onTap,
           child: SizedBox(
-            width: 36,
-            height: 36,
-            child: Icon(icon, size: 20, color: Colors.white70),
+            width: 48,
+            height: 48,
+            child: Icon(icon,
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -327,12 +356,12 @@ class EpisodesSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SheetScaffold(
-      title: english ? 'Episodes' : 'الحلقات',
+      title: NovaStrings.lookup(english, 'message43'),
       child: ListView.separated(
         shrinkWrap: true,
         itemCount: episodes.length,
-        separatorBuilder: (_, __) =>
-            const Divider(color: HorseTheme.line, height: 1),
+        separatorBuilder: (_, __) => Divider(
+            color: Theme.of(context).colorScheme.outlineVariant, height: 1),
         itemBuilder: (context, index) {
           final episode = episodes[index];
           final season = (episode['season'] as num?)?.toInt() ?? 0;
@@ -342,7 +371,7 @@ class EpisodesSheet extends StatelessWidget {
           final id = (episode['id'] ?? '').toString();
           final isCurrent = id == currentVideoId;
           return ListTile(
-            dense: true,
+            dense: false,
             selected: isCurrent,
             leading: Container(
               width: 44,
@@ -350,7 +379,9 @@ class EpisodesSheet extends StatelessWidget {
               child: Text(
                 number == 0 ? '$index' : '$number',
                 style: TextStyle(
-                  color: isCurrent ? HorseTheme.gold : Colors.white54,
+                  color: isCurrent
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -359,20 +390,23 @@ class EpisodesSheet extends StatelessWidget {
             ),
             title: Text(
               name.isEmpty
-                  ? (english ? 'Episode $number' : 'الحلقة $number')
+                  ? (NovaStrings.lookup(english, 'message44', {'p0': number}))
                   : name,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14),
+              style: TextStyle(fontSize: 14),
             ),
             subtitle: season > 0
                 ? Text(
-                    english ? 'S$season' : 'الموسم $season',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                    NovaStrings.lookup(english, 'message45', {'p0': season}),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12),
                   )
                 : null,
             trailing: isCurrent
-                ? const Icon(LucideIcons.play, size: 20, color: HorseTheme.gold)
+                ? Icon(LucideIcons.play,
+                    size: 20, color: Theme.of(context).colorScheme.primary)
                 : null,
             onTap: isCurrent
                 ? null
@@ -458,18 +492,19 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   }
 
   String _offsetLabel(int ms) {
-    if (ms == 0) return widget.english ? 'No offset' : 'بدون إزاحة';
+    if (ms == 0) return NovaStrings.lookup(widget.english, 'message46');
     final abs = ms.abs();
     return ms < 0
-        ? (widget.english ? 'Ahead $abs ms' : 'تقديم $abs ms')
-        : (widget.english ? 'Delay $abs ms' : 'تأخير $abs ms');
+        ? (NovaStrings.lookup(widget.english, 'message47', {'p0': abs}))
+        : (NovaStrings.lookup(widget.english, 'message48', {'p0': abs}));
   }
 
   /// mpv sub-pos: 100 = bottom of the frame (default), 0 = top.
   String _posLabel(int pos) {
-    if (pos >= 98) return widget.english ? 'Bottom' : 'أسفل';
-    if (pos <= 2) return widget.english ? 'Top' : 'أعلى';
-    if (pos >= 48 && pos <= 52) return widget.english ? 'Middle' : 'منتصف';
+    if (pos >= 98) return NovaStrings.lookup(widget.english, 'message49');
+    if (pos <= 2) return NovaStrings.lookup(widget.english, 'message50');
+    if (pos >= 48 && pos <= 52)
+      return NovaStrings.lookup(widget.english, 'message51');
     return '$pos%';
   }
 
@@ -503,118 +538,124 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final english = widget.english;
-    final wide = MediaQuery.sizeOf(context).width >= 900;
-    final options = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _colorRow(
-          icon: LucideIcons.type,
-          label: english ? 'Text color' : 'لون النص',
-          hex: _v['subFontColor']! as String,
-          onPick: (hex) => _commit('subFontColor', hex),
-        ),
-        _sliderRow(
-          label: english ? 'Subtitle size' : 'حجم الترجمة',
-          value: (_v['subFontSize'] as int).toDouble(),
-          min: 14,
-          max: 44,
-          divisions: 15,
-          display: '${_v['subFontSize']} px',
-          onChanged: (v) => _preview('subFontSize', v.round()),
-          onChangeEnd: (v) => _commit('subFontSize', v.round()),
-        ),
-        // Position: quick chips + fine slider (spec §4: أعلى/وسط/أسفل +
-        // رفع وخفض دقيق).
-        _posChips(),
-        _sliderRow(
-          label: english ? 'Fine position' : 'رفع وخفض دقيق',
-          value: (_v['subPos'] as int).toDouble(),
-          min: 0,
-          max: 100,
-          divisions: 20,
-          display: _posLabel(_v['subPos'] as int),
-          onChanged: (v) => _preview('subPos', v.round()),
-          onChangeEnd: (v) => _commit('subPos', v.round()),
-        ),
-        _styleChips(),
-        _colorRow(
-          icon: LucideIcons.paintBucket,
-          label: english ? 'Outline color' : 'لون الحد',
-          hex: _v['subBorderColor']! as String,
-          onPick: (hex) => _commit('subBorderColor', hex),
-        ),
-        _sliderRow(
-          label: english ? 'Outline thickness' : 'سماكة الحد',
-          value: (_v['subBorderSize'] as int).toDouble(),
-          min: 0,
-          max: 8,
-          divisions: 8,
-          display: '${_v['subBorderSize']} px',
-          onChanged: (v) => _preview('subBorderSize', v.round()),
-          onChangeEnd: (v) => _commit('subBorderSize', v.round()),
-        ),
-        _sliderRow(
-          label: english ? 'Background opacity' : 'شفافية الخلفية',
-          value: _v['subBackgroundOpacity']! as double,
-          min: 0,
-          max: 1,
-          divisions: 20,
-          display:
-              '${((_v['subBackgroundOpacity']! as double) * 100).round()}%',
-          onChanged: (v) => _preview('subBackgroundOpacity', v),
-          onChangeEnd: (v) => _commit('subBackgroundOpacity', v),
-        ),
-        // Timing offset: ±100 ms buttons (spec §4) + coarse slider.
-        _delayButtons(),
-        _sliderRow(
-          label: english ? 'Coarse timing' : 'ضبط تقريبي',
-          value: (_v['subtitleOffsetMs'] as int).toDouble(),
-          min: -5000,
-          max: 5000,
-          divisions: 40,
-          display: _offsetLabel(_v['subtitleOffsetMs']! as int),
-          onChanged: (v) => _preview('subtitleOffsetMs', v.round()),
-          onChangeEnd: (v) => _commit('subtitleOffsetMs', v.round()),
-        ),
-        const SizedBox(height: 6),
-        Center(
-          child: TextButton.icon(
-            onPressed: _resetToDefaults,
-            icon: const Icon(LucideIcons.rotateCcw, size: 18),
-            label: Text(
-              english ? 'Reset to defaults' : 'إعادة للافتراضي',
-              style: const TextStyle(
-                color: HorseTheme.gold,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+    return LayoutBuilder(builder: (context, constraints) {
+      final english = widget.english;
+      final wide = constraints.maxWidth >= 700;
+      final options = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _colorRow(
+            icon: LucideIcons.type,
+            label: NovaStrings.lookup(english, 'message52'),
+            hex: _v['subFontColor']! as String,
+            onPick: (hex) => _commit('subFontColor', hex),
+          ),
+          _sliderRow(
+            label: NovaStrings.lookup(english, 'message53'),
+            value: (_v['subFontSize'] as int).toDouble(),
+            min: 14,
+            max: 44,
+            divisions: 15,
+            display: '${_v['subFontSize']} px',
+            onChanged: (v) => _preview('subFontSize', v.round()),
+            onChangeEnd: (v) => _commit('subFontSize', v.round()),
+          ),
+          // Position: quick chips + fine slider (spec §4: أعلى/وسط/أسفل +
+          // رفع وخفض دقيق).
+          _posChips(),
+          _sliderRow(
+            label: NovaStrings.lookup(english, 'message54'),
+            value: (_v['subPos'] as int).toDouble(),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            display: _posLabel(_v['subPos'] as int),
+            onChanged: (v) => _preview('subPos', v.round()),
+            onChangeEnd: (v) => _commit('subPos', v.round()),
+          ),
+          _styleChips(),
+          _colorRow(
+            icon: LucideIcons.paintBucket,
+            label: NovaStrings.lookup(english, 'message55'),
+            hex: _v['subBorderColor']! as String,
+            onPick: (hex) => _commit('subBorderColor', hex),
+          ),
+          _sliderRow(
+            label: NovaStrings.lookup(english, 'message56'),
+            value: (_v['subBorderSize'] as int).toDouble(),
+            min: 0,
+            max: 8,
+            divisions: 8,
+            display: '${_v['subBorderSize']} px',
+            onChanged: (v) => _preview('subBorderSize', v.round()),
+            onChangeEnd: (v) => _commit('subBorderSize', v.round()),
+          ),
+          _sliderRow(
+            label: NovaStrings.lookup(english, 'message57'),
+            value: _v['subBackgroundOpacity']! as double,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display:
+                '${((_v['subBackgroundOpacity']! as double) * 100).round()}%',
+            onChanged: (v) => _preview('subBackgroundOpacity', v),
+            onChangeEnd: (v) => _commit('subBackgroundOpacity', v),
+          ),
+          // Timing offset: ±100 ms buttons (spec §4) + coarse slider.
+          _delayButtons(),
+          _sliderRow(
+            label: NovaStrings.lookup(english, 'message58'),
+            value: (_v['subtitleOffsetMs'] as int).toDouble(),
+            min: -5000,
+            max: 5000,
+            divisions: 40,
+            display: _offsetLabel(_v['subtitleOffsetMs']! as int),
+            onChanged: (v) => _preview('subtitleOffsetMs', v.round()),
+            onChangeEnd: (v) => _commit('subtitleOffsetMs', v.round()),
+          ),
+          SizedBox(height: 6),
+          Center(
+            child: TextButton.icon(
+              onPressed: _resetToDefaults,
+              icon: Icon(LucideIcons.rotateCcw, size: 18),
+              label: Text(
+                NovaStrings.lookup(english, 'message59'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    );
+        ],
+      );
 
-    return SheetScaffold(
-      title: english ? 'Subtitle settings' : 'إعدادات الترجمة',
-      child: wide
-          ? // Tablet (spec §0-ب): live preview beside the options.
-          Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(width: 230, child: _previewBox(widePreview: true)),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: SingleChildScrollView(child: options),
-                ),
-              ],
-            )
-          : SingleChildScrollView(
-              // Phone: preview on top, options below (spec §0-ب).
-              child: options,
-            ),
-    );
+      return SheetScaffold(
+        title: NovaStrings.lookup(english, 'message60'),
+        child: wide
+            ? // Tablet (spec §0-ب): live preview beside the options.
+            Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(width: 230, child: _previewBox(widePreview: true)),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: SingleChildScrollView(child: options),
+                  ),
+                ],
+              )
+            : SingleChildScrollView(
+                // Phone: preview on top, options below (spec §0-ب).
+                child: Column(children: [
+                  _previewBox(),
+                  const SizedBox(height: 24),
+                  options
+                ]),
+              ),
+      );
+    });
   }
 
   Widget _posChips() {
@@ -625,9 +666,9 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       child: Row(
         children: [
           for (final option in [
-            (0, english ? 'Top' : 'أعلى'),
-            (50, english ? 'Middle' : 'وسط'),
-            (100, english ? 'Bottom' : 'أسفل'),
+            (0, NovaStrings.lookup(english, 'message50')),
+            (50, NovaStrings.lookup(english, 'message61')),
+            (100, NovaStrings.lookup(english, 'message49')),
           ])
             Expanded(
               child: Padding(
@@ -649,54 +690,28 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
     );
   }
 
-  Widget _delayButtons() {
-    final ms = _v['subtitleOffsetMs'] as int;
-    return Padding(
-      padding: const EdgeInsetsDirectional.only(top: 4, bottom: 2),
-      child: Row(
-        children: [
-          Text(
-            widget.english ? 'Timing offset' : 'تقديم أو تأخير الترجمة',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const Spacer(),
+  Widget _delayButtons() => Padding(
+      padding: const EdgeInsetsDirectional.only(top: 16, bottom: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(NovaStrings.lookup(widget.english, 'message62'),
+            style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Row(children: [
           _DelayButton(
-            english: widget.english,
-            icon: LucideIcons.minus,
-            onTap: () => _shiftDelay(-100),
-          ),
-          Container(
-            constraints: const BoxConstraints(minWidth: 92),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: .05),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: HorseTheme.line),
-            ),
-            child: Text(
-              _offsetLabel(ms),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: HorseTheme.gold,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+              english: widget.english,
+              icon: LucideIcons.minus,
+              onTap: () => _shiftDelay(-100)),
+          Expanded(
+              child: Text(_offsetLabel(_v['subtitleOffsetMs'] as int),
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary))),
           _DelayButton(
-            english: widget.english,
-            icon: LucideIcons.plus,
-            onTap: () => _shiftDelay(100),
-          ),
-        ],
-      ),
-    );
-  }
+              english: widget.english,
+              icon: LucideIcons.plus,
+              onTap: () => _shiftDelay(100)),
+        ]),
+      ]));
 
   // ── Pieces ────────────────────────────────────────────────────────────────
 
@@ -706,8 +721,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   }
 
   Widget _previewBoxInner({required double height}) {
-    final text =
-        widget.english ? 'Subtitle sample — Noor' : 'مثال نص الترجمة — Noor';
+    final text = NovaStrings.lookup(widget.english, 'message63');
     final fontSize = ((_v['subFontSize']! as int).clamp(12, 26)).toDouble();
     final color = _hex(_v['subFontColor']! as String);
     final borderColor = _hex(_v['subBorderColor']! as String);
@@ -769,7 +783,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
               Shadow(
                 color: Colors.black.withValues(alpha: .9),
                 blurRadius: 4,
-                offset: const Offset(2, 2),
+                offset: Offset(2, 2),
               ),
             ],
           ),
@@ -785,12 +799,12 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       alignment: vertical,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF43494C), Color(0xFF14171A)],
+          colors: [NovaColors.graphite, NovaColors.ink],
         ),
-        border: Border.all(color: HorseTheme.line),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Directionality(
         textDirection: TextDirection.rtl,
@@ -809,17 +823,20 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   }) =>
       ListTile(
         contentPadding: EdgeInsets.zero,
-        dense: true,
-        leading: Icon(icon, size: 20, color: Colors.white70),
+        dense: false,
+        leading: Icon(icon,
+            size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
         title: Text(label,
-            style: const TextStyle(color: Colors.white, fontSize: 14)),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
         trailing: Container(
           width: 30,
           height: 30,
           decoration: BoxDecoration(
             color: _hex(hex),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white24, width: 1.5),
+            border: Border.all(
+                color: Theme.of(context).colorScheme.outline, width: 1.5),
           ),
         ),
         onTap: () async {
@@ -850,15 +867,16 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
           children: [
             Row(
               children: [
-                Text(label,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-                const Spacer(),
+                Expanded(
+                    child: Text(label,
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600))),
+                const SizedBox(width: 12),
                 Text(display,
-                    style: const TextStyle(
-                        color: HorseTheme.gold,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 12,
                         fontWeight: FontWeight.w700)),
               ],
@@ -869,8 +887,8 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
               max: max,
               divisions: divisions,
               label: display,
-              activeColor: HorseTheme.gold,
-              inactiveColor: Colors.white12,
+              activeColor: Theme.of(context).colorScheme.primary,
+              inactiveColor: Theme.of(context).colorScheme.outlineVariant,
               onChanged: onChanged,
               onChangeEnd: onChangeEnd,
             ),
@@ -883,18 +901,18 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.english ? 'Subtitle style' : 'نمط الترجمة',
-                style: const TextStyle(
-                    color: Colors.white,
+            Text(NovaStrings.lookup(widget.english, 'message64'),
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontSize: 13,
                     fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Row(
               children: [
                 for (final option in [
-                  ('shadow', widget.english ? 'Shadow' : 'ظل'),
-                  ('outline', widget.english ? 'Outline' : 'حد خارجي'),
-                  ('box', widget.english ? 'Background' : 'خلفية'),
+                  ('shadow', NovaStrings.lookup(widget.english, 'message65')),
+                  ('outline', NovaStrings.lookup(widget.english, 'message66')),
+                  ('box', NovaStrings.lookup(widget.english, 'message67')),
                 ])
                   Expanded(
                     child: Padding(

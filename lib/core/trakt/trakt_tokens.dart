@@ -36,9 +36,9 @@ class TraktTokenSet {
       throw const FormatException('token response is missing access_token');
     }
     final refresh = payload['refresh_token']?.toString().trim() ?? '';
-    final createdSeconds = (_num(payload['created_at']) ??
-            clock().millisecondsSinceEpoch ~/ 1000)
-        .toInt();
+    final createdSeconds =
+        (_num(payload['created_at']) ?? clock().millisecondsSinceEpoch ~/ 1000)
+            .toInt();
     final expiresInSeconds = (_num(payload['expires_in']) ?? 0).toInt();
     if (expiresInSeconds <= 0) {
       throw const FormatException('token response is missing expires_in');

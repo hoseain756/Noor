@@ -1,3 +1,4 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show mapEquals;
@@ -585,9 +586,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (engine == null || !engine.ready) return;
     await engine.seekBy(seconds);
     _flashHint(
-      english
-          ? '${seconds > 0 ? '+' : ''}$seconds s'
-          : '${seconds > 0 ? '+' : ''}$seconds ث',
+      NovaStrings.lookup(
+          english, 'message1', {'p0': seconds > 0 ? '+' : '', 'p1': seconds}),
     );
     _bumpControls();
   }
@@ -649,7 +649,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final year =
         RegExp(r'^\d{4}').firstMatch(widget.item.releaseInfo ?? '')?.group(0);
     for (final service in const ['trakt', 'simkl']) {
-      if (!app.api.isLinked(service)) continue;
+      if (!app.api.isLinked(service) ||
+          app.webSettings['${service}Scrobbling'] == false ||
+          !widget.recordProgress) continue;
       unawaited(app.api.scrobbleLinkedService(
         service,
         action: action,
@@ -741,13 +743,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   String get _audioLabel {
     final track = _engine?.selectedAudio;
     if (track == null || track.id == 'auto' || track.id.isEmpty) {
-      return english ? 'Default' : 'افتراضي';
+      return NovaStrings.lookup(english, 'message2');
     }
     return (track.title?.isNotEmpty == true
             ? track.title!
             : track.language?.isNotEmpty == true
                 ? track.language!
-                : '${english ? 'Track' : 'مسار'} ${track.id}')
+                : '${NovaStrings.lookup(english, 'message3')} ${track.id}')
         .split('\n')
         .first;
   }
@@ -755,16 +757,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   String get _subtitleLabel {
     final track = _engine?.selectedSubtitle;
     if (track == null || track.id == 'no') {
-      return english ? 'Off' : 'إيقاف';
+      return NovaStrings.lookup(english, 'message4');
     }
     if (track.id == 'auto' || track.id.isEmpty) {
-      return english ? 'Auto' : 'تلقائي';
+      return NovaStrings.lookup(english, 'message5');
     }
     return (track.title?.isNotEmpty == true
             ? track.title!
             : track.language?.isNotEmpty == true
                 ? track.language!
-                : '${english ? 'Track' : 'مسار'} ${track.id}')
+                : '${NovaStrings.lookup(english, 'message3')} ${track.id}')
         .split('\n')
         .first;
   }
@@ -836,7 +838,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     switch (kind) {
       case PlayerPanelKind.audio:
         return PlayerSidePanel(
-          title: english ? 'Audio' : 'الصوت',
+          title: NovaStrings.lookup(english, 'message6'),
           english: english,
           onClose: _closePanel,
           // The engine is the audio data source — a refresh re-reads its
@@ -859,7 +861,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         );
       case PlayerPanelKind.subtitles:
         return PlayerSidePanel(
-          title: english ? 'Subtitles' : 'الترجمة',
+          title: NovaStrings.lookup(english, 'message7'),
           english: english,
           onClose: _closePanel,
           // Refresh re-fetches the add-on subtitles in place.
@@ -887,7 +889,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 ? widget.streams[_streamIndex]
                 : null;
         return PlayerSidePanel(
-          title: english ? 'Sources' : 'المصادر',
+          title: NovaStrings.lookup(english, 'message8'),
           english: english,
           onClose: _closePanel,
           // Refresh re-runs the full add-on query + ranking in place.
@@ -905,7 +907,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         // panel as the subtitle picker. No refresh button — everything here
         // is engine/device state, applied live in front of the user.
         return PlayerSidePanel(
-          title: english ? 'Playback settings' : 'إعدادات التشغيل',
+          title: NovaStrings.lookup(english, 'message9'),
           english: english,
           onClose: _closePanel,
           child: PlayerSettingsPanelBody(
@@ -1077,9 +1079,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                english
-                    ? 'No playable source for the next episode.'
-                    : 'لا يوجد مصدر قابل للتشغيل للحلقة التالية.',
+                NovaStrings.lookup(english, 'message10'),
               ),
             ),
           );
@@ -1123,9 +1123,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            english
-                ? 'Could not resolve the source. Try another stream.'
-                : 'تعذر تحضير المصدر. جرّب مصدراً آخر.',
+            NovaStrings.lookup(english, 'message11'),
           ),
         ),
       );
@@ -1227,7 +1225,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       final end = _segments.introEndMs;
       if (end == null) return;
       await engine.seekTo(Duration(milliseconds: end));
-      _flashHint(english ? 'Intro skipped' : 'تم تخطي المقدمة');
+      _flashHint(NovaStrings.lookup(english, 'message12'));
     } else {
       final end = _segments.outroEndMs;
       if (end == null) return;
@@ -1240,7 +1238,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return;
       }
       await engine.seekTo(Duration(milliseconds: end));
-      _flashHint(english ? 'Outro skipped' : 'تم تخطي الخاتمة');
+      _flashHint(NovaStrings.lookup(english, 'message13'));
     }
     _bumpControls();
   }
@@ -1324,10 +1322,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final width = MediaQuery.sizeOf(context).width;
     final backStep = _backStepSec;
     final forwardStep = _forwardStepSec;
-    if (details.localPosition.dx < width * .34) {
+    final logicalX = logicalSeekPosition(details.localPosition.dx, width,
+        rtl: Directionality.of(context) == TextDirection.rtl);
+    if (logicalX < width * .34) {
       _showRipple(forward: false, step: backStep);
       unawaited(_seekBy(-backStep));
-    } else if (details.localPosition.dx > width * .66) {
+    } else if (logicalX > width * .66) {
       _showRipple(forward: true, step: forwardStep);
       unawaited(_seekBy(forwardStep));
     } else {
@@ -1347,7 +1347,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       return;
     }
     if (engine == null || !engine.ready) return;
-    _dragStartDx = details.localFocalPoint.dx;
+    _dragStartDx = logicalSeekPosition(
+        details.localFocalPoint.dx, MediaQuery.sizeOf(context).width,
+        rtl: Directionality.of(context) == TextDirection.rtl);
     _dragAccumDx = 0;
     _dragAccumDy = 0;
     _positionAtDragStartMs = engine.position.inMilliseconds;
@@ -1402,7 +1404,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _dragAccumDx += details.focalPointDelta.dx;
         final durationMs = engine.duration.inMilliseconds;
         // Full screen width covers half the runtime — comfortable scrub rate.
-        final deltaMs = (_dragAccumDx / size.width * durationMs * .5).round();
+        final deltaMs = directionalSeekDeltaMs(
+            dx: _dragAccumDx,
+            width: size.width,
+            durationMs: durationMs,
+            rtl: Directionality.of(context) == TextDirection.rtl);
         setState(() {
           _hudDeltaSeconds = (deltaMs / 1000).round();
           _hudTargetMs =
@@ -1580,7 +1586,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           behavior: HitTestBehavior.opaque,
           onTap: () {
             if (_locked) {
-              _flashHint(english ? 'Controls locked' : 'التحكم مقفل');
+              _flashHint(NovaStrings.lookup(english, 'message14'));
             } else {
               _toggleControls();
             }
@@ -1598,9 +1604,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               if (failed)
                 _ErrorPanel(
                   message: _stuck
-                      ? (english
-                          ? 'This stream is not responding on this device — it may be offline, too slow, or undecodable. Try another source from the sources page.'
-                          : 'لا يستجيب هذا البث على هذا الجهاز — قد يكون متوقفًا أو بطيئًا أو غير قابل لفك الترميز. جرّب مصدرًا آخر من صفحة المصادر.')
+                      ? (NovaStrings.lookup(english, 'message15'))
                       : (engine?.errorMessage ?? _engineInitError),
                   english: english,
                   onRetry: () {
@@ -1645,7 +1649,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   left: 12,
                   child: AnimatedOpacity(
                     opacity: _showTorrentHud ? 1 : 0,
-                    duration: const Duration(milliseconds: 280),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 280),
                     child: IgnorePointer(
                       ignoring: !_showTorrentHud,
                       child: _TorrentHud(
@@ -1673,7 +1679,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 // Chrome — fades together.
                 AnimatedOpacity(
                   opacity: _controlsVisible && !_locked ? 1 : 0,
-                  duration: const Duration(milliseconds: 280),
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 280),
                   child: IgnorePointer(
                     ignoring: !_controlsVisible || _locked,
                     child: Stack(
@@ -1790,12 +1798,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 else if (_mode == _GestureMode.brightness)
                   // Sides are FIXED (never mirrored): left = brightness.
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerStart,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 24),
+                      padding: const EdgeInsetsDirectional.only(start: 24),
                       child: VerticalHud(
                         icon: Icons.brightness_6_rounded,
-                        label: english ? 'Brightness' : 'السطوع',
+                        label: NovaStrings.lookup(english, 'message16'),
                         value: _hudValue,
                         vertical: true,
                       ),
@@ -1804,12 +1812,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 else if (_mode == _GestureMode.volume)
                   // Right = volume, in both directions.
                   Align(
-                    alignment: Alignment.centerRight,
+                    alignment: AlignmentDirectional.centerEnd,
                     child: Padding(
-                      padding: const EdgeInsets.only(right: 24),
+                      padding: const EdgeInsetsDirectional.only(end: 24),
                       child: VerticalHud(
                         icon: Icons.volume_up_rounded,
-                        label: english ? 'Volume' : 'الصوت',
+                        label: NovaStrings.lookup(english, 'message17'),
                         value: _hudValue,
                         vertical: true,
                       ),
@@ -1894,8 +1902,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     child: IgnorePointer(
                       child: Align(
                         alignment: _rippleForward
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
+                            ? AlignmentDirectional.centerEnd
+                            : AlignmentDirectional.centerStart,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 56,
@@ -1924,7 +1932,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         children: [
                           PlayerCardHeader(
                             icon: Icons.history_rounded,
-                            label: english ? 'RESUME' : 'استئناف',
+                            label: NovaStrings.lookup(english, 'message18'),
                             trailing: InkWell(
                               onTap: () => setState(() => _resuming = false),
                               child: const Icon(Icons.close_rounded,
@@ -1933,9 +1941,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           ),
                           const SizedBox(height: 7),
                           Text(
-                            english
-                                ? 'Resume from ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}?'
-                                : 'استئناف من ${formatPlayerTime(Duration(milliseconds: _resumePositionMs ?? 0))}؟',
+                            NovaStrings.lookup(english, 'message19', {
+                              'p0': formatPlayerTime(Duration(
+                                  milliseconds: _resumePositionMs ?? 0))
+                            }),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
@@ -1947,7 +1956,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             children: [
                               Expanded(
                                 child: PlayerPrimaryAction(
-                                  label: english ? 'Resume' : 'استئناف',
+                                  label:
+                                      NovaStrings.lookup(english, 'message20'),
                                   onPressed: () =>
                                       unawaited(_resumeFromSaved()),
                                 ),
@@ -1955,7 +1965,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: PlayerSecondaryAction(
-                                  label: english ? 'Start over' : 'من البداية',
+                                  label:
+                                      NovaStrings.lookup(english, 'message21'),
                                   onPressed: () async {
                                     setState(() {
                                       _resuming = false;
@@ -1996,7 +2007,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         children: [
                           PlayerCardHeader(
                             icon: Icons.skip_next_rounded,
-                            label: english ? 'UP NEXT' : 'التالي',
+                            label: NovaStrings.lookup(english, 'message22'),
                             trailing: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
@@ -2048,9 +2059,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             children: [
                               Expanded(
                                 child: PlayerPrimaryAction(
-                                  label: english
-                                      ? 'Next episode'
-                                      : 'الحلقة التالية',
+                                  label:
+                                      NovaStrings.lookup(english, 'message23'),
                                   // Spec B2.3: ALWAYS through the existing
                                   // source-selection page — never auto-pick.
                                   onPressed: () => unawaited(
@@ -2060,7 +2070,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               ),
                               const SizedBox(width: 8),
                               PlayerSecondaryAction(
-                                label: english ? 'Cancel' : 'إلغاء',
+                                label: NovaStrings.lookup(english, 'cancel'),
                                 onPressed: () =>
                                     setState(() => _upNextDismissed = true),
                               ),
@@ -2081,8 +2091,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     child: _SegmentSkipPill(
                       key: ValueKey(introVisible ? 'intro' : 'outro'),
                       label: introVisible
-                          ? (english ? 'Skip intro' : 'تخطي المقدمة')
-                          : (english ? 'Skip outro' : 'تخطي الخاتمة'),
+                          ? (NovaStrings.lookup(english, 'message24'))
+                          : (NovaStrings.lookup(english, 'message25')),
                       icon: introVisible
                           ? Icons.fast_forward_rounded
                           : Icons.skip_next_rounded,
@@ -2095,14 +2105,38 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               // sources) — an in-page overlay on the RIGHT HALF of the
               // screen, opened with a single setState (instant), loading
               // and refreshing its data in front of the user.
-              if (_panel != null)
-                Positioned(
-                  right: 0,
-                  top: 0,
+              if (_panel != null) ...[
+                Positioned.fill(
+                    child: GestureDetector(
+                        onTap: _closePanel,
+                        behavior: HitTestBehavior.opaque,
+                        child: ColoredBox(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .scrim
+                                .withValues(alpha: .32)))),
+                PositionedDirectional(
+                  end: 0,
+                  start: MediaQuery.sizeOf(context).width < 600 &&
+                          MediaQuery.sizeOf(context).height > width
+                      ? 0
+                      : null,
+                  top: MediaQuery.sizeOf(context).width < 600 &&
+                          MediaQuery.sizeOf(context).height > width
+                      ? null
+                      : 0,
                   bottom: 0,
-                  width: playerPanelWidth(width),
+                  width: MediaQuery.sizeOf(context).width < 600 &&
+                          MediaQuery.sizeOf(context).height > width
+                      ? null
+                      : playerPanelWidth(width),
+                  height: MediaQuery.sizeOf(context).width < 600 &&
+                          MediaQuery.sizeOf(context).height > width
+                      ? MediaQuery.sizeOf(context).height * .82
+                      : null,
                   child: _buildPanel(engine),
                 ),
+              ],
             ],
           ),
         ),
@@ -2120,10 +2154,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         duration;
     final seconds = ((at - position) / 1000).ceil().clamp(0, 9999);
     final s = seconds.toString();
-    final unit = english ? 's' : 'ث';
+    final unit = NovaStrings.lookup(english, 'message26');
     return seconds > 0
-        ? (english ? 'in $s$unit' : 'بعد $s$unit')
-        : (english ? 'now' : 'الآن');
+        ? (NovaStrings.lookup(english, 'message27', {'p0': s, 'p1': unit}))
+        : (NovaStrings.lookup(english, 'message28'));
   }
 }
 
@@ -2154,7 +2188,7 @@ class _ErrorPanel extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                english ? 'Playback error' : 'خطأ في التشغيل',
+                NovaStrings.lookup(english, 'message29'),
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
@@ -2171,7 +2205,7 @@ class _ErrorPanel extends StatelessWidget {
               FilledButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh_rounded),
-                label: Text(english ? 'Try again' : 'إعادة المحاولة'),
+                label: Text(NovaStrings.lookup(english, 'retry')),
               ),
             ],
           ),
@@ -2253,12 +2287,12 @@ class _TorrentHud extends StatelessWidget {
   Widget build(BuildContext context) {
     final pct = (status.progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
     final state = switch (status.state) {
-      'downloading' => english ? 'Streaming' : 'بث',
-      'finished' => english ? 'Completed' : 'مكتمل',
-      'seeding' => english ? 'Seeding' : 'مشاركة',
-      'paused' => english ? 'Paused' : 'متوقف',
-      'checking' => english ? 'Checking' : 'فحص',
-      _ => english ? 'Preparing' : 'تحضير',
+      'downloading' => NovaStrings.lookup(english, 'message30'),
+      'finished' => NovaStrings.lookup(english, 'message31'),
+      'seeding' => NovaStrings.lookup(english, 'message32'),
+      'paused' => NovaStrings.lookup(english, 'message33'),
+      'checking' => NovaStrings.lookup(english, 'message34'),
+      _ => NovaStrings.lookup(english, 'message35'),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

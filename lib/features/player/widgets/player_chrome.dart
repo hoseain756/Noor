@@ -1,7 +1,9 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/horse_theme.dart';
+import '../../../core/theme/nova_theme.dart';
 
 /// Visual language of the cinematic player chrome (reference design):
 /// white controls over the video, a teal→blue gradient timeline, a large
@@ -18,15 +20,17 @@ import '../../../core/theme/horse_theme.dart';
 ///  · gestures are side-fixed: left = brightness, right = volume.
 /// Mirroring follows the inherited Directionality (Arabic RTL / English LTR).
 class PlayerPalette {
-  static const Color gradientStart = Color(0xFF2FE3B4);
-  static const Color gradientEnd = Color(0xFF3B82F6);
-  static const Color thumb = Color(0xFF36E5C0);
+  static const Color gradientStart = NovaColors.red;
+  static const Color gradientEnd = NovaColors.redSoft;
+  static const Color thumb = NovaColors.redSoft;
 
   static const List<Shadow> iconShadow = [
     Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1)),
   ];
 
   static const LinearGradient played = LinearGradient(
+    begin: AlignmentDirectional.centerStart,
+    end: AlignmentDirectional.centerEnd,
     colors: [gradientStart, gradientEnd],
   );
 }
@@ -85,7 +89,7 @@ class PlayerTopBar extends StatelessWidget {
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(12, 6, wide ? 24 : 12, 26),
+            padding: EdgeInsetsDirectional.fromSTEB(12, 6, wide ? 24 : 12, 26),
             child: Row(
               children: [
                 Expanded(
@@ -155,20 +159,14 @@ class PlayerBackButton extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.white.withValues(alpha: .10),
-        shape: const CircleBorder(
-          side: BorderSide(color: Colors.white24),
-        ),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: const SizedBox(
-            width: 44,
-            height: 44,
-            child: Icon(LucideIcons.x, color: Colors.white, size: 22),
-          ),
-        ),
+  Widget build(BuildContext context) => IconButton.filledTonal(
+        onPressed: onTap,
+        tooltip: MaterialLocalizations.of(context).closeButtonLabel,
+        style: IconButton.styleFrom(
+            minimumSize: const Size.square(48),
+            backgroundColor: NovaColors.ink.withValues(alpha: .72),
+            foregroundColor: NovaColors.white),
+        icon: const Icon(LucideIcons.x, size: 22),
       );
 }
 
@@ -198,8 +196,8 @@ class PlayerRailButton extends StatelessWidget {
           customBorder: const CircleBorder(),
           onTap: onTap,
           child: SizedBox(
-            width: 44,
-            height: 44,
+            width: 48,
+            height: 48,
             child: Icon(
               icon,
               color: active ? PlayerPalette.thumb : Colors.white,
@@ -358,10 +356,10 @@ class PlayerSideRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLeft = side == AxisSide.left;
-    return Positioned(
+    return PositionedDirectional(
       top: topInset,
-      left: isLeft ? 6 : null,
-      right: isLeft ? null : 6,
+      start: isLeft ? 6 : null,
+      end: isLeft ? null : 6,
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: isLeft ? 4 : 4),
         child: Column(
@@ -420,8 +418,12 @@ class _GradientTimelineState extends State<GradientTimeline> {
     return (value / widget.durationMs).clamp(0.0, 1.0);
   }
 
-  double _valueFromDx(double dx, double width) =>
-      (dx / (width == 0 ? 1 : width)).clamp(0.0, 1.0);
+  double _valueFromDx(double dx, double width) {
+    final position = (dx / (width == 0 ? 1 : width)).clamp(0.0, 1.0);
+    return Directionality.of(context) == TextDirection.rtl
+        ? 1 - position
+        : position;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -441,125 +443,144 @@ class _GradientTimelineState extends State<GradientTimeline> {
           widget.onScrubEnd(value * duration / 1000);
         }
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: duration <= 0
-              ? null
-              : (details) {
-                  widget.onScrubStart();
-                  setState(() {
-                    _dragging = true;
-                    _dragValue = _valueFromDx(details.localPosition.dx, width) *
-                        duration;
-                  });
-                  widget.onScrubUpdate(_dragValue / 1000);
-                },
-          onHorizontalDragUpdate: duration <= 0
-              ? null
-              : (details) {
-                  setState(() {
-                    _dragging = true;
-                    _dragValue = _valueFromDx(details.localPosition.dx, width) *
-                        duration;
-                  });
-                  widget.onScrubUpdate(_dragValue / 1000);
-                },
-          onHorizontalDragEnd: duration <= 0
-              ? null
-              : (details) {
-                  widget.onScrubEnd(_dragValue / 1000);
-                  setState(() => _dragging = false);
-                },
-          onHorizontalDragCancel: () => setState(() => _dragging = false),
-          onTapUp: duration <= 0
-              ? null
-              : (details) => handleTap(details.localPosition.dx),
-          child: SizedBox(
-            height: 40,
-            child: Stack(
-              alignment: Alignment.centerLeft,
-              children: [
-                // Remaining track.
-                Container(
-                  height: thickness,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: .22),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                // Buffered portion — second color per spec §2.
-                FractionallySizedBox(
-                  widthFactor: buffered,
-                  child: Container(
+        return Semantics(
+          label: Localizations.localeOf(context).languageCode == 'ar'
+              ? 'موضع التشغيل'
+              : 'Playback position',
+          value: formatPlayerTime(Duration(milliseconds: widget.positionMs)),
+          onIncrease: duration > 0
+              ? () => widget.onScrubEnd(
+                  (widget.positionMs + 10000).clamp(0, duration) / 1000)
+              : null,
+          onDecrease: duration > 0
+              ? () => widget.onScrubEnd(
+                  (widget.positionMs - 10000).clamp(0, duration) / 1000)
+              : null,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: duration <= 0
+                ? null
+                : (details) {
+                    widget.onScrubStart();
+                    setState(() {
+                      _dragging = true;
+                      _dragValue =
+                          _valueFromDx(details.localPosition.dx, width) *
+                              duration;
+                    });
+                    widget.onScrubUpdate(_dragValue / 1000);
+                  },
+            onHorizontalDragUpdate: duration <= 0
+                ? null
+                : (details) {
+                    setState(() {
+                      _dragging = true;
+                      _dragValue =
+                          _valueFromDx(details.localPosition.dx, width) *
+                              duration;
+                    });
+                    widget.onScrubUpdate(_dragValue / 1000);
+                  },
+            onHorizontalDragEnd: duration <= 0
+                ? null
+                : (details) {
+                    widget.onScrubEnd(_dragValue / 1000);
+                    setState(() => _dragging = false);
+                  },
+            onHorizontalDragCancel: () => setState(() => _dragging = false),
+            onTapUp: duration <= 0
+                ? null
+                : (details) => handleTap(details.localPosition.dx),
+            child: SizedBox(
+              height: 48,
+              child: Stack(
+                alignment: AlignmentDirectional.centerStart,
+                children: [
+                  // Remaining track.
+                  Container(
                     height: thickness,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .38),
+                      color: Colors.white.withValues(alpha: .22),
                       borderRadius: BorderRadius.circular(999),
                     ),
                   ),
-                ),
-                // Played gradient.
-                FractionallySizedBox(
-                  widthFactor: progress,
-                  child: Container(
-                    height: thickness,
-                    decoration: BoxDecoration(
-                      gradient: PlayerPalette.played,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                // Thumb + scrub bubble.
-                Positioned(
-                  left: (progress * width - thumbSize / 2)
-                      .clamp(0.0, (width - thumbSize).clamp(0.0, width)),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    width: _dragging ? thumbSize + 4 : thumbSize,
-                    height: _dragging ? thumbSize + 4 : thumbSize,
-                    decoration: BoxDecoration(
-                      color: PlayerPalette.thumb,
-                      shape: BoxShape.circle,
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black45,
-                          blurRadius: 5,
-                          offset: Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (_dragging && duration > 0)
-                  Positioned(
-                    left: (progress * width - 44)
-                        .clamp(0.0, (width - 88).clamp(0.0, width)),
-                    bottom: 26,
+                  // Buffered portion — second color per spec §2.
+                  FractionallySizedBox(
+                    widthFactor: buffered,
                     child: Container(
-                      width: thickness > 4 ? 120 : 88,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
+                      height: thickness,
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: .78),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Text(
-                        formatPlayerTime(
-                          Duration(milliseconds: (progress * duration).round()),
-                        ),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
+                        color: Colors.white.withValues(alpha: .38),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
                   ),
-              ],
+                  // Played gradient.
+                  FractionallySizedBox(
+                    widthFactor: progress,
+                    child: Container(
+                      height: thickness,
+                      decoration: BoxDecoration(
+                        gradient: PlayerPalette.played,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  // Thumb + scrub bubble.
+                  PositionedDirectional(
+                    start: (progress * width - thumbSize / 2)
+                        .clamp(0.0, (width - thumbSize).clamp(0.0, width)),
+                    child: AnimatedContainer(
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : const Duration(milliseconds: 120),
+                      width: _dragging ? thumbSize + 4 : thumbSize,
+                      height: _dragging ? thumbSize + 4 : thumbSize,
+                      decoration: BoxDecoration(
+                        color: PlayerPalette.thumb,
+                        shape: BoxShape.circle,
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black45,
+                            blurRadius: 5,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_dragging && duration > 0)
+                    PositionedDirectional(
+                      start: (progress * width - 44)
+                          .clamp(0.0, (width - 88).clamp(0.0, width)),
+                      bottom: 26,
+                      child: Container(
+                        width: thickness > 4 ? 120 : 88,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: .78),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          formatPlayerTime(
+                            Duration(
+                                milliseconds: (progress * duration).round()),
+                          ),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -643,7 +664,7 @@ class PlayerBottomCluster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controlSize = 44.0 * scale;
+    final controlSize = 48.0 * scale;
     final margin = wide ? 28.0 : 14.0;
     final thickness = wide ? 6.0 : 4.0;
     return Positioned(
@@ -665,14 +686,15 @@ class PlayerBottomCluster extends StatelessWidget {
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(margin, 30, margin, 8 * scale),
+            padding:
+                EdgeInsetsDirectional.fromSTEB(margin, 30, margin, 8 * scale),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Progress row — NEVER mirrored: full duration at the far
                 // right, current time to its left, fill left→right always.
                 Directionality(
-                  textDirection: TextDirection.ltr,
+                  textDirection: Directionality.of(context),
                   child: Row(
                     children: [
                       _TimeLabel(
@@ -707,25 +729,24 @@ class PlayerBottomCluster extends StatelessWidget {
                 SizedBox(height: 2 * scale),
                 // Control row: side groups mirror with the direction; the
                 // transport trio lives center-screen (Task 139).
-                SizedBox(
-                  height: controlSize + (wide ? 26 : 6),
-                  child: Stack(
-                    children: [
-                      // END side (RTL: left · LTR: right):
-                      // fullscreen + volume.
-                      Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: _mediaGroup(controlSize),
-                      ),
-                      // START side (RTL: right · LTR: left):
-                      // source / subtitles / audio.
-                      Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: _trackGroup(controlSize),
-                      ),
-                    ],
-                  ),
-                ),
+                LayoutBuilder(builder: (context, constraints) {
+                  if (constraints.maxWidth < 600) {
+                    return Column(mainAxisSize: MainAxisSize.min, children: [
+                      SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: _trackGroup(controlSize)),
+                      const SizedBox(height: 4),
+                      _mediaGroup(controlSize),
+                    ]);
+                  }
+                  return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        _trackGroup(controlSize),
+                        _mediaGroup(controlSize)
+                      ]);
+                }),
               ],
             ),
           ),
@@ -746,7 +767,7 @@ class PlayerBottomCluster extends StatelessWidget {
                     ? LucideIcons.volume1
                     : LucideIcons.volume2,
             semanticLabel: muted ? 'Unmute' : 'Mute',
-            label: wide ? (english ? 'Sound' : 'الصوت') : null,
+            label: wide ? (NovaStrings.lookup(english, 'message36')) : null,
             scale: scale,
             onTap: onMuteToggle,
           ),
@@ -757,11 +778,9 @@ class PlayerBottomCluster extends StatelessWidget {
             onChangeEnd: (_) => onVolumeDragEnd(),
           ),
           _RaillessControl(
-            icon: fullscreen
-                ? LucideIcons.maximize
-                : LucideIcons.minimize,
+            icon: fullscreen ? LucideIcons.maximize : LucideIcons.minimize,
             semanticLabel: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-            label: wide ? (english ? 'Full screen' : 'ملء الشاشة') : null,
+            label: wide ? (NovaStrings.lookup(english, 'message37')) : null,
             scale: scale,
             onTap: onToggleFullscreen,
           ),
@@ -785,21 +804,21 @@ class PlayerBottomCluster extends StatelessWidget {
           _RaillessControl(
             icon: LucideIcons.arrowLeftRight,
             semanticLabel: 'Change source',
-            label: wide ? (english ? 'Source' : 'المصدر') : null,
+            label: wide ? (NovaStrings.lookup(english, 'message38')) : null,
             scale: scale,
             onTap: onOpenStreams,
           ),
           _RaillessControl(
             icon: LucideIcons.captions,
             semanticLabel: 'Subtitles',
-            label: wide ? (english ? 'Subs' : 'الترجمة') : null,
+            label: wide ? (NovaStrings.lookup(english, 'message39')) : null,
             scale: scale,
             onTap: onOpenSubtitles,
           ),
           _RaillessControl(
             icon: LucideIcons.audioLines,
             semanticLabel: 'Audio track / dub',
-            label: wide ? (english ? 'Audio' : 'الدبلاج') : null,
+            label: wide ? (NovaStrings.lookup(english, 'message40')) : null,
             scale: scale,
             onTap: onOpenAudio,
           ),
@@ -922,6 +941,7 @@ class _TimeLabel extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
           child: Text(
             text,
+            textDirection: TextDirection.ltr,
             style: TextStyle(
               color: Colors.white70,
               fontSize: wide ? 13.5 : 12,
@@ -970,8 +990,8 @@ class _RaillessControl extends StatelessWidget {
           onTap: onTap,
           child: label == null
               ? SizedBox(
-                  width: 44 * scale,
-                  height: 44 * scale,
+                  width: 48 * scale,
+                  height: 48 * scale,
                   child: Center(child: iconWidget),
                 )
               : Padding(
@@ -981,8 +1001,8 @@ class _RaillessControl extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        width: 44 * scale,
-                        height: 44 * scale,
+                        width: 48 * scale,
+                        height: 48 * scale,
                         child: Center(child: iconWidget),
                       ),
                       Text(
@@ -1061,9 +1081,13 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-        opacity: _fade,
+        opacity: MediaQuery.disableAnimationsOf(context)
+            ? const AlwaysStoppedAnimation(1.0)
+            : _fade,
         child: ScaleTransition(
-          scale: _scale,
+          scale: MediaQuery.disableAnimationsOf(context)
+              ? const AlwaysStoppedAnimation(1.0)
+              : _scale,
           child: Container(
             width: 190,
             height: 190,
@@ -1091,7 +1115,8 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    widget.forward
+                    widget.forward ==
+                            (Directionality.of(context) == TextDirection.ltr)
                         ? LucideIcons.chevronsRight
                         : LucideIcons.chevronsLeft,
                     color: Colors.white,
@@ -1100,9 +1125,10 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    widget.english
-                        ? '${widget.forward ? '+' : '-'}${widget.seconds}s'
-                        : '${widget.forward ? '+' : '-'}${widget.seconds}ث',
+                    NovaStrings.lookup(widget.english, 'message41', {
+                      'p0': widget.forward ? '+' : '-',
+                      'p1': widget.seconds
+                    }),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,
@@ -1418,8 +1444,8 @@ class PlayerPrimaryAction extends StatelessWidget {
   Widget build(BuildContext context) => FilledButton(
         style: FilledButton.styleFrom(
           backgroundColor: HorseTheme.gold,
-          foregroundColor: const Color(0xFF1A1209),
-          minimumSize: const Size.fromHeight(36),
+          foregroundColor: NovaColors.white,
+          minimumSize: const Size.fromHeight(48),
         ),
         onPressed: onPressed,
         child: Text(label),
@@ -1439,7 +1465,7 @@ class PlayerSecondaryAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) => OutlinedButton(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(36),
+          minimumSize: const Size.fromHeight(48),
         ),
         onPressed: onPressed,
         child: Text(label),

@@ -1,8 +1,9 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../shared/widgets/color_picker_dialog.dart';
 import 'widgets/settings_tiles.dart';
 
@@ -264,52 +265,86 @@ const _subtitlePreferences = <_Preference>[
 class SettingsPreferencesPage extends StatelessWidget {
   const SettingsPreferencesPage({super.key, required this.subtitles});
   final bool subtitles;
-
   @override
   Widget build(BuildContext context) {
-    // Task 122-c F4: the page subscribes only to the UI language — every
-    // value is selected per-tile inside [_PreferenceTile], killing the
-    // double registration (page watch + per-tile watch) from the audit.
-    final english = context.select<AppState, bool>((app) => app.english);
-    final title = subtitles
-        ? (english ? 'Subtitles and translation' : 'الترجمة واللغات')
-        : (english ? 'Player settings' : 'إعدادات المشغّل');
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
     final rows = subtitles ? _subtitlePreferences : _playerPreferences;
+    final groups = subtitles
+        ? <String, List<String>>{
+            app.tr('message496'): [
+              'preferredSubLangs',
+              'subtitleTranslationLanguage',
+              'subtitlesOffByDefault'
+            ],
+            app.tr('message497'): [
+              'subFontSize',
+              'subFontColor',
+              'subStyle',
+              'subBorderColor',
+              'subBorderSize',
+              'subBackgroundOpacity'
+            ],
+            app.tr('message498'): ['subtitleOffsetMs'],
+          }
+        : <String, List<String>>{
+            app.tr('message499'): [
+              'autoPlayNextEpisode',
+              'resumePlayback',
+              'resumePrompt',
+              'playerConfirmLeave'
+            ],
+            app.tr('message500'): [
+              'defaultAudioLanguage',
+              'preferredQuality',
+              'videoFill',
+              'showQualityInfo'
+            ],
+            app.tr('message501'): [
+              'seekBackStepSec',
+              'seekForwardStepSec',
+              'customPlaybackSpeeds'
+            ],
+            app.tr('message502'): [
+              'pickerLayout',
+              'streamSort',
+              'playableOnly',
+              'preferH264',
+              'p2pEnabled'
+            ],
+          };
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+          title: Text(subtitles ? app.tr('message7') : app.tr('message453'))),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: ListView.separated(
-            padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 32),
-            itemCount: rows.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return Padding(
-                  padding:
-                      const EdgeInsetsDirectional.only(start: 3, bottom: 5),
-                  child: Text(
-                    subtitles
-                        ? (english
-                            ? 'Language preferences select tracks supplied by your add-ons. This app does not translate subtitle files automatically.'
-                            : 'تفضيلات اللغة تختار المسارات التي توفرها إضافاتك. التطبيق لا يترجم ملفات الترجمة تلقائيًا.')
-                        : (english
-                            ? 'Playback runs natively on this device — direct URLs, Debrid, or the built-in torrent engine. Browser-only proxy, transcoding, and WebTorrent controls are not available here.'
-                            : 'يعمل التشغيل محليًا على هذا الجهاز — روابط مباشرة أو Debrid أو محرك التورنت المدمج. خيارات الوسيط والتحويل ومحرك WebTorrent الخاصة بالمتصفح غير متاحة هنا.'),
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: HorseTheme.muted),
-                  ),
-                );
-              }
-              final row = rows[index - 1];
-              return _PreferenceTile(item: row);
-            },
-          ),
-        ),
-      ),
+          child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 800),
+              child: ListView(
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
+                children: [
+                  SettingsPageIntro(
+                      title: subtitles
+                          ? app.tr('message503')
+                          : app.tr('message504'),
+                      description: subtitles
+                          ? app.tr('message505')
+                          : app.tr('message506'),
+                      icon: subtitles
+                          ? LucideIcons.captions
+                          : LucideIcons.circlePlay),
+                  for (final group in groups.entries)
+                    SettingsContentSection(
+                        title: group.key,
+                        children: group.value
+                            .map((key) => _PreferenceTile(
+                                item: rows.firstWhere((row) => row.key == key)))
+                            .toList()),
+                  SettingsInfoBanner(
+                      message: subtitles
+                          ? app.tr('message507')
+                          : app.tr('message508')),
+                ],
+              ))),
     );
   }
 }
@@ -334,26 +369,40 @@ class _PreferenceTile extends StatelessWidget {
       _Control.select => _valueButton(context, value, english),
       _Control.multiple => _valueButton(context, value, english),
       _Control.slider => _valueButton(context, value, english),
-      _Control.color => _colorValue(value?.toString() ?? '#FFFFFF'),
+      _Control.color => _colorValue(context, value?.toString() ?? '#FFFFFF'),
     };
-    // No repeated white value under the title — the colored trailing value
-    // is the single source of truth (user request: no duplicates in settings).
-    return Container(
-      decoration: BoxDecoration(
-        color: HorseTheme.surface,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: HorseTheme.line),
-      ),
-      child: ListTile(
-        minVerticalPadding: 10,
-        title: Text(title),
-        trailing: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150), child: trailing),
-        onTap: item.control == _Control.toggle
-            ? () => context.read<AppState>().setSetting(item.key, value != true)
-            : () => _edit(context, item, value),
-      ),
-    );
+    if (item.control == _Control.toggle) {
+      return SettingsOptimisticSwitchTile(
+          title: Text(title),
+          value: value == true,
+          onChanged: (next) =>
+              context.read<AppState>().setSetting(item.key, next));
+    }
+    return InkWell(
+        onTap: () => _edit(context, item, value),
+        child: Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(20, 18, 16, 18),
+          child: Row(children: [
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 6),
+                  if (item.control != _Control.color)
+                    Text(_formatValue(item, value, english),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.secondary)),
+                ])),
+            if (item.control == _Control.color) trailing,
+            const SizedBox(width: 16),
+            Icon(
+                Directionality.of(context) == TextDirection.rtl
+                    ? LucideIcons.chevronLeft
+                    : LucideIcons.chevronRight,
+                size: 18),
+          ]),
+        ));
   }
 
   Widget _valueButton(BuildContext context, dynamic value, bool english) =>
@@ -365,7 +414,7 @@ class _PreferenceTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis),
       );
 
-  Widget _colorValue(String value) {
+  Widget _colorValue(BuildContext context, String value) {
     final color = _parseColor(value);
     return Container(
       width: 28,
@@ -373,7 +422,8 @@ class _PreferenceTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
-        border: Border.all(color: HorseTheme.line, width: 1.5),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant, width: 1.5),
       ),
     );
   }
@@ -385,21 +435,29 @@ class _PreferenceTile extends StatelessWidget {
     if (item.control == _Control.select) {
       final selected = await showModalBottomSheet<String>(
         context: context,
-        backgroundColor: HorseTheme.surface,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        showDragHandle: true,
+        isScrollControlled: true,
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .8),
         builder: (context) => SafeArea(
           child: ListView(
             shrinkWrap: true,
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
+              Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(english ? item.english : item.arabic,
+                      style: Theme.of(context).textTheme.titleLarge)),
               for (final option in item.options)
                 ListTile(
                   leading: Icon(
                     current?.toString() == option.value
-                        ? Icons.radio_button_checked_rounded
-                        : Icons.radio_button_off_rounded,
+                        ? LucideIcons.circleDot
+                        : LucideIcons.circle,
                     color: current?.toString() == option.value
-                        ? HorseTheme.gold
-                        : HorseTheme.muted,
+                        ? Theme.of(context).colorScheme.secondary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   title: Text(english ? option.english : option.arabic),
                   onTap: () => Navigator.pop(context, option.value),
@@ -444,10 +502,10 @@ class _PreferenceTile extends StatelessWidget {
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text(english ? 'Cancel' : 'إلغاء')),
+                  child: Text(NovaStrings.lookup(english, 'cancel'))),
               FilledButton(
                   onPressed: () => Navigator.pop(context, currentValues),
-                  child: Text(english ? 'Save' : 'حفظ'))
+                  child: Text(NovaStrings.lookup(english, 'save')))
             ],
           ),
         ),
@@ -484,10 +542,10 @@ class _PreferenceTile extends StatelessWidget {
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text(english ? 'Cancel' : 'إلغاء')),
+                  child: Text(NovaStrings.lookup(english, 'cancel'))),
               FilledButton(
                   onPressed: () => Navigator.pop(context, sliderValue),
-                  child: Text(english ? 'Save' : 'حفظ'))
+                  child: Text(NovaStrings.lookup(english, 'save')))
             ],
           ),
         ),
@@ -515,7 +573,7 @@ class _PreferenceTile extends StatelessWidget {
 
 String _formatValue(_Preference item, dynamic value, bool english) {
   if (value is List) {
-    if (value.isEmpty) return english ? 'None selected' : 'لم يتم التحديد';
+    if (value.isEmpty) return NovaStrings.lookup(english, 'message509');
     return value.map((entry) {
       final option = item.options
           .where((entryOption) => entryOption.value == entry.toString())
@@ -532,7 +590,7 @@ String _formatValue(_Preference item, dynamic value, bool english) {
   if (item.control == _Control.slider && value is num) {
     return _shownNumber(value.toDouble(), item);
   }
-  return value?.toString() ?? (english ? 'Default' : 'افتراضي');
+  return value?.toString() ?? (NovaStrings.lookup(english, 'message2'));
 }
 
 String _shownNumber(double value, _Preference item) {

@@ -73,6 +73,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
 }
 ''';
   final Map<String, FeaturedArtwork> _featuredArtworkCache = {};
+  final Map<String, Map<String, dynamic>> _detailEnrichmentCache = {};
   final Map<String, Future<FeaturedArtwork?>> _featuredArtworkRequests = {};
 
   Future<List<MediaItem>> catalog(
@@ -254,6 +255,7 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         },
         language: language,
       );
+      _detailEnrichmentCache['${item.type}:${item.id}:$language'] = details;
       final images = details['images'] is Map
           ? Map<String, dynamic>.from(details['images'] as Map)
           : const <String, dynamic>{};
@@ -282,6 +284,75 @@ query ($weekStart: Int!, $weekEnd: Int!) {
       // The catalog hero must still render when TMDB is unavailable.
       return null;
     }
+  }
+
+  /// Reuses the artwork response for genuine people, production and metadata.
+  /// The detail page renders its warm item before this optional enrichment.
+  Future<MediaItem> detailEnrichment(MediaItem item,
+      {String language = 'en-US', String region = 'US'}) async {
+    final key = '${item.type}:${item.id}:$language';
+    if (!_detailEnrichmentCache.containsKey(key)) {
+      await featuredArtwork(item,
+          language: language, region: region, uiLanguage: language);
+    }
+    final details = _detailEnrichmentCache[key];
+    if (details == null) return item;
+    // Credits are loaded only for an opened detail page. Home artwork must
+    // not pay for the much larger cast payload for every carousel slide.
+    Map credits = details['credits'] as Map? ?? const {};
+    if (credits.isEmpty && details['id'] != null) {
+      try {
+        credits = await api.tmdbGet(
+            '/${item.type == 'series' ? 'tv' : 'movie'}/${details['id']}/credits',
+            language: language);
+        details['credits'] = credits;
+      } catch (_) {/* Existing addon names remain useful offline. */}
+    }
+    final crew = (credits['crew'] as List? ?? const [])
+        .whereType<Map>()
+        .where((person) => const {
+              'Director',
+              'Writer',
+              'Screenplay',
+              'Creator',
+              'Executive Producer'
+            }.contains(person['job']))
+        .take(12)
+        .toList();
+    final creators = (details['created_by'] as List? ?? const [])
+        .whereType<Map>()
+        .map((person) => {...person, 'job': 'Creator'})
+        .toList();
+    final directors = crew
+        .where((person) => person['job'] == 'Director')
+        .map((person) => person['name'])
+        .whereType<String>()
+        .toList();
+    final json = item.toJson();
+    void add(String key, Object? value) {
+      if (value != null && value.toString().trim().isNotEmpty)
+        json[key] = value;
+    }
+
+    add('originalTitle', details['original_title'] ?? details['original_name']);
+    add('status', details['status']);
+    add('language', details['original_language']);
+    add('releaseDate', details['release_date'] ?? details['first_air_date']);
+    if (item.type == 'series') {
+      add('seasonCount', details['number_of_seasons']);
+      add('episodeCount', details['number_of_episodes']);
+    }
+    if ((credits['cast'] as List?)?.isNotEmpty == true)
+      json['castMembers'] = credits['cast'];
+    if (crew.isNotEmpty || creators.isNotEmpty)
+      json['crewMembers'] = [...creators, ...crew];
+    if ((details['production_companies'] as List?)?.isNotEmpty == true)
+      json['productionCompanies'] = details['production_companies'];
+    if (item.director.isEmpty && directors.isNotEmpty)
+      json['director'] = directors;
+    if (item.originCountry == null)
+      json['countries'] = details['production_countries'];
+    return MediaItem.fromJson(json);
   }
 
   static String? _localizedLogoPath(

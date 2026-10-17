@@ -1,166 +1,128 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/state/app_state.dart';
-import '../../core/theme/horse_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'widgets/settings_tiles.dart';
+import '../../shared/widgets/nova_parental_gate.dart';
 
 class SettingsDisplayPage extends StatelessWidget {
-  const SettingsDisplayPage({super.key});
-
+  const SettingsDisplayPage({super.key, this.kidsOnly = false});
+  final bool kidsOnly;
   @override
   Widget build(BuildContext context) {
-    // Task 122-c F4: the page subscribes ONLY to the UI language (titles,
-    // card headers, footer). Every row selects its own `webSettings` value,
-    // so a settings change rebuilds exactly one row instead of the page.
-    final english = context.select<AppState, bool>((app) => app.english);
+    context.select<AppState, bool>((app) => app.english);
+    final app = context.read<AppState>();
     return Scaffold(
       appBar: AppBar(
-        title: Text(english ? 'Catalog and display' : 'الكتالوج والمظهر'),
-      ),
+          title: Text(kidsOnly ? app.tr('message415') : app.tr('message416'))),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: ListView(
-            padding: const EdgeInsetsDirectional.fromSTEB(20, 12, 20, 36),
-            children: [
-              _PreferenceCard(
-                title: english ? 'Language' : 'اللغة',
+          child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 800),
+              child: ListView(
+                padding: const EdgeInsetsDirectional.fromSTEB(24, 8, 24, 48),
                 children: [
-                  _ContentLanguageRow(
-                    title: english ? 'Content language' : 'لغة المحتوى',
-                    subtitle: english
-                        ? 'Posters, synopses & episode titles (TMDB & supporting addons)'
-                        : 'الملصقات والقصص وعناوين الحلقات (TMDB والإضافات الداعمة)',
-                  ),
+                  SettingsPageIntro(
+                      title: kidsOnly
+                          ? app.tr('message417')
+                          : app.tr('message418'),
+                      description: kidsOnly
+                          ? app.tr('message419')
+                          : app.tr('message420'),
+                      icon: kidsOnly
+                          ? LucideIcons.smile
+                          : LucideIcons.layoutGrid),
+                  if (!kidsOnly) ...[
+                    SettingsContentSection(
+                        title: app.tr('message421'),
+                        children: [
+                          _SettingSelect(
+                              settingKey: 'homeMode',
+                              fallback: 'harbor',
+                              title: app.tr('message422'),
+                              options: {
+                                'harbor': app.tr('message423'),
+                                'classic': app.tr('message424')
+                              }),
+                          _SettingToggle(
+                              settingKey: 'homeShowAllAddonRows',
+                              title: app.tr('message425')),
+                          _SettingToggle(
+                              settingKey: 'hideWatchedInCatalogs',
+                              title: app.tr('message426')),
+                          _HideContentToggle(
+                              kind: 'anime', title: app.tr('message427')),
+                          _HideContentToggle(
+                              kind: 'adult', title: app.tr('message428')),
+                        ]),
+                    SettingsContentSection(
+                        title: app.tr('message429'),
+                        children: [
+                          _SettingToggle(
+                              settingKey: 'showImdbBadge',
+                              onWhenAbsent: true,
+                              title: app.tr('message430')),
+                          _SettingToggle(
+                              settingKey: 'hidePosterTitles',
+                              title: app.tr('message431')),
+                          const _PosterRadiusRow(),
+                          _SettingToggle(
+                              settingKey: 'blurEpisodeThumbnails',
+                              title: app.tr('message432')),
+                          _SettingSelect(
+                              settingKey: 'episodesView',
+                              fallback: 'auto',
+                              title: app.tr('message433'),
+                              options: {
+                                'auto': app.tr('message434'),
+                                'list': app.tr('message435'),
+                                'grid': app.tr('message436')
+                              }),
+                        ]),
+                    SettingsContentSection(
+                        title: app.tr('message437'),
+                        children: [
+                          _SettingSelect(
+                              settingKey: 'librarySort',
+                              fallback: 'recent',
+                              title: app.tr('message438'),
+                              options: {
+                                'recent': app.tr('message439'),
+                                'title': app.tr('message440'),
+                                'year': app.tr('message441')
+                              }),
+                          _SettingToggle(
+                              settingKey: 'dockAutoHide',
+                              onWhenAbsent: true,
+                              title: app.tr('message442')),
+                        ]),
+                  ],
+                  SettingsContentSection(
+                      title: app.tr('message443'),
+                      children: [
+                        _SettingSelect(
+                            settingKey: 'kidsCardSize',
+                            fallback: 'medium',
+                            title: app.tr('message444'),
+                            options: {
+                              'large': app.tr('message445'),
+                              'medium': app.tr('message446'),
+                              'small': app.tr('message447')
+                            }),
+                        if (kidsOnly)
+                          SettingsTile(
+                              icon: LucideIcons.keyRound,
+                              title: app.tr('message448'),
+                              subtitle: app.tr('message449'),
+                              onTap: () => NovaParentalGate.change(context)),
+                      ]),
+                  if (kidsOnly)
+                    SettingsInfoBanner(
+                        icon: LucideIcons.shieldCheck,
+                        message: app.tr('message450')),
                 ],
-              ),
-              const SizedBox(height: 12),
-              _PreferenceCard(
-                title: english ? 'Home' : 'الرئيسية',
-                children: [
-                  _SettingSelect(
-                    settingKey: 'homeMode',
-                    fallback: 'harbor',
-                    title: english ? 'Home layout' : 'تخطيط الرئيسية',
-                    options: {
-                      'harbor': english ? 'Featured' : 'المميز',
-                      'classic': english ? 'Compact' : 'مختصر',
-                    },
-                  ),
-                  _SettingToggle(
-                    settingKey: 'homeShowAllAddonRows',
-                    title: english
-                        ? 'Show all add-on catalogs'
-                        : 'عرض كل كتالوجات الإضافات',
-                  ),
-                  _SettingToggle(
-                    settingKey: 'hideWatchedInCatalogs',
-                    title: english
-                        ? 'Hide watched titles in catalogs'
-                        : 'إخفاء العناوين المشاهدة من الكتالوجات',
-                  ),
-                  _HideContentToggle(
-                    kind: 'anime',
-                    title: english
-                        ? 'Hide anime from Home catalogs'
-                        : 'إخفاء الأنمي من كتالوجات الرئيسية',
-                  ),
-                  _HideContentToggle(
-                    kind: 'adult',
-                    title: english
-                        ? 'Hide adult-rated titles from Home'
-                        : 'إخفاء العناوين المصنفة للكبار من الرئيسية',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _PreferenceCard(
-                title: english ? 'Posters' : 'الملصقات',
-                children: [
-                  _SettingToggle(
-                    settingKey: 'showImdbBadge',
-                    onWhenAbsent: true,
-                    title: english ? 'Show rating badge' : 'إظهار تقييم الملصق',
-                  ),
-                  _SettingToggle(
-                    settingKey: 'hidePosterTitles',
-                    title: english
-                        ? 'Hide poster titles'
-                        : 'إخفاء عناوين الملصقات',
-                  ),
-                  const _PosterRadiusRow(),
-                  _SettingToggle(
-                    settingKey: 'blurEpisodeThumbnails',
-                    title: english
-                        ? 'Blur unwatched episode stills'
-                        : 'تمويه صور الحلقات غير المشاهدة',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _PreferenceCard(
-                title: english ? 'Kids and library' : 'الأطفال والمكتبة',
-                children: [
-                  _SettingSelect(
-                    settingKey: 'kidsCardSize',
-                    fallback: 'medium',
-                    title: english ? 'Kids poster size' : 'حجم ملصقات الأطفال',
-                    options: {
-                      'large': english ? 'Large' : 'كبير',
-                      'medium': english ? 'Medium' : 'متوسط',
-                      'small': english ? 'Small' : 'صغير',
-                    },
-                  ),
-                  _SettingSelect(
-                    settingKey: 'librarySort',
-                    fallback: 'recent',
-                    title: english ? 'Library sort' : 'ترتيب المكتبة',
-                    options: {
-                      'recent': english ? 'Recently added' : 'الأحدث إضافة',
-                      'title': english ? 'Title' : 'العنوان',
-                      'year': english ? 'Year' : 'السنة',
-                    },
-                  ),
-                  _SettingSelect(
-                    settingKey: 'episodesView',
-                    fallback: 'auto',
-                    title: english ? 'Episode layout' : 'عرض الحلقات',
-                    options: {
-                      'auto': english ? 'Automatic' : 'تلقائي',
-                      'list': english ? 'List' : 'قائمة',
-                      'grid': english ? 'Cards' : 'بطاقات',
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _PreferenceCard(
-                title: english ? 'Navigation' : 'التنقل',
-                children: [
-                  _SettingToggle(
-                    settingKey: 'dockAutoHide',
-                    onWhenAbsent: true,
-                    title: english
-                        ? 'Auto-hide navigation while scrolling'
-                        : 'إخفاء شريط التنقل أثناء التمرير',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                english
-                    ? 'Noor keeps its signature dark and bronze colors. Browser-only options such as desktop side-rail order are not available on mobile.'
-                    : 'يحافظ Noor على ألوانه الداكنة والذهبية. خيارات المتصفح الخاصة مثل ترتيب الشريط الجانبي المكتبي غير متاحة على الجوال.',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: HorseTheme.muted),
-              ),
-            ],
-          ),
-        ),
-      ),
+              ))),
     );
   }
 }
@@ -199,28 +161,6 @@ class _RadiusSliderState extends State<_RadiusSlider> {
 /// [AppState.contentLanguage] via context.select. The 11 options are the
 /// static [AppState.kContentLanguages] native labels, shown natively in
 /// BOTH UI languages (a content language may differ from the UI one).
-class _ContentLanguageRow extends StatelessWidget {
-  const _ContentLanguageRow({required this.title, required this.subtitle});
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final language =
-        context.select<AppState, String>((app) => app.contentLanguage);
-    final options = AppState.kContentLanguages;
-    return _SelectRow(
-      title: title,
-      subtitle: subtitle,
-      themedDropdown: true,
-      value: options.containsKey(language) ? language : options.keys.first,
-      options: options,
-      onChanged: (next) =>
-          context.read<AppState>().setSetting('contentLanguage', next),
-    );
-  }
-}
-
 /// Task 122-c F4: self-subscribing toggle row bound to one `webSettings`
 /// bool key (`== true` semantics, or `!= false` with [onWhenAbsent]) —
 /// renders through the optimistic switch tile so taps paint instantly.
@@ -241,7 +181,7 @@ class _SettingToggle extends StatelessWidget {
       return onWhenAbsent ? raw != false : raw == true;
     });
     return SettingsOptimisticSwitchTile(
-      contentPadding: const EdgeInsetsDirectional.only(start: 3, end: 0),
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(20, 10, 16, 10),
       title: Text(title),
       value: value,
       onChanged: (next) =>
@@ -261,7 +201,7 @@ class _HideContentToggle extends StatelessWidget {
     final value = context.select<AppState, bool>(
         (app) => (app.webSettings['hideContent'] as Map?)?[kind] == true);
     return SettingsOptimisticSwitchTile(
-      contentPadding: const EdgeInsetsDirectional.only(start: 3, end: 0),
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(20, 10, 16, 10),
       title: Text(title),
       value: value,
       onChanged: (next) {
@@ -315,18 +255,16 @@ class _PosterRadiusRow extends StatelessWidget {
               (app.webSettings['posterRadius'] as num?)?.toDouble() ?? 12,
             ));
     return Padding(
-      padding: const EdgeInsetsDirectional.fromSTEB(3, 12, 3, 6),
+      padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(english ? 'Poster corner radius' : 'استدارة زوايا الملصق'),
-          const SizedBox(height: 3),
+          Text(NovaStrings.lookup(english, 'message451')),
+          SizedBox(height: 3),
           Text(
             '${radius.round()} px',
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: HorseTheme.muted),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           _RadiusSlider(
             value: radius,
@@ -340,106 +278,29 @@ class _PosterRadiusRow extends StatelessWidget {
   }
 }
 
-class _PreferenceCard extends StatelessWidget {
-  const _PreferenceCard({required this.title, required this.children});
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Material(
-        color: HorseTheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: HorseTheme.line),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(3, 8, 3, 6),
-                child: Text(title,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(color: HorseTheme.gold)),
-              ),
-              ...children,
-            ],
-          ),
-        ),
-      );
-}
-
 class _SelectRow extends StatelessWidget {
-  const _SelectRow({
-    required this.title,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-    this.subtitle,
-    this.themedDropdown = false,
-  });
+  const _SelectRow(
+      {required this.title,
+      required this.value,
+      required this.options,
+      required this.onChanged});
   final String title;
-  final String? subtitle;
   final String value;
   final Map<String, String> options;
   final ValueChanged<String> onChanged;
-
-  /// Task 122-c: render the shared [SettingsLanguageDropdown] (gold/muted,
-  /// no underline) instead of the plain dropdown — used by the new
-  /// content-language row so the two language dropdowns look alike. The
-  /// default keeps the original dropdown byte-for-byte.
-  final bool themedDropdown;
-
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsetsDirectional.fromSTEB(3, 10, 3, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title),
-            if (subtitle != null) ...[
-              const SizedBox(height: 3),
-              Text(
-                subtitle!,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: HorseTheme.muted),
-              ),
-            ],
-            // The dropdown itself shows the selected value — no repeated
-            // muted copy of it above (user request: no duplicates).
-            if (themedDropdown)
-              SettingsLanguageDropdown(
-                expanded: true,
-                value: options.containsKey(value) ? value : options.keys.first,
-                items: options.entries
-                    .map((entry) => DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
-                        ))
-                    .toList(),
-                onChanged: onChanged,
-              )
-            else
-              DropdownButton<String>(
-                value: options.containsKey(value) ? value : options.keys.first,
-                isExpanded: true,
-                items: options.entries
-                    .map((entry) => DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
-                        ))
-                    .toList(),
-                onChanged: (next) {
-                  if (next != null) onChanged(next);
-                },
-              ),
-          ],
-        ),
-      );
+      padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        SettingsLanguageDropdown(
+            expanded: true,
+            value: options.containsKey(value) ? value : options.keys.first,
+            items: options.entries
+                .map((entry) => DropdownMenuItem(
+                    value: entry.key, child: Text(entry.value)))
+                .toList(),
+            onChanged: onChanged),
+      ]));
 }

@@ -1,3 +1,5 @@
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +15,7 @@ import '../../core/torrent/torrent_models.dart';
 import '../../core/torrent/torrent_service.dart';
 import '../../shared/widgets/media_rail.dart';
 import '../../shared/widgets/noor_toast.dart';
+import '../../shared/widgets/nova_parental_gate.dart';
 import '../anime/anime_tracker_sheet.dart';
 import '../library/custom_list_picker.dart';
 import '../player/stream_headers.dart';
@@ -23,6 +26,9 @@ import 'episode_data.dart';
 import 'episode_views.dart';
 import 'sources_page.dart';
 import 'stream_loading.dart';
+import '../home/widgets/cinematic_cover_scroll.dart';
+import '../home/widgets/async_media_section.dart';
+import '../../core/downloads/download_manager.dart';
 
 /// Cinematic detail page — the Flutter replica of the Harbor web DetailView:
 /// fixed glass back pill over a full-bleed hero (phone card variant < 700px /
@@ -40,8 +46,10 @@ class MediaDetailPage extends StatefulWidget {
     required this.item,
     this.resumeVideoId,
     this.resumePositionMs,
+    this.kidsMode = false,
   });
   final MediaItem item;
+  final bool kidsMode;
 
   /// Continue-watching handoff: the video to resume (series episode id, or
   /// the movie's own id) and the playback position in milliseconds.
@@ -55,6 +63,8 @@ class MediaDetailPage extends StatefulWidget {
 class _MediaDetailPageState extends State<MediaDetailPage> {
   late Future<MediaItem?> _detail;
   FeaturedArtwork? _art;
+  MediaItem? _enrichedItem;
+  int _detailGeneration = 0;
   bool _loadingStreams = false;
 
   /// Episodes subsystem state (season/sort/view) — Task 118. Created lazily
@@ -66,7 +76,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   void initState() {
     super.initState();
     final app = context.read<AppState>();
-    _detail = app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+    _detail = _loadDetail(app);
     _loadFeaturedArtwork(app);
   }
 
@@ -109,11 +119,28 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     }
   }
 
+  Future<MediaItem?> _loadDetail(AppState app) async {
+    final generation = ++_detailGeneration;
+    final item =
+        await app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+    if (item != null && app.webSettings['tmdbEnabled'] != false) {
+      unawaited(app.catalogs
+          .detailEnrichment(item,
+              language: app.contentTmdbLocale,
+              region: app.webSettings['region']?.toString() ?? 'US')
+          .then((enriched) {
+        if (mounted && generation == _detailGeneration)
+          setState(() => _enrichedItem = enriched);
+      }).catchError((Object _) {}));
+    }
+    return item;
+  }
+
   void _reloadDetail() {
     final app = context.read<AppState>();
     setState(() {
-      _detail =
-          app.catalogs.detail(widget.item.type, widget.item.id, app.addons);
+      _enrichedItem = null;
+      _detail = _loadDetail(app);
     });
   }
 
@@ -137,14 +164,12 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             children: [
               if (showSkeleton)
                 const Positioned.fill(child: DetailLoadingSkeleton())
-              else if (failed)
+              else if (failed && widget.item.name.isEmpty)
                 Positioned.fill(
                   child: _ErrorView(
                     english: english,
                     message: snapshot.error?.toString() ??
-                        (english
-                            ? 'Title not found. It may not be in Cinemeta or your addons.'
-                            : 'لم يتم العثور على العنوان. قد لا يكون موجوداً في Cinemeta أو في إضافاتك.'),
+                        (NovaStrings.lookup(english, 'message172')),
                     onRetry: _reloadDetail,
                   ),
                 )
@@ -153,10 +178,11 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
                   child: _buildContent(
                     context,
                     app,
-                    item: snapshot.data ?? widget.item,
+                    item: _enrichedItem ?? snapshot.data ?? widget.item,
                     english: english,
                     isWide: isWide,
                     viewportSize: media.size,
+                    refreshFailed: failed,
                   ),
                 ),
               // Fixed chrome — visible in every state, over everything.
@@ -179,6 +205,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     required bool english,
     required bool isWide,
     required Size viewportSize,
+    bool refreshFailed = false,
   }) {
     final videos = sortEpisodes(item.videos);
     final resume = _resolveResume(app, item, videos);
@@ -223,178 +250,140 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       );
     }
 
-    return CustomScrollView(
+    final gutter = isWide ? 40.0 : 24.0;
+    final heroHeight = (viewportSize.height * (isWide ? .65 : .60))
+            .clamp(360.0, 640.0) +
+        (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0.0, 32.0) * 4;
+    return CinematicCoverScroll(
+      storageKey: PageStorageKey('detail-${item.id}'),
+      heroHeight: heroHeight,
+      hero: DetailHero(
+          item: item,
+          backdropUrl: backdrop,
+          logoUrl: logo,
+          isWide: isWide,
+          viewportHeight: viewportSize.height,
+          viewportWidth: viewportSize.width),
       slivers: [
         SliverToBoxAdapter(
-          child: _buildHeroAndColumn(
-            context,
-            app,
-            item: item,
-            english: english,
-            isWide: isWide,
-            viewportSize: viewportSize,
-            backdrop: backdrop,
-            logo: logo,
-            resume: resume,
-            defaultVideo: defaultVideo,
-          ),
-        ),
-        ...episodeSlivers,
-        SliverToBoxAdapter(child: _SimilarTitles(item: item)),
-        if (item.type == 'movie' &&
-            item.genres.isEmpty &&
-            (item.description == null || item.description!.isEmpty))
-          SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                  isWide ? 34 : 20, 32, isWide ? 34 : 20, 0),
-              child: Align(
-                alignment: isWide
-                    ? AlignmentDirectional.centerStart
-                    : AlignmentDirectional.topCenter,
-                child: Text(
-                  english
-                      ? 'Press Watch Now to fetch playback sources…'
-                      : 'اضغط مشاهدة لجلب مصادر التشغيل…',
-                  style: const TextStyle(fontSize: 12, color: HorseTheme.muted),
-                ),
-              ),
+          padding: EdgeInsetsDirectional.fromSTEB(gutter, 24, gutter, 32),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (refreshFailed) ...[
+              Text(NovaStrings.lookup(english, 'message173'),
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              TextButton(
+                  onPressed: _reloadDetail,
+                  child: Text(NovaStrings.lookup(english, 'message174'))),
+              const SizedBox(height: 16),
+            ],
+            DetailMetaRow(item: item, isWide: true),
+            const SizedBox(height: 20),
+            DetailActionRow(
+              english: english,
+              isWide: true,
+              inList: app.contains(item),
+              showTrackAnime: item.hasAnimeIds &&
+                  (app.linkedServices['anilist']?['linked'] == true ||
+                      app.linkedServices['mal']?['linked'] == true),
+              primaryLabel: resume.isResume
+                  ? (item.type == 'series'
+                      ? (NovaStrings.lookup(english, 'message175',
+                          {'p0': resume.season, 'p1': resume.episode}))
+                      : (NovaStrings.lookup(english, 'message176')))
+                  : (NovaStrings.lookup(english, 'message177')),
+              primaryIsResume: resume.isResume,
+              loading: _loadingStreams,
+              onPrimaryPressed: () => _play(item,
+                  video: resume.video ?? defaultVideo,
+                  resumePositionMs: resume.positionMs),
+              onToggleWatchlist: () => unawaited(app.toggleWatchlist(item)),
+              onOpenStreams: () =>
+                  _play(item, video: resume.video ?? defaultVideo),
+              onTrackAnime: () =>
+                  unawaited(showAnimeTrackerSheet(context, item)),
+              onShare: () => unawaited(_share(item, english)),
+              onAddToList: () => unawaited(showCustomListPicker(context, item)),
+              onDownload: widget.kidsMode
+                  ? null
+                  : () => unawaited(
+                      _download(item, video: resume.video ?? defaultVideo)),
             ),
-          ),
-        // Dock clearance (was a flat SizedBox(height: 108) — bug fix).
+            const SizedBox(height: 16),
+            _ProviderRatings(item: item, startAligned: true),
+            if (item.description?.isNotEmpty == true) ...[
+              const SizedBox(height: 32),
+              Text(NovaStrings.lookup(english, 'message178'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              DetailSynopsis(
+                  description: item.description!,
+                  isWide: isWide,
+                  viewportWidth: viewportSize.width),
+            ],
+          ]),
+        )),
+        if (episodeSlivers.isNotEmpty)
+          SliverPadding(
+              padding: EdgeInsetsDirectional.fromSTEB(gutter, 0, gutter, 32),
+              sliver: SliverMainAxisGroup(slivers: episodeSlivers)),
         SliverToBoxAdapter(
-          child: SizedBox(height: glassDockContentClearance(context)),
-        ),
+            child: Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(gutter, 8, gutter, 32),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            DetailCastCrew(item: item, english: english),
+            DetailProduction(item: item, english: english),
+          ]),
+        )),
+        // The fact table is deliberately immediately before similar titles.
+        SliverToBoxAdapter(
+            child: Padding(
+                padding: EdgeInsetsDirectional.fromSTEB(gutter, 0, gutter, 0),
+                child: DetailFactsTable(item: item, english: english))),
+        SliverToBoxAdapter(
+            child: _SimilarTitles(item: item, kidsMode: widget.kidsMode)),
+        SliverToBoxAdapter(
+            child: SizedBox(height: glassDockContentClearance(context))),
       ],
     );
   }
 
-  /// Hero + overlapping content column. The column is laid out in normal
-  /// flow with a top offset of `heroHeight − overlap`; the hero paints
-  /// behind it as a positioned child of the same Stack.
-  Widget _buildHeroAndColumn(
-    BuildContext context,
-    AppState app, {
-    required MediaItem item,
-    required bool english,
-    required bool isWide,
-    required Size viewportSize,
-    required String? backdrop,
-    required String? logo,
-    required _ResumePlan resume,
-    required Map<String, dynamic>? defaultVideo,
-  }) {
-    final vh = viewportSize.height;
-    final vw = viewportSize.width;
-    final heroHeight =
-        isWide ? (vh * 0.52).clamp(360.0, 680.0) : (vw - 32) * 11 / 16 + 72;
-    final overlap = isWide ? (vh * 0.14).clamp(96.0, 168.0) : 0.0;
-
-    Widget column = Column(
-      crossAxisAlignment:
-          isWide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
-      children: [
-        if (isWide) ...[
-          DetailColumnTitle(
-            logoUrl: logo,
-            title: item.name,
-            isWide: true,
-            viewportWidth: vw,
-          ),
-          const SizedBox(height: 8),
-        ] else
-          const SizedBox(height: 16),
-        DetailMetaRow(item: item, isWide: isWide),
-        const SizedBox(height: 8),
-        _ProviderRatings(item: item, startAligned: isWide),
-        if (item.description != null && item.description!.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          DetailSynopsis(
-            description: item.description!,
-            isWide: isWide,
-            viewportWidth: vw,
-          ),
-        ],
-        const SizedBox(height: 24),
-        DetailActionRow(
-          english: english,
-          isWide: isWide,
-          inList: app.contains(item),
-          showTrackAnime: item.hasAnimeIds &&
-              (app.linkedServices['anilist']?['linked'] == true ||
-                  app.linkedServices['mal']?['linked'] == true),
-          primaryLabel: resume.isResume
-              ? (item.type == 'series'
-                  ? (english
-                      ? 'Resume S${resume.season}:E${resume.episode}'
-                      : 'متابعة S${resume.season}:E${resume.episode}')
-                  : (english ? 'Resume' : 'متابعة'))
-              : (english ? 'Watch Now' : 'مشاهدة'),
-          primaryIsResume: resume.isResume,
-          loading: _loadingStreams,
-          onPrimaryPressed: () => _play(
-            item,
-            video: resume.video ?? defaultVideo,
-            resumePositionMs: resume.positionMs,
-          ),
-          onToggleWatchlist: () => unawaited(app.toggleWatchlist(item)),
-          // Task 139: identical to the primary CTA now — every watch path
-          // goes through the sources page (loading + refresh live there).
-          onOpenStreams: () => _play(
-            item,
-            video: resume.video ?? defaultVideo,
-          ),
-          onTrackAnime: () => unawaited(showAnimeTrackerSheet(context, item)),
-          onShare: () => unawaited(_share(item, english)),
-          onAddToList: () => unawaited(showCustomListPicker(context, item)),
-        ),
-        if (item.director.isNotEmpty || item.cast.isNotEmpty) ...[
-          const SizedBox(height: 32),
-          DetailCastCrew(item: item, english: english, centered: !isWide),
-        ],
-      ],
-    );
-    column = SizedBox(width: double.infinity, child: column);
-    if (isWide) {
-      column = vw >= 840
-          ? ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: column,
-            )
-          : FractionallySizedBox(
-              widthFactor: 0.7,
-              alignment: AlignmentDirectional.centerStart,
-              child: column,
-            );
+  Future<void> _download(MediaItem item, {Map<String, dynamic>? video}) async {
+    final app = context.read<AppState>();
+    final id = video?['id']?.toString() ?? item.id;
+    final picked = await Navigator.of(context)
+        .push<Map<String, dynamic>>(MaterialPageRoute(
+            builder: (_) => SourcesPage(
+                  item: item,
+                  video: video,
+                  english: app.english,
+                  downloadMode: true,
+                  loader: () async => (await loadRankedSources(
+                          app: app, item: item, videoId: id))
+                      .where((source) =>
+                          source['url'] is String &&
+                          (source['url'] as String).startsWith('http'))
+                      .toList(),
+                )));
+    if (picked == null || !mounted) return;
+    final title = video == null
+        ? item.name
+        : '${item.name} · S${video['season']}:E${video['episode']}';
+    try {
+      final source = parsePlaybackSource(picked);
+      if (source == null) return;
+      await DownloadManager.instance
+          .enqueue(url: source.url, title: title, headers: source.headers);
+      if (mounted)
+        NoorToast.show(context, NovaStrings.lookup(app.english, 'message179'));
+    } catch (_) {
+      if (mounted)
+        NoorToast.show(context, NovaStrings.lookup(app.english, 'message180'),
+            error: true);
     }
-    column = Padding(
-      padding: EdgeInsets.symmetric(horizontal: isWide ? 34 : 20),
-      child: column,
-    );
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Positioned(
-          left: 0,
-          right: 0,
-          top: 0,
-          height: heroHeight,
-          child: DetailHero(
-            item: item,
-            backdropUrl: backdrop,
-            logoUrl: logo,
-            isWide: isWide,
-            viewportHeight: vh,
-            viewportWidth: vw,
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.only(top: heroHeight - overlap),
-          child: column,
-        ),
-      ],
-    );
   }
 
   /// Resolves the primary CTA's resume target from the constructor hand-off
@@ -463,6 +452,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   }
 
   Future<void> _share(MediaItem item, bool english) async {
+    if (widget.kidsMode &&
+        (!await NovaParentalGate.verify(context) || !mounted)) return;
     try {
       await SharePlus.instance.share(ShareParams(text: item.name));
     } catch (_) {
@@ -472,7 +463,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         if (mounted) {
           NoorToast.show(
             context,
-            english ? 'Link copied to clipboard' : 'تم نسخ الرابط',
+            NovaStrings.lookup(english, 'message181'),
           );
         }
       } catch (_) {
@@ -749,12 +740,8 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       SnackBar(
         content: Text(
           debridFailed
-              ? (english
-                  ? 'The Debrid service could not resolve this torrent and this device has no built-in torrent engine.'
-                  : 'تعذّرت خدمة Debrid حل هذا التورنت، وهذا الجهاز لا يدعم محرك التورنت المدمج.')
-              : (english
-                  ? 'Torrent streaming needs a Debrid service (Real-Debrid / AllDebrid / TorBox) or a device with the built-in torrent engine.'
-                  : 'البث عبر التورنت يحتاج خدمة Debrid (Real-Debrid / AllDebrid / TorBox) أو جهازًا يدعم محرك التورنت المدمج.'),
+              ? (NovaStrings.lookup(english, 'message182'))
+              : (NovaStrings.lookup(english, 'message183')),
         ),
       ),
     );
@@ -823,8 +810,8 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: Text(english ? 'Retry' : 'إعادة المحاولة'),
+            icon: const Icon(LucideIcons.refreshCw, size: 18),
+            label: Text(NovaStrings.lookup(english, 'message120')),
           ),
         ],
       ),
@@ -967,35 +954,37 @@ class _RatingChip extends StatelessWidget {
       'anilist' => 'AniList',
       'mal' => 'MAL',
       'kitsu' => 'Kitsu',
-      _ => provider.isEmpty ? (english ? 'Rating' : 'تقييم') : provider,
+      _ => provider.isEmpty
+          ? (NovaStrings.lookup(english, 'message184'))
+          : provider,
     };
     final display = (rating['display'] ?? '').toString();
     final scale = (rating['originalScale'] ?? '/10').toString();
     final votes = rating['votes'] is num ? (rating['votes'] as num).toInt() : 0;
     final url = Uri.tryParse((rating['url'] ?? '').toString());
-    final color = switch (provider) {
-      'imdb' => const Color(0xFFFFC107),
-      'tmdb' => const Color(0xFF01B4E4),
-      'trakt' || 'rotten' => const Color(0xFFDA3545),
-      'metacritic' => const Color(0xFF21A366),
-      'anilist' => const Color(0xFF7B61FF),
-      'mal' => const Color(0xFF2E66A8),
-      _ => HorseTheme.gold,
-    };
+    final color = Theme.of(context).colorScheme.secondary;
     return Semantics(
       button: url?.hasScheme == true,
       label: '$label $display $scale',
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
-        onTap: url?.hasScheme == true ? () => unawaited(launchUrl(url!)) : null,
+        onTap: url?.hasScheme == true
+            ? () async {
+                if (context.read<AppState>().kidsSession &&
+                    (!await NovaParentalGate.verify(context) ||
+                        !context.mounted)) return;
+                await launchUrl(url!);
+              }
+            : null,
         child: Container(
           // Task 136 (perf): the blur-6 backdrop is retired — a row of these
           // rating chips sat over the scrolling artwork and each re-blurred
           // its backdrop every frame; the .55 fill keeps the same contrast.
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: .55),
-            border: Border.all(color: Colors.white.withValues(alpha: .08)),
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            border:
+                Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             borderRadius: BorderRadius.circular(999),
           ),
           child: Row(
@@ -1007,7 +996,7 @@ class _RatingChip extends StatelessWidget {
                     color: color, borderRadius: BorderRadius.circular(999)),
                 child: Text(label,
                     style: TextStyle(
-                        color: provider == 'imdb' ? Colors.black : Colors.white,
+                        color: Theme.of(context).colorScheme.onSecondary,
                         fontSize: 9,
                         fontWeight: FontWeight.w900)),
               ),
@@ -1017,13 +1006,13 @@ class _RatingChip extends StatelessWidget {
                       fontSize: 11, fontWeight: FontWeight.w600)),
               if (scale != '/10')
                 Text(scale == '%' ? '' : scale,
-                    style:
-                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
+                    style: TextStyle(
+                        fontSize: 10, color: NovaTheme.of(context).muted)),
               if (votes > 0) ...[
                 const SizedBox(width: 4),
                 Text(_compactVotes(votes),
-                    style:
-                        const TextStyle(fontSize: 10, color: HorseTheme.muted)),
+                    style: TextStyle(
+                        fontSize: 10, color: NovaTheme.of(context).muted)),
               ],
             ],
           ),
@@ -1034,8 +1023,9 @@ class _RatingChip extends StatelessWidget {
 }
 
 class _SimilarTitles extends StatefulWidget {
-  const _SimilarTitles({required this.item});
+  const _SimilarTitles({required this.item, this.kidsMode = false});
   final MediaItem item;
+  final bool kidsMode;
 
   @override
   State<_SimilarTitles> createState() => _SimilarTitlesState();
@@ -1043,7 +1033,6 @@ class _SimilarTitles extends StatefulWidget {
 
 class _SimilarTitlesState extends State<_SimilarTitles> {
   Future<List<MediaItem>>? _similar;
-  String? _genre;
   String? _requestSignature;
 
   @override
@@ -1064,7 +1053,6 @@ class _SimilarTitlesState extends State<_SimilarTitles> {
     ].join('|');
     if (signature != _requestSignature) {
       _requestSignature = signature;
-      _genre = genre;
       final language = app.contentTmdbLocale;
       final region = app.webSettings['region']?.toString() ?? 'US';
       final fallback = genre == null
@@ -1093,21 +1081,42 @@ class _SimilarTitlesState extends State<_SimilarTitles> {
       builder: (context, snapshot) {
         final items = (snapshot.data ?? const <MediaItem>[])
             .where((item) => item.id != widget.item.id)
+            .where((item) =>
+                !widget.kidsMode ||
+                const {
+                  'g',
+                  'pg',
+                  'tv-y',
+                  'tv-y7',
+                  'tv-g',
+                  'tv-pg',
+                  'u',
+                  '0',
+                  '6',
+                  '7'
+                }.contains(item.certification?.trim().toLowerCase()))
             .take(14)
             .toList();
-        if (items.isEmpty) return const SizedBox.shrink();
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return RailLoadingSkeleton(
+              title: NovaStrings.lookup(app.english, 'message185'));
+        }
+        if (items.isEmpty)
+          return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(NovaStrings.lookup(app.english, 'message186'),
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)));
         return Padding(
           padding: const EdgeInsetsDirectional.only(top: 32, bottom: 22),
           child: MediaRail(
-            title: app.english
-                ? (_genre == null
-                    ? 'Recommended for you'
-                    : 'More like this · $_genre')
-                : (_genre == null ? 'مقترح لك' : 'أعمال مشابهة · $_genre'),
+            title: NovaStrings.lookup(app.english, 'message185'),
             items: items,
             onTap: (item) => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                  builder: (_) => MediaDetailPage(item: item)),
+                  builder: (_) =>
+                      MediaDetailPage(item: item, kidsMode: widget.kidsMode)),
             ),
           ),
         );

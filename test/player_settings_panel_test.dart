@@ -18,19 +18,22 @@ void main() {
   }) {
     return MaterialApp(
       home: Scaffold(
-        body: PlayerSettingsPanelBody(
-          english: english,
-          speed: speed,
-          fit: fit,
-          audioLabel: 'Default',
-          subtitleLabel: 'Off',
-          hasEpisodes: hasEpisodes,
-          onSpeed: onSpeed ?? (_) {},
-          onFit: onFit ?? (_) {},
-          onOpenAudio: onOpenAudio ?? () {},
-          onOpenSubtitles: onOpenSubtitles ?? () {},
-          onOpenEpisodes: onOpenEpisodes ?? () {},
-        ),
+        body: Center(
+            child: SizedBox(
+                width: 420,
+                child: PlayerSettingsPanelBody(
+                  english: english,
+                  speed: speed,
+                  fit: fit,
+                  audioLabel: 'Default',
+                  subtitleLabel: 'Off',
+                  hasEpisodes: hasEpisodes,
+                  onSpeed: onSpeed ?? (_) {},
+                  onFit: onFit ?? (_) {},
+                  onOpenAudio: onOpenAudio ?? () {},
+                  onOpenSubtitles: onOpenSubtitles ?? () {},
+                  onOpenEpisodes: onOpenEpisodes ?? () {},
+                ))),
       ),
     );
   }
@@ -105,10 +108,13 @@ void main() {
       onOpenSubtitles: () => subs++,
       onOpenEpisodes: () => episodes++,
     ));
+    await tester.ensureVisible(find.text('Audio track'));
     await tester.tap(find.text('Audio track'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Subtitles'));
     await tester.tap(find.text('Subtitles'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Episodes'));
     await tester.tap(find.text('Episodes'));
     await tester.pumpAndSettle();
     expect(audio, 1);

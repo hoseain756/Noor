@@ -5,14 +5,18 @@
 /// still accepted (legacy callers) — when `loader` is provided it wins.
 library;
 
+import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:provider/provider.dart';
+import '../../core/state/app_state.dart';
+import '../../shared/widgets/shimmer_box.dart';
 
 import '../../core/models/media_item.dart';
 import '../../core/theme/horse_theme.dart';
 import '../../core/torrent/torrent_models.dart';
 import '../../shared/widgets/app_state_message.dart';
-import '../../shared/widgets/glass_navigation.dart';
 import '../../shared/widgets/image_decode.dart';
 import 'detail_glass.dart';
 
@@ -26,6 +30,7 @@ class SourcesPage extends StatefulWidget {
     this.streams = const [],
     this.loader,
     required this.english,
+    this.downloadMode = false,
   });
 
   final MediaItem item;
@@ -41,6 +46,7 @@ class SourcesPage extends StatefulWidget {
   /// re-runs it in place. Takes precedence over [streams].
   final Future<List<Map<String, dynamic>>> Function()? loader;
   final bool english;
+  final bool downloadMode;
 
   @override
   State<SourcesPage> createState() => _SourcesPageState();
@@ -48,6 +54,7 @@ class SourcesPage extends StatefulWidget {
 
 class _SourcesPageState extends State<SourcesPage> {
   String _query = '';
+  bool _loadFailed = false;
 
   /// The live list: seeded from [SourcesPage.streams], or fetched through
   /// [SourcesPage.loader] (initial load + every refresh press).
@@ -76,12 +83,16 @@ class _SourcesPageState extends State<SourcesPage> {
   Future<void> _runLoader(
     Future<List<Map<String, dynamic>>> Function() loader,
   ) async {
-    setState(() => _refreshing = true);
+    setState(() {
+      _refreshing = true;
+      _loadFailed = false;
+    });
     List<Map<String, dynamic>> streams;
     try {
       streams = await loader();
     } catch (_) {
-      streams = const []; // refreshable empty state — never a crash
+      _loadFailed = true;
+      streams = _streams; // refreshable empty state — never a crash
     }
     if (!mounted) return;
     setState(() {
@@ -202,10 +213,10 @@ class _SourcesPageState extends State<SourcesPage> {
   }
 
   String _sortLabel(int index, bool english) => switch (index) {
-        1 => english ? 'Seeds' : 'البذور',
-        2 => english ? 'Size' : 'الحجم',
-        3 => english ? 'Quality' : 'الجودة',
-        _ => english ? 'Best' : 'الأفضل',
+        1 => NovaStrings.lookup(english, 'message187'),
+        2 => NovaStrings.lookup(english, 'message188'),
+        3 => NovaStrings.lookup(english, 'message189'),
+        _ => NovaStrings.lookup(english, 'message190'),
       };
 
   Future<void> _openSortMenu() async {
@@ -233,8 +244,8 @@ class _SourcesPageState extends State<SourcesPage> {
                       width: 20,
                       height: 20,
                       child: i == _sort
-                          ? const Icon(Icons.check_rounded,
-                              size: 16, color: HorseTheme.gold)
+                          ? Icon(LucideIcons.check,
+                              size: 16, color: NovaTheme.of(context).gold)
                           : null,
                     ),
                     const SizedBox(width: 10),
@@ -243,10 +254,10 @@ class _SourcesPageState extends State<SourcesPage> {
                         _sortLabel(i, widget.english),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: HorseTheme.ink,
+                          color: NovaTheme.of(context).ink,
                         ),
                       ),
                     ),
@@ -301,7 +312,7 @@ class _SourcesPageState extends State<SourcesPage> {
                     Expanded(
                       child: Text(
                         i == 0
-                            ? (english ? 'All add-ons' : 'كل الإضافات')
+                            ? (NovaStrings.lookup(english, 'message191'))
                             : names[i - 1],
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -312,8 +323,8 @@ class _SourcesPageState extends State<SourcesPage> {
                                   (_addon != null &&
                                       i > 0 &&
                                       names[i - 1] == _addon)
-                              ? HorseTheme.gold
-                              : HorseTheme.ink,
+                              ? NovaTheme.of(context).gold
+                              : NovaTheme.of(context).ink,
                         ),
                       ),
                     ),
@@ -321,10 +332,10 @@ class _SourcesPageState extends State<SourcesPage> {
                       const SizedBox(width: 6),
                       Text(
                         '${_addonStats[names[i - 1]]!.$1}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: HorseTheme.muted,
+                          color: NovaTheme.of(context).muted,
                         ),
                       ),
                     ],
@@ -334,8 +345,8 @@ class _SourcesPageState extends State<SourcesPage> {
                       height: 20,
                       child: (i == 0 && _addon == null) ||
                               (i > 0 && names[i - 1] == _addon)
-                          ? const Icon(Icons.check_rounded,
-                              size: 16, color: HorseTheme.gold)
+                          ? Icon(LucideIcons.check,
+                              size: 16, color: NovaTheme.of(context).gold)
                           : null,
                     ),
                   ],
@@ -377,7 +388,9 @@ class _SourcesPageState extends State<SourcesPage> {
                 if (icon != null) ...[
                   Icon(icon,
                       size: 15,
-                      color: selected ? HorseTheme.gold : HorseTheme.muted),
+                      color: selected
+                          ? NovaTheme.of(context).gold
+                          : NovaTheme.of(context).muted),
                   const SizedBox(width: 7),
                 ],
                 Text(
@@ -385,7 +398,9 @@ class _SourcesPageState extends State<SourcesPage> {
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
-                    color: selected ? HorseTheme.gold : HorseTheme.muted,
+                    color: selected
+                        ? NovaTheme.of(context).gold
+                        : NovaTheme.of(context).muted,
                   ),
                 ),
               ],
@@ -406,7 +421,7 @@ class _SourcesPageState extends State<SourcesPage> {
           _chip(
             key: _sortKey,
             label: _sortLabel(_sort, english),
-            icon: Icons.swap_vert_rounded,
+            icon: LucideIcons.arrowDownUp,
             selected: _sort != 0,
             onTap: _openSortMenu,
           ),
@@ -414,10 +429,9 @@ class _SourcesPageState extends State<SourcesPage> {
           _chip(
             key: _addonKey,
             label: _addon ??
-                (english
-                    ? 'Add-ons · ${_addonStats.length}'
-                    : 'الإضافات · ${_addonStats.length}'),
-            icon: Icons.extension_rounded,
+                (NovaStrings.lookup(
+                    english, 'message192', {'p0': _addonStats.length})),
+            icon: LucideIcons.puzzle,
             selected: _addon != null,
             onTap: _openAddonMenu,
           ),
@@ -431,7 +445,7 @@ class _SourcesPageState extends State<SourcesPage> {
           ]) ...[
             _chip(
               label: bucket.$2 == 'any'
-                  ? (english ? 'Any quality' : 'كل الجودات')
+                  ? (NovaStrings.lookup(english, 'message193'))
                   : bucket.$2,
               selected: _minHeight == bucket.$1,
               onTap: () => setState(() => _minHeight = bucket.$1),
@@ -439,16 +453,16 @@ class _SourcesPageState extends State<SourcesPage> {
             const SizedBox(width: 8),
           ],
           _chip(
-            label: english ? 'Torrents' : 'تورنت',
-            icon: Icons.bolt_rounded,
+            label: NovaStrings.lookup(english, 'message194'),
+            icon: LucideIcons.zap,
             selected: _kind == 'torrent',
             onTap: () =>
                 setState(() => _kind = _kind == 'torrent' ? null : 'torrent'),
           ),
           const SizedBox(width: 8),
           _chip(
-            label: english ? 'Direct' : 'مباشر',
-            icon: Icons.play_arrow_rounded,
+            label: NovaStrings.lookup(english, 'message195'),
+            icon: LucideIcons.play,
             selected: _kind == 'direct',
             onTap: () =>
                 setState(() => _kind = _kind == 'direct' ? null : 'direct'),
@@ -460,185 +474,156 @@ class _SourcesPageState extends State<SourcesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final english = widget.english;
+    final english = context.watch<AppState?>()?.english ?? widget.english;
+    final scheme = Theme.of(context).colorScheme;
     final video = widget.video;
     final season = (video?['season'] as num?)?.toInt();
     final episode = (video?['episode'] as num?)?.toInt();
     final episodeName = (video?['name'] ?? video?['title'])?.toString();
     final subtitle = video == null
-        ? (english ? 'Movie' : 'فيلم')
+        ? (NovaStrings.lookup(english, 'message128'))
         : [
             'S$season:E$episode',
-            if (episodeName != null && episodeName.isNotEmpty) episodeName,
+            if (episodeName?.isNotEmpty == true) episodeName!
           ].join(' · ');
-
-    final query = _query.trim().toLowerCase();
-    final visible = _visibleIndices(query);
+    final visible = _visibleIndices(_query.trim().toLowerCase());
     final addons = <String>{
       for (final stream in _streams)
-        if (stream['addonName'] is String) stream['addonName'] as String,
+        if (stream['addonName'] is String) stream['addonName'] as String
     };
-
     return Scaffold(
+      appBar: AppBar(
+          title: Text(widget.downloadMode
+              ? (NovaStrings.lookup(english, 'message196'))
+              : (NovaStrings.lookup(english, 'message197')))),
       body: SafeArea(
-        bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(12, 12, 20, 0),
-              child: Row(
+          top: false,
+          child: LayoutBuilder(builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 840;
+            final controls = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Same liquid-glass family as the search + detail back
-                  // buttons (Task 118 chrome consistency).
-                  GlassSearchButton(
-                    size: 40,
-                    tooltip: english ? 'Back' : 'رجوع',
-                    icon: english
-                        ? Icons.arrow_back_rounded
-                        : Icons.arrow_forward_rounded,
-                    onPressed: () => Navigator.of(context).maybePop(),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          english ? 'Sources' : 'المصادر',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: HorseTheme.ink,
-                          ),
-                        ),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: HorseTheme.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 4),
-              child: Text(
-                english
-                    ? '${_streams.length} sources from ${addons.length} '
-                        '${addons.length == 1 ? 'add-on' : 'add-ons'}'
-                    : '${_streams.length} مصدر من ${addons.length} '
-                        '${addons.length == 1 ? 'إضافة' : 'إضافات'}',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: HorseTheme.muted,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(20, 8, 20, 4),
-              child: TextField(
-                onChanged: (value) => setState(() => _query = value),
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  isDense: true,
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  // Task 139 (user mandate): the refresh button lives NEXT
-                  // TO the search bar — it re-runs the loader in place and
-                  // spins while the round-trip is in flight.
-                  suffixIcon: widget.loader == null
-                      ? null
-                      : (_refreshing
-                          ? const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: HorseTheme.gold,
-                                ),
-                              ),
-                            )
-                          : IconButton(
-                              tooltip: english ? 'Refresh' : 'تحديث',
-                              icon: const Icon(LucideIcons.refreshCw, size: 18),
-                              onPressed: _refresh,
-                            )),
-                  hintText: english ? 'Filter sources…' : 'تصفية المصادر…',
-                  filled: true,
-                  fillColor: HorseTheme.raised.withValues(alpha: .7),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                ),
-              ),
-            ),
-            if (_streams.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _filterBar(english),
-            ],
-            Expanded(
-              // Task 139: the first loader round-trip shows a full-body
-              // spinner — loading happens HERE, in front of the user.
-              child: _initialLoading
-                  ? const Center(
-                      child: SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.4,
-                          color: HorseTheme.gold,
-                        ),
-                      ),
-                    )
-                  : visible.isEmpty
-                      ? AppStateMessage(
-                          icon: _streams.isEmpty
-                              ? Icons.cloud_off_rounded
-                              : Icons.filter_alt_off_rounded,
-                          message: _streams.isEmpty
-                              ? (english
-                                  ? 'No sources available for this title yet'
-                                  : 'لا توجد مصادر متاحة لهذا العمل بعد')
-                              : (english
-                                  ? 'No matching sources'
-                                  : 'لا مصادر مطابقة'),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                          itemCount: visible.length,
-                          itemBuilder: (context, index) {
-                            final i = visible[index];
-                            final stream = _streams[i];
-                            return _SourceRow(
+                  Text(widget.item.name,
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 8),
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: scheme.onSurfaceVariant, height: 1.5)),
+                  const SizedBox(height: 24),
+                  Text(NovaStrings.lookup(english, 'message198'),
+                      style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 16),
+                  TextField(
+                      onChanged: (value) => setState(() => _query = value),
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                          prefixIcon: const Icon(LucideIcons.search),
+                          hintText: NovaStrings.lookup(english, 'message199'),
+                          suffixIcon: widget.loader == null
+                              ? null
+                              : _refreshing
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: SizedBox.square(
+                                          dimension: 20,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2)))
+                                  : IconButton(
+                                      tooltip: NovaStrings.lookup(
+                                          english, 'message200'),
+                                      icon: const Icon(LucideIcons.refreshCw),
+                                      onPressed: _refresh))),
+                  if (_streams.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _filterBar(english)
+                  ],
+                  const SizedBox(height: 16),
+                  Text(
+                      NovaStrings.lookup(english, 'message201',
+                          {'p0': visible.length, 'p1': addons.length}),
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelLarge
+                          ?.copyWith(color: scheme.onSurfaceVariant)),
+                  if (widget.downloadMode) ...[
+                    const SizedBox(height: 8),
+                    Text(NovaStrings.lookup(english, 'message202'),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant))
+                  ],
+                  if (_loadFailed) ...[
+                    const SizedBox(height: 16),
+                    Text(NovaStrings.lookup(english, 'message203'),
+                        style: TextStyle(color: scheme.error)),
+                    TextButton.icon(
+                        onPressed: _refresh,
+                        icon: const Icon(LucideIcons.refreshCw),
+                        label: Text(NovaStrings.lookup(english, 'message174'))),
+                  ],
+                ]);
+            final resultSliver = _initialLoading
+                ? SliverList.builder(
+                    itemCount: 6,
+                    itemBuilder: (_, __) => const Padding(
+                        padding: EdgeInsetsDirectional.only(bottom: 16),
+                        child: ShimmerBox(height: 112)))
+                : visible.isEmpty
+                    ? SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: AppStateMessage(
+                            icon: _loadFailed
+                                ? LucideIcons.wifiOff
+                                : LucideIcons.searchX,
+                            message: _loadFailed
+                                ? (NovaStrings.lookup(english, 'message204'))
+                                : _streams.isEmpty
+                                    ? (NovaStrings.lookup(
+                                        english, 'message205'))
+                                    : (NovaStrings.lookup(
+                                        english, 'message206'))))
+                    : SliverList.builder(
+                        itemCount: visible.length,
+                        itemBuilder: (context, index) {
+                          final i = visible[index];
+                          final stream = _streams[i];
+                          return _SourceRow(
                               stream: stream,
                               facts: _facts[i],
                               english: english,
-                              condensed:
-                                  _streams.length > 12, // web pickerLayout
+                              condensed: false,
                               onTap: _isDirect(stream) || _isTorrent(stream)
                                   ? () => Navigator.of(context).pop(stream)
-                                  : null,
-                            );
-                          },
-                        ),
-            ),
-          ],
-        ),
-      ),
+                                  : null);
+                        });
+            if (wide)
+              return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                        width: 320,
+                        child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(24),
+                            child: controls)),
+                    VerticalDivider(width: 1, color: scheme.outlineVariant),
+                    Expanded(
+                        child: CustomScrollView(slivers: [
+                      SliverPadding(
+                          padding: const EdgeInsets.all(24),
+                          sliver: resultSliver)
+                    ])),
+                  ]);
+            return CustomScrollView(slivers: [
+              SliverToBoxAdapter(
+                  child: Padding(
+                      padding: const EdgeInsets.all(24), child: controls)),
+              SliverPadding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(24, 0, 24, 24),
+                  sliver: resultSliver),
+            ]);
+          })),
     );
   }
 }
@@ -773,99 +758,6 @@ class _SourceFacts {
 /// the right in RTL (Arabic) and on the left in LTR (English) automatically.
 /// Falls back to the add-on's initial letter on a gold tile; a small
 /// cloud-off badge marks rows no playback path supports.
-class _AddonBadge extends StatelessWidget {
-  const _AddonBadge({
-    required this.icon,
-    required this.name,
-    required this.playable,
-    required this.condensed,
-  });
-
-  final String? icon;
-  final String name;
-  final bool playable;
-  final bool condensed;
-
-  @override
-  Widget build(BuildContext context) {
-    final size = condensed ? 38.0 : 44.0;
-    final initial = name.trim().isEmpty
-        ? '?'
-        : String.fromCharCode(name.trim().runes.first).toUpperCase();
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: playable
-                  ? HorseTheme.gold.withValues(alpha: .12)
-                  : Colors.white.withValues(alpha: .04),
-              border: Border.all(
-                color: playable
-                    ? HorseTheme.gold.withValues(alpha: .35)
-                    : HorseTheme.line,
-              ),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(11),
-              child: icon != null
-                  ? Image.network(
-                      icon!,
-                      fit: BoxFit.cover,
-                      width: size,
-                      height: size,
-                      // Task 136: decode at the 38/44px badge size.
-                      cacheWidth: imageCacheWidth(context, size),
-                      errorBuilder: (_, __, ___) => _fallback(initial),
-                    )
-                  : _fallback(initial),
-            ),
-          ),
-          if (!playable)
-            Positioned.directional(
-              textDirection: Directionality.of(context),
-              end: -2,
-              bottom: -2,
-              child: Container(
-                width: 15,
-                height: 15,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: HorseTheme.surface,
-                ),
-                child: const Icon(
-                  Icons.cloud_off_rounded,
-                  size: 9,
-                  color: HorseTheme.muted,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _fallback(String initial) => SizedBox.expand(
-        child: ColoredBox(
-          color: HorseTheme.gold.withValues(alpha: .10),
-          child: Center(
-            child: Text(
-              initial,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: HorseTheme.gold,
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-/// Tiny add-on icon for the picker menu (same image pipeline, no badge).
 class _AddonIcon extends StatelessWidget {
   const _AddonIcon({
     required this.icon,
@@ -885,9 +777,9 @@ class _AddonIcon extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: Container(
-        color: HorseTheme.gold.withValues(alpha: .12),
+        color: NovaTheme.of(context).gold.withValues(alpha: .12),
         child: icon != null
-            ? Image.network(
+            ? NovaNetworkImage(
                 icon!,
                 fit: BoxFit.cover,
                 width: double.infinity,
@@ -897,10 +789,10 @@ class _AddonIcon extends StatelessWidget {
                 errorBuilder: (_, __, ___) => Center(
                   child: Text(
                     initial,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
-                      color: HorseTheme.gold,
+                      color: NovaTheme.of(context).gold,
                     ),
                   ),
                 ),
@@ -908,10 +800,10 @@ class _AddonIcon extends StatelessWidget {
             : Center(
                 child: Text(
                   initial,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: HorseTheme.gold,
+                    color: NovaTheme.of(context).gold,
                   ),
                 ),
               ),
@@ -924,199 +816,136 @@ class _AddonIcon extends StatelessWidget {
 /// the language), title beside it, facts line below (kind · quality pill ·
 /// seeds · size · codec). Disabled rows (neither URL nor infoHash) dim.
 class _SourceRow extends StatelessWidget {
-  const _SourceRow({
-    required this.stream,
-    required this.facts,
-    required this.english,
-    required this.condensed,
-    required this.onTap,
-  });
-
+  const _SourceRow(
+      {required this.stream,
+      required this.facts,
+      required this.english,
+      required this.condensed,
+      required this.onTap});
   final Map<String, dynamic> stream;
   final _SourceFacts facts;
-  final bool english;
-  final bool condensed;
+  final bool english, condensed;
   final VoidCallback? onTap;
-
   @override
   Widget build(BuildContext context) {
-    final playable = facts.isDirect || facts.isTorrent;
+    final scheme = Theme.of(context).colorScheme;
     final title = (stream['title'] ??
             stream['name'] ??
             stream['description'] ??
-            (playable ? 'HTTP stream' : 'Torrent stream'))
+            (NovaStrings.lookup(english, 'message207')))
         .toString()
         .split('\n')
         .first;
-    final addonName =
-        (stream['addonName'] ?? (english ? 'Add-on' : 'إضافة')).toString();
-    final addonIcon = stream['addonIcon']?.toString();
-
+    final addon =
+        (stream['addonName'] ?? (NovaStrings.lookup(english, 'message208')))
+            .toString();
+    final kind = facts.isTorrent
+        ? (NovaStrings.lookup(english, 'message209'))
+        : facts.isDirect
+            ? (NovaStrings.lookup(english, 'message195'))
+            : (NovaStrings.lookup(english, 'message210'));
     return Padding(
-      padding: const EdgeInsetsDirectional.only(bottom: 8),
-      child: Material(
-        color: HorseTheme.raised.withValues(alpha: onTap == null ? .30 : .70),
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: condensed ? 8 : 12,
-            ),
-            child: Row(
-              children: [
-                _AddonBadge(
-                  icon: addonIcon,
-                  name: addonName,
-                  playable: playable,
-                  condensed: condensed,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
+        padding: const EdgeInsetsDirectional.only(bottom: 16),
+        child: Material(
+          color: scheme.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: scheme.outlineVariant)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                  padding: const EdgeInsets.all(20),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: condensed ? 1 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: condensed ? 13 : 14,
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
-                          color:
-                              onTap == null ? HorseTheme.muted : HorseTheme.ink,
-                        ),
-                      ),
-                      SizedBox(height: condensed ? 3 : 5),
-                      Wrap(
-                        spacing: 7,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                facts.isTorrent
-                                    ? Icons.bolt_rounded
-                                    : facts.isDirect
-                                        ? Icons.play_arrow_rounded
-                                        : Icons.cloud_off_rounded,
-                                size: 13,
-                                color: onTap == null
-                                    ? HorseTheme.muted
-                                    : facts.isTorrent
-                                        ? HorseTheme.gold
-                                        : HorseTheme.success,
-                              ),
-                              const SizedBox(width: 3),
-                              Text(
-                                facts.isTorrent
-                                    ? (english ? 'Torrent' : 'تورنت')
-                                    : facts.isDirect
-                                        ? (english ? 'Direct' : 'مباشر')
-                                        : (english
-                                            ? 'Unsupported'
-                                            : 'غير مدعوم'),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: onTap == null
-                                      ? HorseTheme.muted
-                                      : HorseTheme.muted,
-                                ),
-                              ),
-                            ],
-                          ),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          SizedBox.square(
+                              dimension: 24,
+                              child: _AddonIcon(
+                                  icon: stream['addonIcon']?.toString(),
+                                  name: addon,
+                                  radius: 8)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(addon,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(color: scheme.primary))),
                           if (facts.qualityLabel != null)
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 1.5),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: HorseTheme.gold.withValues(
-                                      alpha: onTap == null ? .18 : .45),
-                                ),
-                              ),
-                              child: Text(
-                                facts.qualityLabel!,
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: onTap == null
-                                      ? HorseTheme.muted
-                                      : HorseTheme.gold,
-                                ),
-                              ),
-                            ),
-                          if (facts.seeds != null)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.groups_rounded,
-                                  size: 13,
-                                  color: onTap == null
-                                      ? HorseTheme.muted
-                                      : facts.seeds! > 0
-                                          ? HorseTheme.success
-                                          : HorseTheme.muted,
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '${facts.seeds}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
+                                padding: const EdgeInsetsDirectional.fromSTEB(
+                                    8, 4, 8, 4),
+                                decoration: BoxDecoration(
+                                    color: scheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(8)),
+                                child: Text(facts.qualityLabel!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                            color: scheme.onPrimaryContainer))),
+                        ]),
+                        const SizedBox(height: 12),
+                        Text(title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                    height: 1.5,
                                     color: onTap == null
-                                        ? HorseTheme.muted
-                                        : facts.seeds! > 0
-                                            ? HorseTheme.success
-                                            : HorseTheme.muted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          if (facts.sizeLabel.isNotEmpty)
-                            Text(
-                              facts.sizeLabel,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: HorseTheme.muted,
-                              ),
-                            ),
-                          if (facts.codec != null)
-                            Text(
-                              facts.codec!,
-                              style: const TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: .3,
-                                color: HorseTheme.muted,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                if (onTap != null)
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: HorseTheme.muted,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.onSurface)),
+                        const SizedBox(height: 12),
+                        Row(children: [
+                          Expanded(
+                              child: Wrap(
+                                  spacing: 12,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                Text(kind,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                            color: scheme.onSurfaceVariant)),
+                                if (facts.sizeLabel.isNotEmpty)
+                                  Text(facts.sizeLabel,
+                                      textDirection: TextDirection.ltr,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall),
+                                if (facts.codec != null)
+                                  Text(facts.codec!,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall),
+                                if (facts.seeds != null)
+                                  Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(LucideIcons.users,
+                                            size: 14,
+                                            color: scheme.onSurfaceVariant),
+                                        const SizedBox(width: 4),
+                                        Text('${facts.seeds}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall)
+                                      ]),
+                              ])),
+                          if (onTap != null)
+                            Icon(LucideIcons.play,
+                                color: scheme.primary, size: 24),
+                        ]),
+                      ]))),
+        ));
   }
 }
 
@@ -1142,11 +971,11 @@ class StreamPrepareDialog extends StatelessWidget {
   static String _stateLabel(TorrentStatus? status, bool english) {
     final state = status?.state;
     return switch (state) {
-      'downloading' => english ? 'Downloading…' : 'جارٍ التحميل…',
-      'checking' => english ? 'Checking…' : 'جارٍ الفحص…',
-      'finished' || 'seeding' => english ? 'Ready' : 'جاهز',
-      'paused' => english ? 'Paused' : 'متوقف مؤقتاً',
-      _ => english ? 'Preparing the stream…' : 'جارٍ تجهيز المصدر…',
+      'downloading' => NovaStrings.lookup(english, 'message211'),
+      'checking' => NovaStrings.lookup(english, 'message212'),
+      'finished' || 'seeding' => NovaStrings.lookup(english, 'message213'),
+      'paused' => NovaStrings.lookup(english, 'message214'),
+      _ => NovaStrings.lookup(english, 'message215'),
     };
   }
 
@@ -1154,91 +983,50 @@ class StreamPrepareDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      backgroundColor: HorseTheme.surface,
-      contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      icon: Icon(LucideIcons.clapperboard, size: 32, color: scheme.primary),
+      title: Text(NovaStrings.lookup(english, 'message216')),
       content: SizedBox(
-        width: 320,
-        child: ValueListenableBuilder<TorrentStatus?>(
-          valueListenable: status,
-          builder: (context, snapshot, _) {
-            final progress = snapshot?.progress ?? 0.0;
-            final hasPercent = snapshot != null;
-            final rateMbps =
-                snapshot == null ? 0.0 : snapshot.downloadRate / (1024 * 1024);
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _stateLabel(snapshot, english),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: hasPercent ? progress.clamp(0.0, 1.0) : null,
-                    minHeight: 6,
-                    backgroundColor: HorseTheme.raised,
-                    valueColor: const AlwaysStoppedAnimation(HorseTheme.gold),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    if (hasPercent) ...[
-                      Directionality(
-                        textDirection: TextDirection.ltr,
-                        child: Text(
-                          '${(progress * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: HorseTheme.gold,
-                            fontFeatures: [],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                    Expanded(
-                      child: Text(
-                        english
-                            ? 'A portion is buffered before playback starts.'
-                            : 'يُجهَّز جزء من الحلقة قبل بدء التشغيل.',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: HorseTheme.muted,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (hasPercent) ...[
-                  const SizedBox(height: 8),
-                  Directionality(
-                    textDirection: TextDirection.ltr,
-                    child: Text(
-                      '↓ ${rateMbps.toStringAsFixed(2)} MB/s'
-                      ' · P:${snapshot.numPeers} S:${snapshot.numSeeds}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: HorseTheme.muted,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            );
-          },
-        ),
-      ),
+          width: 360,
+          child: ValueListenableBuilder<TorrentStatus?>(
+              valueListenable: status,
+              builder: (context, snapshot, _) {
+                final progress = snapshot?.progress.clamp(0.0, 1.0);
+                return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_stateLabel(snapshot, english),
+                          style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 20),
+                      LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 8,
+                          borderRadius: BorderRadius.circular(8)),
+                      const SizedBox(height: 16),
+                      Text(NovaStrings.lookup(english, 'message217'),
+                          style: TextStyle(
+                              color: scheme.onSurfaceVariant, height: 1.6)),
+                      if (snapshot != null) ...[
+                        const SizedBox(height: 20),
+                        Wrap(spacing: 16, runSpacing: 8, children: [
+                          Text('${((progress ?? 0) * 100).round()}%',
+                              textDirection: TextDirection.ltr,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(color: scheme.primary)),
+                          Text(
+                              '${(snapshot.downloadRate / (1024 * 1024)).toStringAsFixed(2)} MB/s',
+                              textDirection: TextDirection.ltr,
+                              style: Theme.of(context).textTheme.bodyMedium),
+                        ]),
+                      ],
+                    ]);
+              })),
       actions: [
         TextButton(
-          onPressed: onCancel,
-          child: Text(english ? 'Cancel' : 'إلغاء',
-              style: TextStyle(color: scheme.onSurface.withValues(alpha: .8))),
-        ),
+            onPressed: onCancel,
+            child: Text(NovaStrings.lookup(english, 'cancel')))
       ],
     );
   }

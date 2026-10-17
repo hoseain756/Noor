@@ -1,4 +1,7 @@
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+import 'l10n/nova_strings.dart';
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
@@ -37,13 +40,14 @@ void main() {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                Icons.error_outline_rounded,
+                LucideIcons.circleAlert,
                 color: HorseTheme.gold,
                 size: 40,
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Something went wrong\nحدث خطأ غير متوقع',
+              Text(
+                NovaStrings(PlatformDispatcher.instance.locale)
+                    .text('errorTitle'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: HorseTheme.ink,
@@ -53,7 +57,8 @@ void main() {
               ),
               const SizedBox(height: 8),
               Text(
-                'Go back and try again\nارجع وحاول مرة أخرى',
+                NovaStrings(PlatformDispatcher.instance.locale)
+                    .text('errorBody'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: HorseTheme.muted, fontSize: 13),
               ),
@@ -73,7 +78,9 @@ void main() {
       noorSystemBarOverlayStyle(Brightness.dark));
   final api = NoorApi();
   final appState = AppState(api, CatalogRepository(api));
-  runApp(NoorApp(state: appState));
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 128 << 20;
+  PaintingBinding.instance.imageCache.maximumSize = 200;
+  runApp(NovaApp(state: appState));
   // Task 128: pre-boot the torrent engine + DHT while the user browses, so
   // the first torrent stream never pays the 10–30s cold-start inside its own
   // metadata timeout. No-op (and fully swallowed) off Android.
