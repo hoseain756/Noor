@@ -447,11 +447,20 @@ class TorrentService {
             : infoHash;
 
     // 4. Local range-capable HTTP server for the selected file.
-    final absoluteFilePath = _join(saveDir, target.name);
+    // Libtorrent may place multi-file torrents under their root folder, while
+    // TorrentMetadata.name is only the displayed filename. Use the exact
+    // selected path resolved by the native engine so the HTTP server opens the
+    // downloaded file rather than polling a nonexistent sibling path.
+    final nativeFilePath = (started['filePath'] as String?)?.trim();
+    final absoluteFilePath = nativeFilePath != null && nativeFilePath.isNotEmpty
+        ? nativeFilePath
+        : _join(saveDir, target.name);
     await _server?.close();
     final server = StreamServer(
       filePath: absoluteFilePath,
       declaredSize: filesize ?? target.size,
+      availableBytes: (offset, maxBytes) =>
+          _readableBytes(torrentId, offset, maxBytes),
     );
     await server.start();
     final url = server.url;
@@ -491,6 +500,18 @@ class TorrentService {
     } on MissingPluginException {
       // Non-Android platform — ignore.
     }
+  }
+
+  Future<int> _readableBytes(String infoHash, int offset, int length) async {
+    return await _channel.invokeMethod<int>(
+          'readableBytes',
+          <String, Object?>{
+            'infoHash': infoHash,
+            'offset': offset,
+            'length': length,
+          },
+        ) ??
+        0;
   }
 
   Future<void> _remove(String infoHash, {required bool deleteFiles}) async {

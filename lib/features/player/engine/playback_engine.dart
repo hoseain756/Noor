@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -100,6 +102,12 @@ class MediaKitEngine extends PlaybackEngine {
     _controller = VideoController(
       _player,
       configuration: VideoControllerConfiguration(
+        // Use Android's native video decoder directly when available. The
+        // conservative auto-safe policy can leave some device/source pairs on
+        // the CPU decoder, which makes high-resolution playback stutter.
+        hwdec: defaultTargetPlatform == TargetPlatform.android
+            ? (hardwareAcceleration ? 'mediacodec' : 'no')
+            : null,
         enableHardwareAcceleration: hardwareAcceleration,
       ),
     );
@@ -213,6 +221,19 @@ class MediaKitEngine extends PlaybackEngine {
     _completed = false;
     _buffering = true;
     notifyListeners();
+    // VideoController initializes asynchronously after the first Flutter
+    // frame. Opening mpv before that completes can let audio start while the
+    // Android video output is still being configured.
+    try {
+      await _controller.platform.future;
+    } catch (error) {
+      if (!_disposed) _onError(error.toString());
+      return;
+    }
+    if (_disposed) return;
+    if (Uri.tryParse(url)?.host == '127.0.0.1') {
+      await _configureTorrentBuffer();
+    }
     // Opening paused, seeking to the resume point once the media is parsed,
     // then starting playback keeps mpv from decoding the first frames twice.
     await _player.open(
@@ -225,6 +246,54 @@ class MediaKitEngine extends PlaybackEngine {
       await _player.seek(startAt);
     }
     if (!_disposed) await _player.play();
+    if (Uri.tryParse(url)?.host == '127.0.0.1') {
+      unawaited(_logTorrentDecoderPath());
+    }
+  }
+
+  Future<void> _logTorrentDecoderPath() async {
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (_disposed) return;
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    try {
+      final codec = await platform.getProperty('video-codec');
+      final decoder = await platform.getProperty('hwdec-current');
+      debugPrint(
+        '[NoorPlayback] video codec=$codec decoder=${decoder.isEmpty ? 'software' : decoder}',
+      );
+    } catch (_) {
+      // Diagnostic only; playback must not depend on optional mpv properties.
+    }
+  }
+
+  /// Let the local torrent stream read ahead enough data to absorb short peer
+  /// speed changes. The initial wait is deliberately short so playback can
+  /// start after the first few seconds of media, without waiting for a large
+  /// percentage of the torrent to finish.
+  Future<void> _configureTorrentBuffer() async {
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    const properties = <String, String>{
+      'cache': 'yes',
+      'cache-secs': '45',
+      'cache-pause': 'yes',
+      'cache-pause-initial': 'yes',
+      'cache-pause-wait': '3',
+      // Nuvio's Android MPV path keeps each demuxer cache within 32–64 MiB.
+      // A 192 MiB forward cache can pressure RAM on entry-level phones and
+      // cause the very frame/audio stutter this cache is meant to prevent.
+      'demuxer-max-bytes': '64MiB',
+      'demuxer-max-back-bytes': '16MiB',
+    };
+    for (final entry in properties.entries) {
+      try {
+        await platform.setProperty(entry.key, entry.value);
+      } catch (_) {
+        // Keep playback available if this mpv build does not expose a tuning
+        // option; the torrent's own rolling piece window still applies.
+      }
+    }
   }
 
   @override

@@ -63,8 +63,7 @@ Future<void> openMagnetFlow(
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetContext) =>
-          _MagnetSheet(initialMagnet: initialMagnet),
+      builder: (sheetContext) => _MagnetSheet(initialMagnet: initialMagnet),
     );
   } finally {
     _flowOpen = false;
@@ -213,7 +212,15 @@ class _MagnetSheetState extends State<_MagnetSheet> {
 
   List<TorrentFileInfo> _videoFiles(TorrentMetadata meta) {
     const extensions = [
-      '.mp4', '.mkv', '.avi', '.webm', '.mov', '.flv', '.ts', '.rmvb', '.m2ts',
+      '.mp4',
+      '.mkv',
+      '.avi',
+      '.webm',
+      '.mov',
+      '.flv',
+      '.ts',
+      '.rmvb',
+      '.m2ts',
     ];
     return meta.files
         .where((file) =>
@@ -247,26 +254,9 @@ class _MagnetSheetState extends State<_MagnetSheet> {
         name: meta.name,
       );
       final navigator = Navigator.of(context, rootNavigator: true);
-      // Give the engine a short head start on the first pieces so the
-      // player opens with data on disk; the stream server also waits for
-      // bytes that are not there yet, so this is an optimization only.
-      await prepared.statusStream
-          .firstWhere((status) => status.ready)
-          .timeout(
-        const Duration(seconds: 20),
-        onTimeout: () => TorrentStatus(
-          infoHash: meta.infoHash,
-          progress: 0,
-          downloadRate: 0,
-          uploadRate: 0,
-          numPeers: 0,
-          numSeeds: 0,
-          state: 'downloading',
-          filePath: null,
-          fileSize: 0,
-          ready: false,
-        ),
-      );
+      // prepare() returns only after the local range server is bound. Hand off
+      // immediately; the server and player buffer missing pieces while the
+      // torrent continues downloading.
       if (!mounted) {
         unawaited(prepared.stop());
         return;
@@ -431,8 +421,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
             hintText: english
                 ? 'magnet:?xt=urn:btih:…  or info hash'
                 : 'magnet:?xt=urn:btih:…  أو info hash',
-            hintStyle:
-                const TextStyle(color: HorseTheme.muted, fontSize: 12.5),
+            hintStyle: const TextStyle(color: HorseTheme.muted, fontSize: 12.5),
             filled: true,
             fillColor: HorseTheme.raised,
             contentPadding:
@@ -498,8 +487,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
           icon: const Icon(Icons.play_arrow_rounded, size: 21),
           label: Text(
             english ? 'Stream' : 'تشغيل',
-            style:
-                const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
           ),
         ),
       ],
@@ -610,8 +598,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
                           selected
                               ? Icons.check_circle_rounded
                               : Icons.radio_button_unchecked_rounded,
-                          color:
-                              selected ? HorseTheme.gold : HorseTheme.muted,
+                          color: selected ? HorseTheme.gold : HorseTheme.muted,
                           size: 20,
                         ),
                         const SizedBox(width: 10),
@@ -653,8 +640,7 @@ class _MagnetSheetState extends State<_MagnetSheet> {
           icon: const Icon(Icons.play_arrow_rounded, size: 21),
           label: Text(
             english ? 'Play selected' : 'تشغيل المحدد',
-            style:
-                const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
           ),
         ),
       ],

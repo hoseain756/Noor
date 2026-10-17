@@ -277,33 +277,6 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-        // Continue watching sourced from the LINKED tracking services
-        // (Trakt paused playback + AniList/MAL currently-watching) — same
-        // Harbor-web card spec, rendered right after the local row.
-        if (app.linkedContinueWatching.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsetsDirectional.only(
-                bottom: MediaRail.sectionSpacing(context),
-              ),
-              child: LinkedContinueRail(
-                entries: app.linkedContinueWatching,
-                english: english,
-                onOpen: _open,
-              ),
-            ),
-          )
-        else if (app.linkedServices.isNotEmpty && app.linkedContentLoading)
-          // First fetch in flight (rows arrive after the link completes) —
-          // geometry-matched placeholder instead of a silent pop-in.
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsetsDirectional.only(
-                bottom: MediaRail.sectionSpacing(context),
-              ),
-              child: LinkedContinueSkeleton(english: english),
-            ),
-          ),
         SliverToBoxAdapter(
           child: AsyncMediaSection(
             title: english ? 'Recommended for you' : 'مقترح لك',

@@ -18,13 +18,16 @@ class _ByteRange {
 ///  - `Content-Length` always reflects the REAL file size. The torrent engine
 ///    preallocates the file, and an authoritative [declaredSize] (from the
 ///    torrent metadata) takes precedence over a partial on-disk stat.
-///  - When a requested range reaches the current end of the on-disk file, the
-///    server patiently waits for the engine to write more data instead of
-///    truncating the response — the player simply keeps buffering.
+///  - When a requested range reaches a piece that is not complete yet, the
+///    server waits instead of streaming preallocated zero bytes to the player.
 ///  - Supports GET and HEAD, answers 206 with `Content-Range` for single
 ///    ranges, 416 for unsatisfiable ranges and 404 when the file is missing.
 class StreamServer {
-  StreamServer({required this.filePath, this.declaredSize});
+  StreamServer({
+    required this.filePath,
+    this.declaredSize,
+    this.availableBytes,
+  });
 
   /// Absolute path of the file being served.
   final String filePath;
@@ -33,13 +36,21 @@ class StreamServer {
   /// size on disk is used instead.
   final int? declaredSize;
 
-  static const Duration _pollInterval = Duration(milliseconds: 200);
+  /// Returns the consecutive byte count currently backed by completed
+  /// torrent pieces, starting at the file-relative [offset].
+  final Future<int> Function(int offset, int maxBytes)? availableBytes;
+
+  // Check piece availability often enough that the player does not sit idle
+  // after libtorrent has completed the next piece on disk.
+  static const Duration _pollInterval = Duration(milliseconds: 100);
 
   /// Maximum time a streaming response may stay idle (no new bytes written)
   /// before it is closed; the player will retry the range if needed.
-  static const Duration _stallTimeout = Duration(seconds: 45);
+  static const Duration _stallTimeout = Duration(minutes: 2);
 
-  static const int _chunkSize = 64 * 1024;
+  // Larger reads reduce Dart↔Android channel round trips while still keeping
+  // response writes small enough for low-memory phones.
+  static const int _chunkSize = 512 * 1024;
 
   HttpServer? _server;
 
@@ -216,16 +227,35 @@ class StreamServer {
 
     RandomAccessFile? raf;
     try {
+      // Commit the status and headers while the engine is still downloading
+      // the requested piece. Players otherwise time out while waiting for the
+      // first body bytes and report the loopback URL as unopenable.
+      await response.flush();
       raf = await _openWhenExists();
       if (start > 0) await raf.setPosition(start);
 
       var remaining = length;
       var stallDeadline = DateTime.now().add(_stallTimeout);
       while (remaining > 0) {
-        final bytes = await raf.read(math.min(_chunkSize, remaining));
+        final offset = start + (length - remaining);
+        final maxBytes = math.min(_chunkSize, remaining);
+        var readableLength = maxBytes;
+        final isReadable = availableBytes;
+        if (isReadable != null) {
+          readableLength = math.min(
+            maxBytes,
+            await isReadable(offset, maxBytes),
+          );
+          if (readableLength <= 0) {
+            if (DateTime.now().isAfter(stallDeadline)) break;
+            await Future<void>.delayed(_pollInterval);
+            continue;
+          }
+        }
+        final bytes = await raf.read(readableLength);
         if (bytes.isEmpty) {
-          // The engine has not written this part yet — wait for the file to
-          // grow instead of truncating the player's response.
+          // The file may not have been materialised yet, or the engine may
+          // still be writing the completed piece to storage.
           if (DateTime.now().isAfter(stallDeadline)) break;
           await Future<void>.delayed(_pollInterval);
           continue;

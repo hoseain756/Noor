@@ -731,16 +731,18 @@ class _SourceFacts {
     }
 
     final lower = text.toLowerCase();
+    final isTenBit =
+        RegExp(r'10\s*[-_.]?\s*bit|main10|\bp10\b').hasMatch(lower);
     final String? codec = lower.contains('av1')
-        ? 'AV1'
+        ? (isTenBit ? 'AV1 10-bit' : 'AV1')
         : lower.contains('x265') ||
                 lower.contains('h265') ||
                 lower.contains('hevc')
-            ? 'HEVC'
+            ? (isTenBit ? 'HEVC 10-bit' : 'HEVC')
             : lower.contains('x264') ||
                     lower.contains('h264') ||
                     lower.contains('avc')
-                ? 'H.264'
+                ? (isTenBit ? 'H.264 10-bit' : 'H.264')
                 : null;
 
     return _SourceFacts(
@@ -1118,12 +1120,10 @@ class _SourceRow extends StatelessWidget {
   }
 }
 
-/// Live stream-preparation sheet (Task 118): while a torrent source is being
-/// prepared, this modal shows the REAL download percentage (1%, 2%, …),
-/// speed, peers/seeds and engine state streamed from the torrent engine —
-/// replacing the old indeterminate spinner. The detail page drives
-/// [status] and closes the dialog when the stream is ready (or after its
-/// fallback timeout, since the local stream server can serve mid-download).
+/// Stream-preparation sheet shown while metadata and the local HTTP endpoint
+/// are being prepared. Once the endpoint is bound, playback takes over and
+/// waits for the requested pieces itself; a whole-file percentage is not a
+/// prerequisite for opening the player.
 class StreamPrepareDialog extends StatelessWidget {
   const StreamPrepareDialog({
     super.key,

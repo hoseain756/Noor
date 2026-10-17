@@ -1,5 +1,11 @@
 allprojects {
     repositories {
+        maven {
+            url = uri("https://dl.frostwire.com/maven")
+            content {
+                includeGroup("com.frostwire")
+            }
+        }
         google()
         mavenCentral()
     }

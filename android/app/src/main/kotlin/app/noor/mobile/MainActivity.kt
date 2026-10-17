@@ -25,6 +25,7 @@ import com.frostwire.jlibtorrent.swig.add_torrent_params
 import com.frostwire.jlibtorrent.swig.error_code
 import com.frostwire.jlibtorrent.swig.session_handle
 import com.frostwire.jlibtorrent.swig.settings_pack
+import com.frostwire.jlibtorrent.swig.torrent_flags_t
 import java.net.URLDecoder
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -73,6 +74,11 @@ private const val METADATA_WAIT_MS = 30_000L
 /** EventChannel broadcast rate (~2 events per second). */
 private const val EVENT_INTERVAL_MS = 500L
 
+/** Keep a bounded run of the requested file at top piece priority while mpv reads. */
+private const val STREAM_READ_AHEAD_MIN_PIECES = 2
+private const val STREAM_READ_AHEAD_MAX_PIECES = 96
+private const val STREAM_READ_AHEAD_TARGET_BYTES = 96L * 1024L * 1024L
+
 /** Port range offered to libtorrent for the listen socket (UPnP/NAT-PMP mapped). */
 private const val LISTEN_INTERFACES = "0.0.0.0:6881-6889,[::]:6881-6889"
 
@@ -94,9 +100,19 @@ private class ActiveTorrent(
     val handle: TorrentHandle,
     val infoHash: String,
     val filePath: String,
+    val fileIndex: Int,
     val fileSize: Long,
+    /** Torrent-global byte offset of the selected file. */
+    val torrentFileOffset: Long,
+    /** Piece size used to guard reads from the preallocated file. */
+    val pieceLength: Long,
     /** Piece indices whose completion means the stream is ready to start. */
     val readyPieces: IntArray,
+    /** Last rolling high-priority window, guarded by MainActivity.activeLock. */
+    var priorityWindowStart: Int = -1,
+    var priorityWindowEnd: Int = -1,
+    /** Pause peer activity once the selected stream file is fully local. */
+    @Volatile var pausedAfterCompletion: Boolean = false,
 )
 
 /**
@@ -158,6 +174,8 @@ class MainActivity :
         override fun types(): IntArray = intArrayOf(
             AlertType.TORRENT_REMOVED.swig(),
             AlertType.TORRENT_ERROR.swig(),
+            AlertType.DHT_BOOTSTRAP.swig(),
+            AlertType.DHT_ERROR.swig(),
         )
 
         override fun alert(alert: Alert<*>) {
@@ -171,6 +189,12 @@ class MainActivity :
                     }
                     AlertType.TORRENT_ERROR -> {
                         Log.w(TAG, "torrent error: ${alert.message()}")
+                    }
+                    AlertType.DHT_BOOTSTRAP -> {
+                        Log.i(TAG, "DHT bootstrap: ${alert.message()}")
+                    }
+                    AlertType.DHT_ERROR -> {
+                        Log.w(TAG, "DHT error: ${alert.message()}")
                     }
                     else -> Unit
                 }
@@ -291,6 +315,14 @@ class MainActivity :
                     val sequential = call.argument<Boolean>("sequential") ?: true
                     runAsync(result) { startTorrent(magnet, fileIndex, saveDir, sequential) }
                 }
+                "readableBytes" -> {
+                    val infoHash = requireHash(call)
+                    val offset = call.argument<Number>("offset")?.toLong()
+                        ?: throw TorrentEngineException("invalid_args", "offset is required")
+                    val length = call.argument<Number>("length")?.toInt()
+                        ?: throw TorrentEngineException("invalid_args", "length is required")
+                    runAsync(result) { readableBytes(infoHash, offset, length) }
+                }
                 "pause" -> {
                     val infoHash = requireHash(call)
                     runAsync(result) {
@@ -377,8 +409,8 @@ class MainActivity :
 
             val sp = SettingsPack()
             sp.listenInterfaces(LISTEN_INTERFACES)
-            sp.enableDht(true)
-            sp.setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), DHT_BOOTSTRAP_NODES)
+            sp.setEnableDht(true)
+            sp.setDhtBootstrapNodes(DHT_BOOTSTRAP_NODES)
             sp.setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)
             sp.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
             sp.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
@@ -397,8 +429,16 @@ class MainActivity :
             sp.connectionsLimit(180)
 
             sm.start(SessionParams(sp))
+            // Some Android/libtorrent builds report DHT disabled immediately
+            // after constructing the session even when enable_dht was in the
+            // initial settings pack. Re-apply the setting through jlibtorrent's
+            // public toggle so DHT bootstrap is actually requested.
+            if (!sm.isDhtRunning()) sm.startDht()
             manager = sm
-            Log.i(TAG, "libtorrent session started (dht=${sm.isDhtRunning()})")
+            Log.i(
+                TAG,
+                "libtorrent session started (dht=${sm.isDhtRunning()}, enabled=${sp.isEnableDht()})",
+            )
             return sm
         }
     }
@@ -418,13 +458,17 @@ class MainActivity :
         // smart-cast an explicitly-nullable val initialized this way, and
         // stashTorrentData (a Kotlin fun, strict null-check) rejected the
         // ByteArray? here (broke assembleRelease since v1.2.30).
-        val data: ByteArray = sm.fetchMagnet(magnet, RESOLVE_ATTEMPT_SECONDS)
+        val metadataDir = File(cacheDir, "torrent-metadata")
+        if (!metadataDir.exists() && !metadataDir.mkdirs()) {
+            throw TorrentEngineException("io_error", "Cannot create torrent metadata cache")
+        }
+        val data: ByteArray = sm.fetchMagnet(magnet, RESOLVE_ATTEMPT_SECONDS, metadataDir)
             ?: run {
                 Log.i(
                     TAG,
                     "metadata attempt 1 timed out after ${RESOLVE_ATTEMPT_SECONDS}s — retrying on the warmed session",
                 )
-                sm.fetchMagnet(magnet, RESOLVE_RETRY_SECONDS)
+                sm.fetchMagnet(magnet, RESOLVE_RETRY_SECONDS, metadataDir)
             }
             ?: throw TorrentEngineException(
                 "metadata_timeout",
@@ -434,7 +478,7 @@ class MainActivity :
         if (!ti.isValid()) {
             throw TorrentEngineException("invalid_metadata", "Decoded torrent metadata is not valid")
         }
-        stashTorrentData(ti.infoHash().toHex(), data)
+        stashTorrentData(ti.infoHashV1().toHex(), data)
         return metadataFromTorrentInfo(ti)
     }
 
@@ -458,7 +502,7 @@ class MainActivity :
         if (!ti.isValid()) {
             throw TorrentEngineException("invalid_metadata", "Decoded torrent metadata is not valid")
         }
-        stashTorrentData(ti.infoHash().toHex(), bytes)
+        stashTorrentData(ti.infoHashV1().toHex(), bytes)
         return metadataFromTorrentInfo(ti)
     }
 
@@ -476,7 +520,7 @@ class MainActivity :
         }
         return mapOf(
             "name" to ti.name(),
-            "infoHash" to ti.infoHash().toHex(),
+            "infoHash" to ti.infoHashV1().toHex(),
             "files" to files,
         )
     }
@@ -527,10 +571,10 @@ class MainActivity :
                 sm.download(TorrentInfo.bdecode(cached), dir)
             } catch (t: Throwable) {
                 Log.w(TAG, "cached torrent data unusable (${t.message}) — falling back to magnet")
-                sm.download(magnet, dir)
+                sm.download(magnet, dir, torrent_flags_t())
             }
         } else {
-            sm.download(magnet, dir)
+            sm.download(magnet, dir, torrent_flags_t())
         }
 
         val th = awaitHandle(sm, hashHex)
@@ -556,7 +600,19 @@ class MainActivity :
         // UDP/DHT that is exactly the "Torrentio never works" failure. The
         // magnet always carries the Dart-side tracker merge (stream sources
         // + verified defaults) — re-announce those onto the handle.
-        mergeMagnetTrackers(th, magnet)
+        val addedTrackers = mergeMagnetTrackers(th, magnet)
+        if (addedTrackers > 0) {
+            try {
+                // Torrent metadata cached from HTTP mirrors often has no
+                // announce-list. Trackers added after async_add_torrent do not
+                // necessarily announce until the next interval, so request
+                // peers immediately after attaching Torrentio's sources.
+                th.forceReannounce(0, -1, TorrentHandle.IGNORE_MIN_INTERVAL)
+                Log.i(TAG, "forced announce to $addedTrackers newly added tracker(s)")
+            } catch (t: Throwable) {
+                Log.w(TAG, "immediate tracker announce failed: ${t.message}")
+            }
+        }
         if (sequential) {
             th.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD, TorrentFlags.SEQUENTIAL_DOWNLOAD)
         }
@@ -587,13 +643,95 @@ class MainActivity :
             handle = th,
             infoHash = hashHex,
             filePath = File(dir, fs.filePath(fileIndex)).absolutePath,
+            fileIndex = fileIndex,
             fileSize = if (fileIndex in 0 until ti.numFiles()) fs.fileSize(fileIndex) else 0L,
+            torrentFileOffset = if (fileIndex in 0 until ti.numFiles()) fs.fileOffset(fileIndex) else 0L,
+            pieceLength = pieceLength,
             readyPieces = readyPieces,
         )
         synchronized(activeLock) { active = snapshot }
 
-        Log.i(TAG, "streaming torrent started: $hashHex file#$fileIndex")
-        return mapOf("torrentId" to hashHex)
+        Log.i(
+            TAG,
+            "streaming torrent started: $hashHex file#$fileIndex " +
+                "path=${snapshot.filePath} size=${snapshot.fileSize}",
+        )
+        return mapOf(
+            "torrentId" to hashHex,
+            "filePath" to snapshot.filePath,
+        )
+    }
+
+    /**
+     * Returns how many consecutive bytes starting at [fileOffset] are safe to
+     * read from the selected file. Libtorrent preallocates files to their full
+     * length, so file length alone cannot distinguish downloaded bytes from
+     * empty/unverified regions. Only report bytes covered by completed pieces.
+     * The same read position also drives a rolling high-priority piece window,
+     * so a seek or demuxer read can fetch its data ahead of the sequential tail.
+     */
+    private fun readableBytes(infoHash: String, fileOffset: Long, requestedLength: Int): Int {
+        if (fileOffset < 0 || requestedLength <= 0) return 0
+        val snapshot = synchronized(activeLock) { active } ?: return 0
+        if (snapshot.infoHash != infoHash || !snapshot.handle.isValid()) return 0
+
+        val pieceLength = snapshot.pieceLength
+        if (pieceLength <= 0 || fileOffset >= snapshot.fileSize) return 0
+        val bytesToCheck = minOf(requestedLength.toLong(), snapshot.fileSize - fileOffset)
+        val globalStart = snapshot.torrentFileOffset + fileOffset
+        val globalEnd = globalStart + bytesToCheck
+        prioritizeReadWindow(snapshot, (globalStart / pieceLength).toInt())
+        var cursor = globalStart
+        while (cursor < globalEnd) {
+            val pieceIndex = (cursor / pieceLength).toInt()
+            if (!snapshot.handle.havePiece(pieceIndex)) {
+                return (cursor - globalStart).toInt()
+            }
+            cursor = minOf(globalEnd, (pieceIndex + 1L) * pieceLength)
+        }
+        return bytesToCheck.toInt()
+    }
+
+    /**
+     * Prioritize the piece being read and a bounded runway after it. This lets
+     * mpv build a useful buffer while playback starts at the first completed
+     * pieces, and also makes HTTP range seeks work during sequential downloads.
+     */
+    private fun prioritizeReadWindow(snapshot: ActiveTorrent, currentPiece: Int) {
+        synchronized(activeLock) {
+            if (active !== snapshot || !snapshot.handle.isValid()) return
+
+            val firstFilePiece = (snapshot.torrentFileOffset / snapshot.pieceLength).toInt()
+            val lastFilePiece = ((snapshot.torrentFileOffset + snapshot.fileSize - 1) /
+                snapshot.pieceLength).toInt()
+            val windowStart = currentPiece.coerceIn(firstFilePiece, lastFilePiece)
+            if (windowStart == snapshot.priorityWindowStart) return
+
+            val desiredPieces = (STREAM_READ_AHEAD_TARGET_BYTES / snapshot.pieceLength)
+                .toInt()
+                .coerceIn(STREAM_READ_AHEAD_MIN_PIECES, STREAM_READ_AHEAD_MAX_PIECES)
+            val windowEnd = minOf(lastFilePiece, windowStart + desiredPieces - 1)
+            val firstTorrentPiece = firstFilePiece
+
+            // Return pieces that fell behind the read pointer to normal target
+            // file priority. Keep container boundary pieces at their startup /
+            // seek priority.
+            if (snapshot.priorityWindowStart >= 0) {
+                for (piece in snapshot.priorityWindowStart..snapshot.priorityWindowEnd) {
+                    if (piece !in windowStart..windowEnd &&
+                        piece != firstTorrentPiece && piece != lastFilePiece
+                    ) {
+                        snapshot.handle.piecePriority(piece, Priority.FOUR)
+                    }
+                }
+            }
+
+            for (piece in windowStart..windowEnd) {
+                snapshot.handle.piecePriority(piece, Priority.SEVEN)
+            }
+            snapshot.priorityWindowStart = windowStart
+            snapshot.priorityWindowEnd = windowEnd
+        }
     }
 
     private fun pauseOrResume(infoHash: String, pause: Boolean) {
@@ -644,7 +782,7 @@ class MainActivity :
             if (ec.value() != 0) {
                 throw TorrentEngineException("invalid_magnet", ec.message())
             }
-            Sha1Hash(params.getInfo_hash()).toHex()
+            Sha1Hash(params.getInfo_hashes().get_best()).toHex()
         } catch (e: TorrentEngineException) {
             throw e
         } catch (t: Throwable) {
@@ -677,7 +815,7 @@ class MainActivity :
      * Adds every `tr=` tracker of [magnet] to [th] that the handle does not
      * already announce to. Deduplicated, failures per-tracker non-fatal.
      */
-    private fun mergeMagnetTrackers(th: TorrentHandle, magnet: String) {
+    private fun mergeMagnetTrackers(th: TorrentHandle, magnet: String): Int {
         try {
             val existing = th.trackers().mapTo(HashSet()) { it.url() }
             var added = 0
@@ -698,8 +836,10 @@ class MainActivity :
             if (added > 0) {
                 Log.i(TAG, "merged $added magnet tracker(s) onto the torrent handle")
             }
+            return added
         } catch (t: Throwable) {
             Log.w(TAG, "tracker merge skipped: ${t.message}")
+            return 0
         }
     }
 
@@ -772,10 +912,29 @@ class MainActivity :
             val state = if (paused) "paused" else mapState(st.state())
             val wanted = st.totalWanted()
             val wantedDone = st.totalWantedDone()
-            val progress = if (wanted > 0) {
+            // total_wanted is torrent-wide and can diverge from the selected
+            // file's size (shared boundary pieces, filtered files, seed state).
+            // Report per-file bytes so the percentage matches the media being
+            // streamed and advances as its blocks arrive.
+            val selectedFileDone = snapshot.handle.fileProgress()
+                .getOrNull(snapshot.fileIndex)
+                ?.coerceIn(0L, snapshot.fileSize)
+            val progress = if (snapshot.fileSize > 0 && selectedFileDone != null) {
+                selectedFileDone.toDouble() / snapshot.fileSize.toDouble()
+            } else if (wanted > 0) {
                 wantedDone.toDouble() / wanted.toDouble()
             } else {
                 st.progress().toDouble()
+            }
+            val selectedFileComplete = snapshot.fileSize > 0 &&
+                (selectedFileDone ?: wantedDone) >= snapshot.fileSize
+            if (selectedFileComplete && !snapshot.pausedAfterCompletion) {
+                // The selected media file is now entirely on disk. Stop peer
+                // uploads/announces to leave the device free for playback; the
+                // completed pieces remain readable by the local HTTP server.
+                snapshot.handle.pause()
+                snapshot.pausedAfterCompletion = true
+                Log.i(TAG, "paused completed stream torrent ${snapshot.infoHash}")
             }
             val ready = snapshot.readyPieces.all { snapshot.handle.havePiece(it) }
 
@@ -809,7 +968,7 @@ class MainActivity :
     private fun mapState(state: TorrentStatus.State): String = when (state) {
         TorrentStatus.State.CHECKING_FILES,
         TorrentStatus.State.CHECKING_RESUME_DATA,
-        TorrentStatus.State.ALLOCATING,
+        TorrentStatus.State.DOWNLOADING_METADATA,
         -> "checking"
         TorrentStatus.State.FINISHED -> "finished"
         TorrentStatus.State.SEEDING -> "seeding"

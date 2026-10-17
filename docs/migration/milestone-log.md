@@ -299,3 +299,53 @@ Status: GitHub `Noor/main` root IS the Flutter project.
 - Historical documents in `docs/migration/` keep their original
   `mobile_app/...` paths as written at the time; paths are pre-restructure.
 - Build instructions: clone, `flutter pub get`, `flutter run` from the root.
+
+## Milestone 13 — Torrent playback buffer and piece read-ahead
+
+Status: implementation and Android arm64 release build complete; physical
+playback still to be verified.
+
+- Compared Noor's loopback torrent-to-mpv path with Nuvio Mobile at commit
+  `229c083cf3db7bab6fda284484f87439eb4e0eb0`. Nuvio combines a torrent engine
+  with bounded read-ahead and playback buffering; Noor already had the same
+  loopback shape, but only prioritized a 16 MiB window and closed an idle read
+  after 45 seconds.
+- Increased Noor's rolling high-priority piece window to 48 MiB (bounded by
+  piece count), raised the mpv cache horizon to 45 seconds while retaining a
+  3-second initial/rebuffer wait, and enlarged its demuxer limit to 192 MiB.
+- The local stream now checks for newly completed pieces twice as often,
+  transfers 512 KiB chunks, and keeps a stalled response open for up to two
+  minutes so temporary peer gaps do not truncate playback.
+- Bumped the app to `1.2.55+59`. `flutter build apk --release --no-pub
+  --target-platform android-arm64` passed; no test suite was run. The Android
+  device was not connected to ADB during this turn, so physical playback
+  remains unverified.
+
+## Milestone 14 — Torrent player handoff and open recovery
+
+Status: targeted Dart analysis and Android arm64 release build passed; the new
+APK was installed and launched on the connected SM-A217F. Torrentio playback
+and smoothness still need an actual stream run on the device.
+
+- Removed the wait for the torrent's first pieces before handing a prepared
+  local URL to the player. This prevents out-of-order piece downloads from
+  trapping the user on the preparation dialog; the loopback server waits for
+  each requested piece and MPV performs its own initial buffering.
+- Added one retry of MPV's initial loopback open for torrent sources, keeping
+  the torrent and its local server alive between attempts.
+- Extended the rolling piece-priority runway to 96 MiB (bounded to 2–96
+  pieces), retained the 45-second cache horizon and 3-second startup threshold,
+  and capped MPV's demuxer at 64 MiB forward / 16 MiB backward to reduce memory
+  pressure on lower-memory Android phones.
+- Compared the flow with the supplied NuvioMobile commit and its playback-aware
+  torrent engine; Noor now transfers to playback as soon as its local range
+  endpoint is ready instead of waiting on a whole-torrent progress threshold.
+- `dart analyze` on the five changed Dart files: passed, no issues found.
+  `flutter build apk --release --no-pub --target-platform android-arm64`:
+  passed. The Kotlin daemon was unreachable, so Gradle used its fallback
+  compiler path. APK: `build/app/outputs/flutter-apk/app-release.apk`
+  (92,793,299 bytes), version `1.2.56+60`, SHA-256
+  `8B214AF7D0E55BFFCAED25E88C06132DDF0AA85DC9B1983F9C1987418348BC96`.
+- ADB confirmed version `1.2.56` / code `60` installed and the app launched on
+  `SM-A217F`. No Torrentio stream was started during this verification, so
+  actual decoding, buffering and audio/video smoothness remain unconfirmed.

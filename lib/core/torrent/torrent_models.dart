@@ -131,7 +131,7 @@ class TorrentStatus {
   /// Lowercase hex info-hash of the torrent this status belongs to.
   final String infoHash;
 
-  /// Download progress of the wanted data, `0..1`.
+  /// Download progress of the selected media file, `0..1`.
   final double progress;
 
   /// Current download speed in bytes/second.

@@ -138,6 +138,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   bool _stuck = false;
   DateTime? _openedAt;
   DateTime? _readyAt;
+  bool _softwareDecodeRetryUsed = false;
+  bool _torrentOpenRetryUsed = false;
+  bool _torrentOpenRetryScheduled = false;
 
   // Gesture state.
   _GestureMode _mode = _GestureMode.none;
@@ -260,6 +263,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     });
   }
 
+  bool get _showTorrentHud {
+    final status = _torrentStatus;
+    if (status == null || _locked || (!_controlsVisible && _panel == null)) {
+      return false;
+    }
+    // The pill rounds to one decimal place, so hide it when it would display
+    // 100.0%, as well as for the engine's explicit terminal states.
+    return status.progress < 0.9995 &&
+        status.state != 'finished' &&
+        status.state != 'seeding';
+  }
+
   /// Timing + track defaults that live engine-side (mpv owns timing; the
   /// visual style is owned by the SubtitleOverlay through [_subStyle]).
   /// Called from [_createEngine] so EVERY engine instance — initial and
@@ -369,6 +384,21 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (!mounted) return;
     final engine = _engine;
     if (engine == null) return;
+    if (engine.failed &&
+        engine.hardwareAcceleration &&
+        !_softwareDecodeRetryUsed &&
+        _isVideoCodecError(engine.errorMessage)) {
+      _scheduleSoftwareDecodeRetry(engine);
+      return;
+    }
+    if (engine.failed &&
+        widget.torrent != null &&
+        !engine.ready &&
+        !_torrentOpenRetryUsed &&
+        !_isVideoCodecError(engine.errorMessage)) {
+      _scheduleTorrentOpenRetry(engine);
+      return;
+    }
     if (engine.completed && !_stopScrobbled) {
       _stopScrobbled = true;
       _scrobble('stop');
@@ -376,6 +406,73 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     _maybeAutoAdvance(engine);
     setState(() {});
+  }
+
+  bool _isVideoCodecError(String? message) {
+    final error = message?.toLowerCase() ?? '';
+    return error.contains('codec') ||
+        error.contains('decoder') ||
+        error.contains('decoding') ||
+        error.contains('hwdec');
+  }
+
+  void _scheduleSoftwareDecodeRetry(MediaKitEngine failedEngine) {
+    if (!mounted ||
+        _softwareDecodeRetryUsed ||
+        !identical(_engine, failedEngine)) {
+      return;
+    }
+    _softwareDecodeRetryUsed = true;
+    // A listener cannot remove itself while ChangeNotifier is iterating its
+    // listener list. Defer disposing this engine until the current callback
+    // stack has completed.
+    scheduleMicrotask(() => _retryWithSoftwareDecoding(failedEngine));
+  }
+
+  /// A transient loopback HTTP failure can happen while the first torrent
+  /// piece is still being written. Keep the prepared torrent/server alive and
+  /// make one fresh MPV request before showing the terminal error panel.
+  void _scheduleTorrentOpenRetry(MediaKitEngine failedEngine) {
+    if (!mounted ||
+        _torrentOpenRetryUsed ||
+        _torrentOpenRetryScheduled ||
+        !identical(_engine, failedEngine)) {
+      return;
+    }
+    _torrentOpenRetryScheduled = true;
+    _torrentOpenRetryUsed = true;
+    scheduleMicrotask(() => unawaited(_retryTorrentOpen(failedEngine)));
+  }
+
+  Future<void> _retryTorrentOpen(MediaKitEngine failedEngine) async {
+    if (!mounted || !identical(_engine, failedEngine)) return;
+    debugPrint(
+      '[NoorPlayback] retrying torrent HTTP open once: '
+      '${failedEngine.errorMessage ?? 'unknown error'}',
+    );
+    final softwareDecoding = !failedEngine.hardwareAcceleration;
+    failedEngine.removeListener(_onEngineTick);
+    failedEngine.dispose();
+    if (!mounted) return;
+    setState(() => _engine = null);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
+    setState(() => _createEngine(softwareDecoding: softwareDecoding));
+  }
+
+  void _retryWithSoftwareDecoding(MediaKitEngine failedEngine) {
+    if (!mounted || !identical(_engine, failedEngine)) return;
+    // The codec error may arrive after audio has already advanced. Preserve
+    // that position so switching to FFmpeg's software decoder doesn't restart
+    // the episode from the beginning.
+    if (!_resuming) {
+      _resumePositionMs = failedEngine.position.inMilliseconds;
+    }
+    failedEngine.removeListener(_onEngineTick);
+    failedEngine.dispose();
+    if (!mounted) return;
+    setState(() => _engine = null);
+    _createEngine(softwareDecoding: true);
   }
 
   /// Workstream B: fires the next-episode SOURCE flow when a data-provided
@@ -1149,20 +1246,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   Map<String, dynamic> _bestStream(List<Map<String, dynamic>> list) {
-    int score(Map<String, dynamic> s) {
-      final t = ((s['name'] ?? s['title'] ?? '') as String).toUpperCase();
-      var v = 0;
-      if (t.contains('2160') || t.contains('4K')) v += 50;
-      if (t.contains('1080')) v += 40;
-      if (t.contains('720')) v += 25;
-      if (t.contains('480')) v += 10;
-      if (RegExp('HDR|DOLBY|DV ').hasMatch(t)) v += 5;
-      if (t.contains('H265') || t.contains('HEVC')) v += 3;
-      return v;
-    }
-
-    final sorted = [...list]..sort((a, b) => score(b).compareTo(score(a)));
-    return sorted.first;
+    // Keep automatic episode transitions consistent with the source page:
+    // in particular, honor the user's H.264 preference instead of selecting
+    // a higher-resolution HEVC/Main10 torrent that the phone may software-decode.
+    return rankStreams(list, _app.webSettings).first;
   }
 
   Future<_PlaybackResolution?> _resolveForPlayback(
@@ -1517,6 +1604,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       : (engine?.errorMessage ?? _engineInitError),
                   english: english,
                   onRetry: () {
+                    _softwareDecodeRetryUsed = false;
                     final old = _engine;
                     old?.removeListener(_onEngineTick);
                     old?.dispose();
@@ -1549,14 +1637,22 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   ),
                 ),
 
-              // Torrent streaming HUD (speed / peers / progress).
+              // Keep torrent details alongside the normal player chrome;
+              // completed downloads no longer need a permanent status badge.
               if (widget.torrent != null && _torrentStatus != null)
                 Positioned(
                   top: MediaQuery.paddingOf(context).top + 8,
                   left: 12,
-                  child: _TorrentHud(
-                    status: _torrentStatus!,
-                    english: english,
+                  child: AnimatedOpacity(
+                    opacity: _showTorrentHud ? 1 : 0,
+                    duration: const Duration(milliseconds: 280),
+                    child: IgnorePointer(
+                      ignoring: !_showTorrentHud,
+                      child: _TorrentHud(
+                        status: _torrentStatus!,
+                        english: english,
+                      ),
+                    ),
                   ),
                 ),
 

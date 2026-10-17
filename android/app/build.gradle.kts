@@ -52,7 +52,11 @@ flutter {
 dependencies {
     // On-device torrent streaming engine (libtorrent rasterbar via jlibtorrent).
     // Prebuilt natives ship inside the AARs below, so no NDK is required.
-    implementation("com.frostwire:jlibtorrent:1.2.0.18")
-    implementation("com.frostwire:jlibtorrent-android-arm64:1.2.0.18")
-    implementation("com.frostwire:jlibtorrent-android-arm:1.2.0.18")
+    // Keep Java wrappers and native ARM artifacts on the same maintained
+    // libtorrent release. 1.2.0.18 dates from 2018 and misses years of Android,
+    // DHT, tracker and NAT traversal fixes.
+    val jlibtorrentVersion = "2.0.12.9"
+    implementation("com.frostwire:jlibtorrent:$jlibtorrentVersion")
+    implementation("com.frostwire:jlibtorrent-android-arm64:$jlibtorrentVersion")
+    implementation("com.frostwire:jlibtorrent-android-arm:$jlibtorrentVersion")
 }

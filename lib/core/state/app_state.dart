@@ -406,13 +406,8 @@ class AppState extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------------
-  // Linked-service content: continue-watching cards + watchlist rails
+  // Linked-service content: watchlist rails
   // ------------------------------------------------------------------------
-
-  /// Continue-watching entries sourced from linked services (Trakt paused
-  /// playback, AniList/MAL currently-watching). Newest first, deduped,
-  /// capped — rendered right after the local Continue Watching rail.
-  List<IntegrationCwEntry> linkedContinueWatching = const [];
 
   /// Catalog rails contributed by linked services, keyed for the home page:
   /// 'trakt' / 'simkl' → the service watchlist, 'anilist' / 'mal' → the
@@ -429,19 +424,15 @@ class AppState extends ChangeNotifier {
   /// flight — honored with a trailing re-run instead of being swallowed.
   bool _linkedContentForceQueued = false;
 
-  /// Whether the linked-service rows are being (re)fetched right now —
-  /// the home page shows a skeleton rail for first-time loads.
-  bool get linkedContentLoading => _linkedContentLoading;
-
   /// Signature of the linked-services map — the home page includes it in its
   /// reload signature so linking/unlinking a service refreshes the rails.
   String get linkedServicesSignature =>
       (linkedServices.keys.toList()..sort()).join('|');
 
-  /// Refreshes the linked-service continue-watching cards and catalog rails
-  /// (5-minute TTL, concurrency-guarded, force-able after a link change).
-  /// Fail-soft by design: a provider hiccup keeps the previous rows and
-  /// never disturbs local history or the sync machinery.
+  /// Refreshes the linked-service catalog rails (5-minute TTL,
+  /// concurrency-guarded, force-able after a link change). Fail-soft by
+  /// design: a provider hiccup keeps the previous rows and never disturbs
+  /// local history or the sync machinery.
   Future<void> refreshLinkedContent({bool force = false}) async {
     if (_linkedContentLoading) {
       // A link change while a refresh is in flight must not be swallowed
@@ -457,8 +448,7 @@ class AppState extends ChangeNotifier {
     }
     final linked = linkedServices;
     if (linked.isEmpty) {
-      if (linkedContinueWatching.isNotEmpty || linkedCatalogItems.isNotEmpty) {
-        linkedContinueWatching = const [];
+      if (linkedCatalogItems.isNotEmpty) {
         linkedCatalogItems.clear();
         _linkedContentAt = DateTime.now();
         notifyListeners();
@@ -466,14 +456,9 @@ class AppState extends ChangeNotifier {
       return;
     }
     _linkedContentLoading = true;
-    // Surface the loading wave so first-time rows render a skeleton
-    // instead of silently popping in.
-    notifyListeners();
     final generation = ++_linkedContentGeneration;
     try {
       final jobs = <String, Future<List<dynamic>>>{
-        if (linked['trakt']?['linked'] == true)
-          'trakt-playback': api.traktPlayback(),
         if (linked['trakt']?['linked'] == true)
           'trakt-watchlist': api.syncLinkedService('trakt', 'watchlist'),
         if (linked['simkl']?['linked'] == true)
@@ -481,12 +466,9 @@ class AppState extends ChangeNotifier {
         if (linked['anilist']?['linked'] == true)
           'anilist-entries': api.aniListEntries(),
         if (linked['mal']?['linked'] == true)
-          'mal-watching': api.malList(status: 'watching'),
-        if (linked['mal']?['linked'] == true)
           'mal-planning': api.malList(status: 'plan_to_watch'),
       };
       if (jobs.isEmpty) {
-        linkedContinueWatching = const [];
         linkedCatalogItems.clear();
         _linkedContentAt = DateTime.now();
         return;
@@ -499,26 +481,7 @@ class AppState extends ChangeNotifier {
         results,
       );
 
-      // Continue-watching cards: Trakt paused points + the anime trackers'
-      // currently-watching entries with real progress.
       final anilistRows = rowsByKey['anilist-entries'] ?? const <dynamic>[];
-      final cw = IntegrationCwEntry.merge([
-        if (rowsByKey['trakt-playback'] != null)
-          rowsByKey['trakt-playback']!
-              .map((row) => IntegrationCwEntry.fromTraktPlayback(row))
-              .whereType<IntegrationCwEntry>(),
-        anilistRows
-            .map((row) =>
-                IntegrationCwEntry.fromAniListRow(row, statusFilter: 'CURRENT'))
-            .whereType<IntegrationCwEntry>()
-            .where((entry) => entry.isContinueable),
-        if (rowsByKey['mal-watching'] != null)
-          rowsByKey['mal-watching']!
-              .map((row) => IntegrationCwEntry.fromMalRow(row))
-              .whereType<IntegrationCwEntry>()
-              .where((entry) => entry.isContinueable),
-      ]);
-      linkedContinueWatching = cw;
 
       // Catalog rails. Trakt/Simkl watchlist rows carry only identities, so
       // the first cards get their artwork resolved through the meta add-ons

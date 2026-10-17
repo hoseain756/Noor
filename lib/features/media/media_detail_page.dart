@@ -629,10 +629,9 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
   }
 
   /// Resolves an infoHash stream through the connected Debrid service first
-  /// and the on-device torrent engine second (Task 118): the modal shows the
-  /// LIVE download percentage streamed from the engine (1%, 2%, …) instead
-  /// of a bare spinner, and the player opens as soon as the head pieces are
-  /// down (20s fallback — the local stream server serves mid-download).
+  /// and the on-device torrent engine second (Task 118). The player opens as
+  /// soon as the local endpoint is bound and buffers missing pieces while the
+  /// torrent downloads; it does not wait for an arbitrary file percentage.
   /// Returns `null` after showing a bilingual explanation when no resolution
   /// path exists (or the user cancels).
   Future<({String url, PreparedTorrent? torrent})?> _resolveTorrentStream({
@@ -687,7 +686,6 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         },
       ),
     ));
-    StreamSubscription<TorrentStatus>? sub;
     try {
       if (debridConfigured) {
         final url = await api.resolveDebridTorrent(
@@ -727,26 +725,10 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
         unawaited(TorrentService.instance.remove(prepared.infoHash));
         return null;
       }
-      // Live progress phase (Task 118): pump engine events into the dialog
-      // and hand off to the player the moment the head pieces land.
-      final ready = Completer<void>();
-      sub = prepared.statusStream.listen(
-        (event) {
-          status.value = event;
-          if (event.ready && !ready.isCompleted) ready.complete();
-        },
-        onDone: () {
-          if (!ready.isCompleted) ready.complete();
-        },
-      );
-      try {
-        await ready.future.timeout(const Duration(seconds: 20));
-      } on TimeoutException {
-        // Proceed anyway — the StreamServer stall-wait serves the remainder
-        // while the player buffers.
-      }
-      await sub.cancel();
-      sub = null;
+      // prepare() has already bound the loopback HTTP server. Transfer control
+      // to mpv now; waiting for torrent.ready here can strand the user on this
+      // dialog when the swarm downloads out of order. The HTTP server waits
+      // for each requested piece and mpv owns buffering from this point on.
       if (cancelled) {
         unawaited(prepared.stop());
         unawaited(TorrentService.instance.remove(prepared.infoHash));
@@ -754,7 +736,6 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       }
       return (url: prepared.url, torrent: prepared);
     } finally {
-      await sub?.cancel();
       await closeDialog();
       status.dispose();
     }
