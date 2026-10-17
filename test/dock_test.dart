@@ -1,11 +1,12 @@
 import 'dart:math' as math;
 
 // Port QA suite — drop into the host app's test/ dir and swap the package
-// imports to the host name (e.g. package:noor_mobile/... for Noor).
-import 'package:noor_mobile/features/shell/dock_tab.dart';
-import 'package:noor_mobile/features/shell/glass_dock.dart';
+// imports to the host name (e.g. package:nova_mobile/... for Noor).
+import 'package:nova_mobile/features/shell/dock_tab.dart';
+import 'package:nova_mobile/features/shell/glass_dock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 Widget host({
   required List<DockTab> tabs,
@@ -74,7 +75,8 @@ void main() {
       'settings', // non-dock view on top → settings stays lit
     );
     expect(
-      dockActiveTabId(const [DockNavFrame.ofView('kids'), DockNavFrame.other()]),
+      dockActiveTabId(
+          const [DockNavFrame.ofView('kids'), DockNavFrame.other()]),
       'kids',
     );
     expect(dockActiveTabId(const []), 'home');
@@ -93,7 +95,7 @@ void main() {
       onSelected: (t) => picked.add(t.id),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.auto_awesome_outlined));
+    await tester.tap(find.byIcon(LucideIcons.sparkles));
     await tester.pumpAndSettle();
     expect(picked, ['anime']);
   });
@@ -107,7 +109,7 @@ void main() {
       onSelected: (t) => picked.add(t.id),
     ));
     await tester.pumpAndSettle();
-    final home = tester.getCenter(find.byIcon(Icons.home_outlined));
+    final home = tester.getCenter(find.byIcon(LucideIcons.house));
     final g = await tester.startGesture(home);
     await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
     await g.moveBy(const Offset(-300, 0));
@@ -126,7 +128,7 @@ void main() {
       onSelected: (t) => picked.add(t.id),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.home_outlined));
+    await tester.tap(find.byIcon(LucideIcons.house));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
     expect(picked, ['home']);
@@ -142,11 +144,10 @@ void main() {
       rtl: true,
     ));
     await tester.pumpAndSettle();
-    final settingsCenter =
-        tester.getCenter(find.byIcon(Icons.settings_outlined));
-    final homeCenter = tester.getCenter(find.byIcon(Icons.home_outlined));
+    final settingsCenter = tester.getCenter(find.byIcon(LucideIcons.settings));
+    final homeCenter = tester.getCenter(find.byIcon(LucideIcons.house));
     expect(settingsCenter.dx, lessThan(homeCenter.dx));
-    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.tap(find.byIcon(LucideIcons.settings));
     await tester.pumpAndSettle();
     expect(picked?.id, 'settings');
   });
@@ -159,8 +160,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hidden dock ignores pointers + drops semantics',
-      (tester) async {
+  testWidgets('hidden dock ignores pointers + drops semantics', (tester) async {
+    final semantics = tester.ensureSemantics();
     final picked = <String>[];
     Widget dock(bool hidden) => Directionality(
           textDirection: TextDirection.ltr,
@@ -188,11 +189,12 @@ void main() {
     await tester.pumpWidget(dock(true));
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel('Home'), findsNothing);
-    await tester.tap(find.byIcon(Icons.home_outlined), warnIfMissed: false);
+    await tester.tap(find.byIcon(LucideIcons.house), warnIfMissed: false);
     expect(picked, isEmpty);
     await tester.pumpWidget(dock(false));
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel('Home'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('scrub cancel snaps back without navigating', (tester) async {
@@ -203,7 +205,7 @@ void main() {
       onSelected: (t) => picked.add(t.id),
     ));
     await tester.pumpAndSettle();
-    final home = tester.getCenter(find.byIcon(Icons.home_outlined));
+    final home = tester.getCenter(find.byIcon(LucideIcons.house));
     final g = await tester.startGesture(home);
     await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
     await g.moveBy(const Offset(-200, 0));
@@ -225,8 +227,8 @@ void main() {
     // Release path.
     await tester.pumpWidget(host(tabs: ltrTabs, activeId: 'home'));
     await tester.pumpAndSettle();
-    final g = await tester.startGesture(
-        tester.getCenter(find.byIcon(Icons.home_outlined)));
+    final g = await tester
+        .startGesture(tester.getCenter(find.byIcon(LucideIcons.house)));
     await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
     await g.moveBy(const Offset(-120, 0));
     await tester.pump(const Duration(milliseconds: 60));
@@ -235,8 +237,8 @@ void main() {
     expect(pressedScales(), {1.0}); // every tab back at rest scale
 
     // Cancel path.
-    final g2 = await tester.startGesture(
-        tester.getCenter(find.byIcon(Icons.home_outlined)));
+    final g2 = await tester
+        .startGesture(tester.getCenter(find.byIcon(LucideIcons.house)));
     await tester.pump(const Duration(milliseconds: 300)); // hold → scrub
     await g2.moveBy(const Offset(-120, 0));
     await tester.pump(const Duration(milliseconds: 60));
@@ -245,17 +247,19 @@ void main() {
     expect(pressedScales(), {1.0});
   });
 
-
   testWidgets('pill transform: translation math + scrub grow share ONE matrix',
       (tester) async {
     await tester.pumpWidget(host(tabs: ltrTabs, activeId: 'anime'));
     await tester.pumpAndSettle();
     Matrix4 pillMatrix() {
+      final pillColor = Theme.of(tester.element(find.byType(GlassDock)))
+          .colorScheme
+          .primaryContainer;
       final box = tester.element(
         find.byWidgetPredicate(
           (w) =>
               w is DecoratedBox &&
-              (w.decoration as BoxDecoration).color == const Color(0x29FFFFFF),
+              (w.decoration as BoxDecoration).color == pillColor,
         ),
       );
       Transform? found;
@@ -270,32 +274,34 @@ void main() {
     }
 
     // At rest, scale = 1 and tx = frac * slotW * dirSign (LTR: +1).
-    // 800x600 → ladder 600-839: width 360, pad 8 → trackW 344, slotW 86;
-    // active 'anime' = slot 2 → tx = 172.
+    // Resolve the same responsive width + padding used by the dock itself.
+    final sizing = glassDockSizing(viewport: const Size(800, 600));
+    final slotWidth =
+        (sizing.barWidth - 2 * sizing.horizontalPadding) / ltrTabs.length;
     final rest = pillMatrix();
-    expect(rest.getTranslation().x, closeTo(172, 0.01));
+    expect(rest.getTranslation().x, closeTo(2 * slotWidth, 0.01));
     expect(rest.entry(0, 0), closeTo(1, 0.001));
 
     // Hold to enter scrub → grow scale 1.08 lands in the SAME matrix.
-    final g = await tester.startGesture(
-        tester.getCenter(find.byIcon(Icons.auto_awesome_outlined)));
+    final g = await tester
+        .startGesture(tester.getCenter(find.byIcon(LucideIcons.sparkles)));
     await tester.pump(const Duration(milliseconds: 400));
-    await g.moveBy(const Offset(-43, 0)); // half a slot → fractional frac
+    await g.moveBy(Offset(-slotWidth / 2, 0)); // half a slot → fractional frac
     await tester.pump(const Duration(milliseconds: 200));
     final scrub = pillMatrix();
     expect(scrub.entry(0, 0), closeTo(1.08, 0.01)); // grow, same matrix
-    expect(scrub.getTranslation().x % 86, isNot(closeTo(0, 0.01)));
+    expect(scrub.getTranslation().x % slotWidth, isNot(closeTo(0, 0.01)));
     await g.up();
     await tester.pumpAndSettle();
   });
 
   test('size ladder: landscape last-wins', () {
     final landscape = glassDockSizing(viewport: const Size(915, 412));
-    expect(landscape.barHeight, 48);
-    expect(landscape.tabHeight, 38);
+    expect(landscape.barHeight, 60);
+    expect(landscape.tabHeight, 44);
     final phone = glassDockSizing(viewport: const Size(390, 844));
-    expect(phone.barHeight, 60);
-    expect(phone.barWidth, math.min(390 - 32, 330));
+    expect(phone.barHeight, 76);
+    expect(phone.barWidth, math.min(390 - 24, 390));
     final tv = glassDockSizing(viewport: const Size(1920, 1080));
     expect(tv.barHeight, 78);
     expect(tv.blurSigma, 14);

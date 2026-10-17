@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../core/state/app_state.dart';
+import 'navigation_bar_style_page.dart';
 import 'widgets/settings_tiles.dart';
 
 class SettingsPersonalizationPage extends StatelessWidget {
@@ -46,11 +47,11 @@ class SettingsPersonalizationPage extends StatelessWidget {
                             child: Column(children: [
                               RadioListTile<bool>(
                                   value: true,
-                                  title: const Text('English'),
+                                  title: Text(app.tr('englishLanguage')),
                                   subtitle: Text(app.tr('message481'))),
                               RadioListTile<bool>(
                                   value: false,
-                                  title: const Text('العربية'),
+                                  title: Text(app.tr('arabicLanguage')),
                                   subtitle: Text(app.tr('message482'))),
                             ])),
                       ]),
@@ -106,6 +107,14 @@ class SettingsPersonalizationPage extends StatelessWidget {
                                       _ => LucideIcons.monitor
                                     })),
                             ])),
+                        SettingsTile(
+                            icon: LucideIcons.layoutGrid,
+                            title: app.tr('navigationBarStyle'),
+                            subtitle: app.tr('navigationBarStyleSubtitle'),
+                            onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const NavigationBarStylePage()))),
                       ]),
                   SettingsContentSection(
                       title: app.tr('message490'),

@@ -1,7 +1,8 @@
 import '../shell/nova_catalog_refresh.dart';
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -161,8 +162,9 @@ class _HomePageState extends State<HomePage> with NovaCatalogRefresh<HomePage> {
           .catchError((Object _) {})
           .whenComplete(() {
             finished++;
-            if (finished == 3 && !firstFeatured.isCompleted)
+            if (finished == 3 && !firstFeatured.isCompleted) {
               firstFeatured.complete(const []);
+            }
           });
     }
     _featuredSlides = firstFeatured.future;
@@ -228,47 +230,52 @@ class _HomePageState extends State<HomePage> with NovaCatalogRefresh<HomePage> {
     // icons (classic header / service message) — the hero itself handles
     // icon readability with its top scrim.
     final safeTop = MediaQuery.paddingOf(context).top;
-    final hero = classicHome
-        ? Padding(
-            padding: EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Icon(LucideIcons.sparkles,
-                      size: 40, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 24),
-                  Text(NovaStrings.lookup(english, 'message104'),
-                      style: Theme.of(context).textTheme.headlineLarge),
-                  const SizedBox(height: 12),
-                  Text(NovaStrings.lookup(english, 'message105'),
-                      style: Theme.of(context).textTheme.bodyLarge),
-                ]),
-          )
-        : FutureBuilder<List<MediaItem>>(
-            future: _featuredSlides,
-            builder: (context, snapshot) {
-              final featured = snapshot.data;
-              if (featured != null && featured.isNotEmpty) {
-                return FeaturedHero(
-                    items: featured,
-                    autoplayActive: widget.active,
-                    onTap: _open);
-              }
-              if (snapshot.connectionState == ConnectionState.waiting)
-                return const FeaturedSkeleton();
-              return Padding(
-                  padding:
-                      EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
-                  child: Center(
-                      child: _ServiceMessage(
-                          english: english,
-                          onRetry: () => setState(() => _load(app)))));
-            },
-          );
+    Widget buildHero(ValueListenable<double> contentVisibility) {
+      if (classicHome) {
+        return Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Icon(LucideIcons.sparkles,
+                    size: 40, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(height: 24),
+                Text(NovaStrings.lookup(english, 'message104'),
+                    style: Theme.of(context).textTheme.headlineLarge),
+                const SizedBox(height: 12),
+                Text(NovaStrings.lookup(english, 'message105'),
+                    style: Theme.of(context).textTheme.bodyLarge),
+              ]),
+        );
+      }
+      return FutureBuilder<List<MediaItem>>(
+        future: _featuredSlides,
+        builder: (context, snapshot) {
+          final featured = snapshot.data;
+          if (featured != null && featured.isNotEmpty) {
+            return FeaturedHero(
+                items: featured,
+                autoplayActive: widget.active,
+                onTap: _open,
+                contentVisibility: contentVisibility);
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const FeaturedSkeleton();
+          }
+          return Padding(
+              padding: EdgeInsetsDirectional.fromSTEB(24, safeTop + 96, 24, 24),
+              child: Center(
+                  child: _ServiceMessage(
+                      english: english,
+                      onRetry: () => setState(() => _load(app)))));
+        },
+      );
+    }
+
     return CinematicCoverScroll(
       storageKey: const PageStorageKey('nova-home'),
-      hero: hero,
+      heroBuilder: buildHero,
       heroHeight: classicHome ? 360 : featuredHeroHeight(context),
       slivers: [
         SliverToBoxAdapter(
@@ -538,15 +545,15 @@ class _HomePageState extends State<HomePage> with NovaCatalogRefresh<HomePage> {
       return const [];
     }
     return [
-      for (final service in const <(String, String, String)>[
-        ('trakt', 'Watchlist · Trakt', 'قائمة المشاهدة · Trakt'),
-        ('simkl', 'Watchlist · Simkl', 'قائمة المشاهدة · Simkl'),
-        ('anilist', 'Watchlist · AniList', 'قائمة المشاهدة · AniList'),
-        ('mal', 'Watchlist · MyAnimeList', 'قائمة المشاهدة · MyAnimeList'),
+      for (final service in const <(String, String)>[
+        ('trakt', 'Trakt'),
+        ('simkl', 'Simkl'),
+        ('anilist', 'AniList'),
+        ('mal', 'MyAnimeList'),
       ])
         if (app.linkedCatalogItems[service.$1]?.isNotEmpty ?? false)
           (
-            english ? service.$2 : service.$3,
+            '${NovaStrings.lookup(english, 'watchlist')} · ${service.$2}',
             app.linkedCatalogItems[service.$1]!
           ),
     ];

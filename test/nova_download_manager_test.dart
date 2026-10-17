@@ -5,7 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/downloads/download_manager.dart';
+import 'package:nova_mobile/core/downloads/download_manager.dart';
 
 final _video = <int>[
   0,
@@ -60,8 +60,9 @@ class _Store {
           secrets[key] = value;
         },
         deleteSecret: (key) async {
-          if (failSecretDelete)
+          if (failSecretDelete) {
             throw const FileSystemException('Secret deletion denied');
+          }
           secrets.remove(key);
         },
         dio: Dio()..httpClientAdapter = adapter,

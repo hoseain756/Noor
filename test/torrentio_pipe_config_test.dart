@@ -8,7 +8,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/models/addon.dart';
+import 'package:nova_mobile/core/models/addon.dart';
 
 const _torrentioUrl =
     'https://torrentio.stremio.ru/sort=seeders|qualityfilter=scr,cam/manifest.json';

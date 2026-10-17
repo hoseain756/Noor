@@ -1,8 +1,9 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:screen_brightness/screen_brightness.dart';
@@ -651,7 +652,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     for (final service in const ['trakt', 'simkl']) {
       if (!app.api.isLinked(service) ||
           app.webSettings['${service}Scrobbling'] == false ||
-          !widget.recordProgress) continue;
+          !widget.recordProgress) {
+        continue;
+      }
       unawaited(app.api.scrobbleLinkedService(
         service,
         action: action,
@@ -1136,7 +1139,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           item: widget.item,
           url: resolved.url,
           streamName:
-              (stream['title'] ?? stream['addonName'] ?? 'Noor').toString(),
+              (stream['title'] ?? stream['addonName'] ?? 'NOVA').toString(),
           videoId: videoId,
           season: season,
           episode: episode,
@@ -1579,7 +1582,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: NovaColors.ink,
         // The chrome follows the reference layout (LTR media convention);
         // Arabic strings still render correctly via bidi.
         body: GestureDetector(
@@ -1644,9 +1647,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               // Keep torrent details alongside the normal player chrome;
               // completed downloads no longer need a permanent status badge.
               if (widget.torrent != null && _torrentStatus != null)
-                Positioned(
+                PositionedDirectional(
                   top: MediaQuery.paddingOf(context).top + 8,
-                  left: 12,
+                  start: 12,
                   child: AnimatedOpacity(
                     opacity: _showTorrentHud ? 1 : 0,
                     duration: MediaQuery.disableAnimationsOf(context)
@@ -1664,12 +1667,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
               // Buffering spark.
               if (engine != null && engine.ready && engine.buffering)
-                const Center(
+                Center(
                   child: SizedBox(
                     width: 30,
                     height: 30,
                     child: CircularProgressIndicator(
-                      color: Colors.white70,
+                      color: NovaColors.white.withValues(alpha: .70),
                       strokeWidth: 2,
                     ),
                   ),
@@ -1702,7 +1705,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             // LOCK + SPEED only — the video-fit and episodes
                             // entries moved into the settings sheet.
                             PlayerRailButton(
-                              icon: Icons.lock_outline_rounded,
+                              icon: LucideIcons.lockKeyhole,
                               semanticLabel: 'Lock controls',
                               onTap: _lock,
                             ),
@@ -1796,13 +1799,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     ),
                   )
                 else if (_mode == _GestureMode.brightness)
-                  // Sides are FIXED (never mirrored): left = brightness.
+                  // The logical start side controls brightness.
                   Align(
                     alignment: AlignmentDirectional.centerStart,
                     child: Padding(
                       padding: const EdgeInsetsDirectional.only(start: 24),
                       child: VerticalHud(
-                        icon: Icons.brightness_6_rounded,
+                        icon: LucideIcons.sunMoon,
                         label: NovaStrings.lookup(english, 'message16'),
                         value: _hudValue,
                         vertical: true,
@@ -1810,13 +1813,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     ),
                   )
                 else if (_mode == _GestureMode.volume)
-                  // Right = volume, in both directions.
+                  // The logical end side controls volume.
                   Align(
                     alignment: AlignmentDirectional.centerEnd,
                     child: Padding(
                       padding: const EdgeInsetsDirectional.only(end: 24),
                       child: VerticalHud(
-                        icon: Icons.volume_up_rounded,
+                        icon: LucideIcons.volume2,
                         label: NovaStrings.lookup(english, 'message17'),
                         value: _hudValue,
                         vertical: true,
@@ -1830,11 +1833,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 if (_zoom > 1.01 &&
                     _mode == _GestureMode.none &&
                     _controlsVisible)
-                  Positioned(
+                  PositionedDirectional(
                     top: railTopInset + 168,
-                    right: 14,
+                    end: 14,
                     child: Material(
-                      color: Colors.black.withValues(alpha: .55),
+                      color: NovaColors.ink.withValues(alpha: .55),
                       borderRadius: BorderRadius.circular(999),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(999),
@@ -1847,13 +1850,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.center_focus_strong_rounded,
-                                  size: 14, color: Colors.white),
+                              Icon(LucideIcons.scan,
+                                  size: 14, color: NovaColors.white),
                               SizedBox(width: 6),
                               Text(
                                 '1×',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: NovaColors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -1867,11 +1870,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
                 // Lock pill — the only chrome while locked.
                 if (_locked)
-                  Positioned(
+                  PositionedDirectional(
                     bottom: 26,
-                    left: 16,
+                    start: 16,
                     child: Material(
-                      color: Colors.black.withValues(alpha: .45),
+                      color: NovaColors.ink.withValues(alpha: .45),
                       borderRadius: BorderRadius.circular(999),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(999),
@@ -1882,8 +1885,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             vertical: 9,
                           ),
                           child: Icon(
-                            Icons.lock_rounded,
-                            color: Colors.white,
+                            LucideIcons.lock,
+                            color: NovaColors.white,
                             size: 18,
                           ),
                         ),
@@ -1921,9 +1924,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
                 // Resume card.
                 if (!_locked && _resuming && (_resumePositionMs ?? 0) > 30000)
-                  Positioned(
+                  PositionedDirectional(
                     bottom: 180 * scale,
-                    left: 16,
+                    start: 16,
                     child: PlayerCardShell(
                       width: 340,
                       child: Column(
@@ -1931,12 +1934,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           PlayerCardHeader(
-                            icon: Icons.history_rounded,
+                            icon: LucideIcons.history,
                             label: NovaStrings.lookup(english, 'message18'),
                             trailing: InkWell(
                               onTap: () => setState(() => _resuming = false),
-                              child: const Icon(Icons.close_rounded,
-                                  size: 17, color: Colors.white38),
+                              child: Icon(LucideIcons.x,
+                                  size: 17,
+                                  color:
+                                      NovaColors.white.withValues(alpha: .38)),
                             ),
                           ),
                           const SizedBox(height: 7),
@@ -1946,7 +1951,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                   milliseconds: _resumePositionMs ?? 0))
                             }),
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: NovaColors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1996,9 +2001,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     !outroVisible &&
                     !_upNextDismissed &&
                     !_stopScrobbled)
-                  Positioned(
+                  PositionedDirectional(
                     bottom: 180 * scale,
-                    right: 16,
+                    end: 16,
                     child: PlayerCardShell(
                       width: 288,
                       child: Column(
@@ -2006,7 +2011,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           PlayerCardHeader(
-                            icon: Icons.skip_next_rounded,
+                            icon: LucideIcons.skipForward,
                             label: NovaStrings.lookup(english, 'message22'),
                             trailing: Container(
                               padding: const EdgeInsets.symmetric(
@@ -2020,8 +2025,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               ),
                               child: Text(
                                 _cardCountdown(duration, position),
-                                style: const TextStyle(
-                                  color: Colors.white54,
+                                style: TextStyle(
+                                  color:
+                                      NovaColors.white.withValues(alpha: .54),
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -2037,7 +2043,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: NovaColors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
@@ -2045,11 +2051,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           if (nextEpisode['season'] != null &&
                               nextEpisode['episode'] != null)
                             Padding(
-                              padding: const EdgeInsets.only(top: 3),
+                              padding: const EdgeInsetsDirectional.only(top: 3),
                               child: Text(
                                 'S${(nextEpisode['season'] as num).toInt()}:E${(nextEpisode['episode'] as num).toInt()}',
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: .54),
+                                  color:
+                                      NovaColors.white.withValues(alpha: .54),
                                   fontSize: 12,
                                 ),
                               ),
@@ -2085,17 +2092,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 // no timing data it never appears (spec B1.4/B3: no guessed
                 // timings, feature inactive).
                 if (introVisible || outroVisible)
-                  Positioned(
+                  PositionedDirectional(
                     bottom: 180 * scale,
-                    right: 16,
+                    end: 16,
                     child: _SegmentSkipPill(
                       key: ValueKey(introVisible ? 'intro' : 'outro'),
                       label: introVisible
                           ? (NovaStrings.lookup(english, 'message24'))
                           : (NovaStrings.lookup(english, 'message25')),
                       icon: introVisible
-                          ? Icons.fast_forward_rounded
-                          : Icons.skip_next_rounded,
+                          ? LucideIcons.fastForward
+                          : LucideIcons.skipForward,
                       onTap: () => unawaited(_skipSegment(intro: introVisible)),
                     ),
                   ),
@@ -2182,9 +2189,9 @@ class _ErrorPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                Icons.error_outline_rounded,
+                LucideIcons.circleAlert,
                 size: 46,
-                color: Color(0xFFFF8178),
+                color: NovaColors.redSoft,
               ),
               const SizedBox(height: 14),
               Text(
@@ -2204,7 +2211,7 @@ class _ErrorPanel extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(LucideIcons.refreshCw),
                 label: Text(NovaStrings.lookup(english, 'retry')),
               ),
             ],
@@ -2242,7 +2249,7 @@ class _SegmentSkipPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: Colors.black.withValues(alpha: 0.62),
+        color: NovaColors.ink.withValues(alpha: 0.62),
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
@@ -2252,12 +2259,12 @@ class _SegmentSkipPill extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 18, color: Colors.white),
+                Icon(icon, size: 18, color: NovaColors.white),
                 const SizedBox(width: 8),
                 Text(
                   label,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: NovaColors.white,
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2297,19 +2304,19 @@ class _TorrentHud extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
+        color: NovaColors.ink.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: NovaColors.white.withValues(alpha: .24)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
+          SizedBox(
             width: 7,
             height: 7,
             child: CircularProgressIndicator(
               strokeWidth: 1.6,
-              color: Colors.white70,
+              color: NovaColors.white.withValues(alpha: .70),
             ),
           ),
           const SizedBox(width: 8),
@@ -2317,7 +2324,7 @@ class _TorrentHud extends StatelessWidget {
             '$state · ↓ ${_speed(status.downloadRate)}'
             ' · P:${status.numPeers} S:${status.numSeeds} · $pct%',
             style: const TextStyle(
-              color: Colors.white,
+              color: NovaColors.white,
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
             ),

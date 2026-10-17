@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/oauth/oauth_redirect.dart';
+import 'package:nova_mobile/core/oauth/oauth_redirect.dart';
 
 void main() {
   group('OAuthRedirect constants', () {
@@ -128,8 +128,7 @@ void main() {
         expect(callback.error, 'access_denied');
       });
 
-      test('fragment without access_token still resolves to the code path',
-          () {
+      test('fragment without access_token still resolves to the code path', () {
         expect(
           OAuthRedirect.parse('app.noor.mobile://callback#foo=bar'),
           isNull,

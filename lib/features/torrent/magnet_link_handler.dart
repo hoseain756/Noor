@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -153,32 +153,22 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
     if (!mounted) return;
     NoorToast.show(
       context,
-      app.english ? _englishReason(reason) : _arabicReason(reason),
+      _linkReason(reason, app.english),
       error: true,
     );
   }
 
-  String _arabicReason(String? reason) => switch (reason) {
-        'access_denied' => 'تم رفض الموافقة في Trakt.',
-        'state_mismatch' =>
-          'استجابة ربط غير صالحة (state mismatch) — أعد المحاولة.',
-        'exchange_failed' => 'فشل تبادل الرمز مع Trakt — أعد المحاولة.',
-        'flow_expired' => 'انتهت مهلة طلب الربط — ابدأ من جديد.',
-        'no_pending_flow' => 'انتهت صلاحية طلب الربط — ابدأ من جديد.',
-        'network_error' => 'انقطاع شبكة أثناء ربط Trakt — أعد المحاولة.',
-        _ => 'تعذر إكمال ربط Trakt.',
-      };
-
-  String _englishReason(String? reason) => switch (reason) {
-        'access_denied' => 'Approval was denied on Trakt.',
-        'state_mismatch' =>
-          'Invalid link response (state mismatch) — please retry.',
-        'exchange_failed' => 'Token exchange with Trakt failed — retry.',
-        'flow_expired' => 'The pending link timed out — start again.',
-        'no_pending_flow' => 'The pending link expired — start again.',
-        'network_error' => 'Network hiccup during Trakt linking — retry.',
-        _ => 'Could not finish linking Trakt.',
-      };
+  String _linkReason(String? reason, bool english) => NovaStrings.lookup(
+      english,
+      switch (reason) {
+        'access_denied' => 'serviceAccessDenied',
+        'state_mismatch' => 'serviceStateMismatch',
+        'exchange_failed' => 'serviceExchangeFailed',
+        'flow_expired' => 'serviceFlowExpired',
+        'no_pending_flow' => 'serviceNoPendingFlow',
+        'network_error' => 'serviceNetworkError',
+        _ => 'serviceLinkFailed',
+      });
 
   @override
   void dispose() {
@@ -210,7 +200,7 @@ class _IncomingLinkListenerState extends State<IncomingLinkListener> {
           } else {
             NoorToast.show(
               context,
-              app.english ? _englishReason(reason) : _arabicReason(reason),
+              _linkReason(reason, app.english),
               error: true,
             );
           }

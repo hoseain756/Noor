@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/torrent/stream_server.dart';
+import 'package:nova_mobile/core/torrent/stream_server.dart';
 
 void main() {
   // Regression test for the reported failure: "Failed to open

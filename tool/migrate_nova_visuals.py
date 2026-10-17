@@ -27,8 +27,8 @@ for p in Path('lib').rglob('*.dart'):
     s=s.replace('Image.network(', 'NovaNetworkImage(')
     imports=[]
     if 'LucideIcons.' in s and "package:lucide_icons_flutter/lucide_icons.dart" not in s:imports.append("import 'package:lucide_icons_flutter/lucide_icons.dart';")
-    if 'NovaNetworkImage(' in s and 'nova_network_image.dart' not in s:imports.append("import 'package:noor_mobile/shared/widgets/nova_network_image.dart';")
-    if 'NovaColors.' in s and 'horse_theme.dart' not in s and 'nova_theme.dart' not in s:imports.append("import 'package:noor_mobile/core/theme/nova_theme.dart';")
+    if 'NovaNetworkImage(' in s and 'nova_network_image.dart' not in s:imports.append("import 'package:nova_mobile/shared/widgets/nova_network_image.dart';")
+    if 'NovaColors.' in s and 'horse_theme.dart' not in s and 'nova_theme.dart' not in s:imports.append("import 'package:nova_mobile/core/theme/nova_theme.dart';")
     if imports:
         i=s.find('import ');s=s[:i]+'\n'.join(imports)+'\n'+s[i:]
     if s!=old:p.write_text(s,encoding='utf-8')

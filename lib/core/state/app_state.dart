@@ -1,4 +1,3 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -69,6 +68,7 @@ class AppState extends ChangeNotifier {
       'adult': true
     },
     'kidsMode': false, 'appearance': 'dark', 'contrastLevel': 'standard',
+    'navigationBarStyle': 'classic',
     'theme': <String, dynamic>{},
     'navOrder': <String>[], 'navHidden': <String>[],
     'navRenamed': <String, dynamic>{}, 'hubOrder': <String>[],
@@ -145,8 +145,8 @@ class AppState extends ChangeNotifier {
   /// TMDB locale ([contentTmdbLocale]) plus STRICTLY-GATED addon 'language'
   /// extras — addons whose manifest declares support only (live audit
   /// 122-a2: Cinemeta ignores language extras and provenly returns EN).
-  static const Map<String, String> kContentLanguages = {
-    'ar': 'العربية',
+  static final Map<String, String> kContentLanguages = {
+    'ar': NovaStrings.lookup(false, 'arabicLanguage'),
     'en': 'English',
     'es': 'Español',
     'fr': 'Français',
@@ -195,8 +195,9 @@ class AppState extends ChangeNotifier {
     english =
         savedEnglish ?? PlatformDispatcher.instance.locale.languageCode != 'ar';
     final savedSettings = _preferences!.getString(settingsStorageKey);
-    if (savedSettings == null)
+    if (savedSettings == null) {
       webSettings['contentLanguage'] = english ? 'en' : 'ar';
+    }
     if (savedSettings != null) {
       try {
         final decoded = jsonDecode(savedSettings);
@@ -351,7 +352,7 @@ class AppState extends ChangeNotifier {
         decoded['addons'] is! List ||
         decoded['watchlist'] is! List ||
         decoded['history'] is! List) {
-      throw const FormatException('النسخة الاحتياطية غير صالحة.');
+      throw FormatException(tr('invalidBackup'));
     }
     final data = Map<String, dynamic>.from(decoded);
     final settings = Map<String, dynamic>.from(data['settings'] as Map);
@@ -737,7 +738,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> installAddon(String url) async {
-    final manifest = await catalogs.manifest(url);
+    final manifest = await catalogs.manifest(url, english: english);
     final normalizedUrl = _normalizeManifestUrl(url);
     final next = addons.where((addon) => addon.id != manifest['id']).toList()
       ..add(
@@ -763,7 +764,9 @@ class AppState extends ChangeNotifier {
     if (oldIndex < 0 ||
         oldIndex >= ordered.length ||
         newIndex < 0 ||
-        newIndex > ordered.length) return;
+        newIndex > ordered.length) {
+      return;
+    }
     if (newIndex > oldIndex) newIndex--;
     final moved = ordered.removeAt(oldIndex);
     ordered.insert(newIndex, moved);
@@ -822,10 +825,10 @@ class AppState extends ChangeNotifier {
     final cleanName =
         trimmedName.length > 80 ? trimmedName.substring(0, 80) : trimmedName;
     if (cleanName.isEmpty) {
-      throw const FormatException('أدخل اسم القائمة.');
+      throw FormatException(tr('customListNameRequired'));
     }
     if (customLists.length >= 40) {
-      throw const FormatException('وصلت إلى الحد الأقصى للقوائم.');
+      throw FormatException(tr('customListLimitReached'));
     }
     final now = DateTime.now().millisecondsSinceEpoch;
     final list = CustomMediaList(
@@ -849,7 +852,7 @@ class AppState extends ChangeNotifier {
     final cleanName =
         trimmedName.length > 80 ? trimmedName.substring(0, 80) : trimmedName;
     if (cleanName.isEmpty) {
-      throw const FormatException('أدخل اسم القائمة.');
+      throw FormatException(tr('customListNameRequired'));
     }
     final now = DateTime.now().millisecondsSinceEpoch;
     customLists = customLists
@@ -929,10 +932,10 @@ class AppState extends ChangeNotifier {
     final cleanName =
         trimmedName.length > 80 ? trimmedName.substring(0, 80) : trimmedName;
     if (cleanName.isEmpty) {
-      throw const FormatException('أدخل اسم القائمة.');
+      throw FormatException(tr('customListNameRequired'));
     }
     if (customLists.length >= 40) {
-      throw const FormatException('وصلت إلى الحد الأقصى للقوائم.');
+      throw FormatException(tr('customListLimitReached'));
     }
     final now = DateTime.now().millisecondsSinceEpoch;
     customLists = [

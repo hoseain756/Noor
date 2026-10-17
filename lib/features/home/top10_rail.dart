@@ -1,4 +1,4 @@
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/models/media_item.dart';

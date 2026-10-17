@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import '../shell/nova_catalog_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -309,7 +309,7 @@ class _AniListLinkPrompt extends StatelessWidget {
             .surfaceContainerHighest
             .withValues(alpha: .55),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .08)),
+        border: Border.all(color: NovaColors.white.withValues(alpha: .08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -30,7 +30,7 @@ Key flows:
 2. Add manifest URL → validation → install progress → confirmed result → reorder with drag handle or accessible up/down controls → enable/configure/remove.
 3. Choose service → dedicated provider page → existing verified OAuth/device/key flow → connection status → supported automatic-sync controls, manual import or disconnect confirmation.
 4. Choose app language → existing `setLanguage` → app-level locale and Directionality update immediately, without restart.
-5. Appearance → dark/light/device choice or reduce-motion/transparency flags → root theme updates live.
+5. Appearance → dark/light/device choice, reduce-motion/transparency flags, or Navigation bar style → the root theme or bottom dock updates live.
 6. Kids controls → configure/change parental PIN through `NovaParentalGate.change` → secure parent gate maintained by the shared implementation.
 
 ## Screen and state specifications
@@ -45,7 +45,7 @@ Playback groups: viewing flow, picture/sound, playback controls, stream selectio
 
 ### Appearance and language
 
-Appearance provides Cinema dark, Daylight and Follow device, plus functional reduced-motion/transparency flags. Language provides native English/Arabic labels and independent provider-content language. Choices apply immediately. Device text scaling is respected rather than clamped.
+Appearance provides Cinema dark, Daylight and Follow device, plus functional reduced-motion/transparency flags and a dedicated Navigation bar style page. Its top preview uses the real five primary tabs and a visible active Anime indicator, and updates as Classic, Compact icons or Mini is highlighted. Selecting an option saves `navigationBarStyle` through the existing settings bucket and updates the phone shell immediately. Classic retains the current glass dock with icon labels; Compact icons hides labels while preserving Classic's shape and spacing; Mini is a narrower, 56 dp-high floating capsule with 48 dp tab targets and at least 24 dp horizontal phone insets. Icon-only choices retain localized tab names in semantics and tooltips. The selector changes only the horizontal dock; the existing tablet side rail at 840 dp and wider remains unchanged for every choice. Language provides native English/Arabic labels and independent provider-content language. Choices apply immediately. Device text scaling is respected rather than clamped.
 
 ### Catalog and Kids controls
 
@@ -83,7 +83,7 @@ About uses the supplied brand asset, exact existing build version, license viewe
 
 Directional padding and alignment are used for layout. Forward chevrons follow Directionality; media/provider icons do not mirror. Numeric URLs/code inputs remain LTR, preserving provider syntax. Rows are at least 48 px in interactive height; icon buttons retain standard 48 px targets. Values/descriptions wrap, sheet content scrolls, destructive dialogs explicitly identify the effect, and installation results announce as live regions.
 
-Settings does not add ambient animation or any live blur. Page navigation, pressed/focus feedback and switch motion use the root NOVA motion/theme contract; reduced-motion settings apply there. This keeps settings inexpensive and readable during long work sessions.
+Settings does not add ambient animation or any live blur. The navigation preview reuses the production dock in non-interactive, reduced-motion mode and uses theme surfaces. Page navigation, pressed/focus feedback and switch motion use the root NOVA motion/theme contract; reduced-motion settings apply there. This keeps settings inexpensive and readable during long work sessions.
 
 ## Added controls and rationale
 
@@ -100,4 +100,4 @@ Settings does not add ambient animation or any live blur. Page navigation, press
 
 A scoped `flutter analyze lib/features/settings --no-pub` completed with zero errors. Its three warnings (unused scan-error state and unused dropdown parameters) were corrected afterward; RadioGroup and onReorderItem replaced the deprecated controls identified by that run. The parent workstream performs final combined analysis and tests after all edits.
 
-`test/nova_settings_test.dart` covers search-to-language navigation and live RTL switching, 360 px phone/1200 px tablet layouts at 200% text in both directions, and independent add-on reorder/enable interactions. This file is handed to the parent for the consolidated test run. These tests do not claim real-device visual or frame-rate verification, and no live provider authorization is attempted during UI testing.
+`test/nova_settings_test.dart` covers search-to-language navigation and live RTL switching, 360 px phone/1200 px tablet layouts at 200% text in both directions, and independent add-on reorder/enable interactions. `test/navigation_bar_style_test.dart` covers five tab targets, visible-label rules, localized semantics/tooltips, mirrored order, minimum touch size, all three styles in Arabic/English and Light/Dark at 200% text, live preview updates and the saved selection across a screen rebuild. These tests do not claim real-device visual or frame-rate verification, and no live provider authorization is attempted during UI testing.

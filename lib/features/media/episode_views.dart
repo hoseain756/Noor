@@ -1,7 +1,7 @@
 /// Detail-page episodes system — the Flutter replica of the Harbor web
 /// `EpisodesSection` rebuild (episodes/ folder):
 ///   · toolbar: glass season dropdown (> 1 season) or episode count, sort
-///     chip, and the persisted list/grid view toggle (end-aligned cluster)
+///     chip, and a single persisted list/grid view toggle
 ///   · per-episode art chain (thumbnail → thumb → series background →
 ///     gradient placeholder carrying the episode number) with the full
 ///     overlay kit: E-pill, watched pill, IMDb chip, red progress bar,
@@ -11,8 +11,8 @@
 /// Data helpers (sort/progress/default-season) live in `episode_data.dart`.
 library;
 
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -29,11 +29,11 @@ import 'episode_data.dart';
 final Map<String, int> _sessionSeason = {};
 
 /// rgba(8,8,10,.72) — the web --ep-overlay-bg.
-const Color _kOverlayBg = Color(0xB808080A);
+const Color _kOverlayBg = NovaColors.scrim;
 
 const Color _kWatchedGreen = NovaColors.success;
 const Color _kProgressBarRed = NovaColors.red;
-const Color _kImdbYellow = NovaColors.warning;
+const Color _kImdbYellow = NovaColors.rating;
 
 ColorFilter _saturate(double s) => ColorFilter.matrix(<double>[
       0.213 + (1 - 0.213) * s, 0.715 * (1 - s), 0.072 * (1 - s), 0, 0, //
@@ -670,9 +670,9 @@ class _SortChip extends StatelessWidget {
   }
 }
 
-/// Glass pill with two 40px circles — list / grid; active = white/16 fill
-/// + gold icon. The page wires the tap to the EpisodesController + a
-/// fire-and-forget settings persist (never a global rebuild).
+/// One glass icon button displays the current episode layout. The page wires
+/// its tap to the EpisodesController + a fire-and-forget settings persist
+/// (never a global rebuild).
 class _ViewToggle extends StatelessWidget {
   const _ViewToggle({
     required this.english,
@@ -684,55 +684,40 @@ class _ViewToggle extends StatelessWidget {
   final String view;
   final ValueChanged<String>? onViewChange;
 
-  Widget _segment({
-    required IconData icon,
-    required String value,
-    required String tooltip,
-  }) {
-    final active = view == value;
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: active ? null : () => onViewChange?.call(value),
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 40,
-          height: 40,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: active ? Colors.white.withValues(alpha: .16) : null,
+  @override
+  Widget build(BuildContext context) {
+    final isList = view == 'list';
+    final nextView = isList ? 'grid' : 'list';
+    final nextLabel = NovaStrings.lookup(
+      english,
+      nextView == 'list' ? 'message168' : 'message169',
+    );
+    final icon = isList ? LucideIcons.list : LucideIcons.layoutGrid;
+
+    return GlassPillSurface(
+      borderRadius: 24,
+      child: IconButton(
+        key: const ValueKey('episode-view-toggle'),
+        tooltip: nextLabel,
+        onPressed: () => onViewChange?.call(nextView),
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        padding: EdgeInsets.zero,
+        icon: AnimatedSwitcher(
+          duration: Duration(
+            milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 180,
+          ),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(scale: animation, child: child),
           ),
           child: Icon(
             icon,
+            key: ValueKey(view),
             size: 18,
-            color: active ? HorseTheme.gold : HorseTheme.muted,
+            color: HorseTheme.gold,
           ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassPillSurface(
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _segment(
-              icon: LucideIcons.list,
-              value: 'list',
-              tooltip: NovaStrings.lookup(english, 'message168'),
-            ),
-            const SizedBox(width: 2),
-            _segment(
-              icon: LucideIcons.layoutGrid,
-              value: 'grid',
-              tooltip: NovaStrings.lookup(english, 'message169'),
-            ),
-          ],
         ),
       ),
     );
@@ -792,7 +777,7 @@ class _EpisodeRow extends StatelessWidget {
                         MediaQuery.textScalerOf(context).scale(16) > 24;
                     final text = _EpisodeTextBlock(
                         item: item, isWide: isWide, english: english);
-                    if (stacked)
+                    if (stacked) {
                       return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -800,6 +785,7 @@ class _EpisodeRow extends StatelessWidget {
                             const SizedBox(height: 16),
                             text
                           ]);
+                    }
                     return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1142,9 +1128,9 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                 child: ColoredBox(
                     color: NovaTheme.of(context).raised, child: art)),
             // Legibility scrim for the bottom overlay row.
-            Positioned(
-              left: 0,
-              right: 0,
+            PositionedDirectional(
+              start: 0,
+              end: 0,
               bottom: 0,
               height: 40,
               child: DecoratedBox(
@@ -1153,7 +1139,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                     colors: [
-                      Colors.black.withValues(alpha: .55),
+                      NovaColors.ink.withValues(alpha: .55),
                       Colors.transparent,
                     ],
                   ),
@@ -1173,7 +1159,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       height: 1.2,
-                      color: Colors.white,
+                      color: NovaColors.white,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -1197,7 +1183,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           height: 1.2,
-                          color: Colors.white,
+                          color: NovaColors.white,
                         ),
                       ),
                     ],
@@ -1227,7 +1213,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                               fontSize: 9,
                               fontWeight: FontWeight.w900,
                               height: 1.2,
-                              color: Colors.black,
+                              color: NovaColors.ink,
                             ),
                           ),
                         ),
@@ -1238,7 +1224,7 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             height: 1.2,
-                            color: Colors.white,
+                            color: NovaColors.white,
                             fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
@@ -1248,13 +1234,13 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
                 ),
               ),
             if (showProgress)
-              Positioned(
-                left: 0,
-                right: 0,
+              PositionedDirectional(
+                start: 0,
+                end: 0,
                 bottom: 0,
                 child: Container(
                   height: 3,
-                  color: Colors.black.withValues(alpha: .35),
+                  color: NovaColors.ink.withValues(alpha: .35),
                   alignment: AlignmentDirectional.centerStart,
                   child: FractionallySizedBox(
                     widthFactor: widget.progress.clamp(0.0, 1.0),
@@ -1277,8 +1263,9 @@ class _EpisodeThumbnailState extends State<EpisodeThumbnail> {
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft, // CSS 135deg → top-left→bottom-right
-          end: Alignment.bottomRight,
+          begin: AlignmentDirectional
+              .topStart, // CSS 135deg → top-start→bottom-end
+          end: AlignmentDirectional.bottomEnd,
           colors: [NovaTheme.of(context).raised, NovaTheme.of(context).line],
         ),
       ),
@@ -1312,7 +1299,7 @@ class _OverlayPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: .4),
+            color: NovaColors.ink.withValues(alpha: .4),
             blurRadius: 4,
             offset: const Offset(0, 1),
           ),

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/trakt/trakt_pkce.dart';
+import 'package:nova_mobile/core/trakt/trakt_pkce.dart';
 
 void main() {
   group('TraktPkce.challengeS256', () {

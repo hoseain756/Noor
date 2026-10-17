@@ -1,5 +1,5 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -77,11 +77,12 @@ class _TrackerSheetState extends State<_TrackerSheet> {
         _loading = false;
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
           _loadFailed = true;
         });
+      }
     }
   }
 

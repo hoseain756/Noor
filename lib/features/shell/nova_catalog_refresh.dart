@@ -24,12 +24,14 @@ mixin NovaCatalogRefresh<T extends StatefulWidget> on State<T> {
   bool get _cacheDestinationVisible =>
       mounted &&
       catalogRefreshEnabled &&
-      TickerMode.of(context) &&
+      TickerMode.valuesOf(context).enabled &&
       (ModalRoute.of(context)?.isCurrent ?? true);
 
   void _onCacheRefresh() {
     if (!mounted ||
-        _seenCacheRevision == CatalogResponseCache.instance.revision) return;
+        _seenCacheRevision == CatalogResponseCache.instance.revision) {
+      return;
+    }
     _cacheRefreshDebounce?.cancel();
     // Dependency lookups happen in the callback, not during initState.
     _cacheRefreshDebounce = Timer(const Duration(milliseconds: 300), () {

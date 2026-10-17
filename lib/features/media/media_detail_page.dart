@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -129,8 +129,9 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
               language: app.contentTmdbLocale,
               region: app.webSettings['region']?.toString() ?? 'US')
           .then((enriched) {
-        if (mounted && generation == _detailGeneration)
+        if (mounted && generation == _detailGeneration) {
           setState(() => _enrichedItem = enriched);
+        }
       }).catchError((Object _) {}));
     }
     return item;
@@ -257,13 +258,14 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
     return CinematicCoverScroll(
       storageKey: PageStorageKey('detail-${item.id}'),
       heroHeight: heroHeight,
-      hero: DetailHero(
+      heroBuilder: (contentVisibility) => DetailHero(
           item: item,
           backdropUrl: backdrop,
           logoUrl: logo,
           isWide: isWide,
           viewportHeight: viewportSize.height,
-          viewportWidth: viewportSize.width),
+          viewportWidth: viewportSize.width,
+          contentVisibility: contentVisibility),
       slivers: [
         SliverToBoxAdapter(
             child: Padding(
@@ -377,12 +379,14 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
       if (source == null) return;
       await DownloadManager.instance
           .enqueue(url: source.url, title: title, headers: source.headers);
-      if (mounted)
+      if (mounted) {
         NoorToast.show(context, NovaStrings.lookup(app.english, 'message179'));
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         NoorToast.show(context, NovaStrings.lookup(app.english, 'message180'),
             error: true);
+      }
     }
   }
 
@@ -453,7 +457,9 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
 
   Future<void> _share(MediaItem item, bool english) async {
     if (widget.kidsMode &&
-        (!await NovaParentalGate.verify(context) || !mounted)) return;
+        (!await NovaParentalGate.verify(context) || !mounted)) {
+      return;
+    }
     try {
       await SharePlus.instance.share(ShareParams(text: item.name));
     } catch (_) {
@@ -581,7 +587,7 @@ class _MediaDetailPageState extends State<MediaDetailPage> {
             filename: filename,
             torrent: prepared,
             streamName:
-                (chosenStream['title'] ?? chosenStream['addonName'] ?? 'Noor')
+                (chosenStream['title'] ?? chosenStream['addonName'] ?? 'NOVA')
                     .toString(),
             videoId: id,
             season: (episode?['season'] as num?)?.toInt(),
@@ -783,7 +789,7 @@ class _ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.fromLTRB(
+      padding: EdgeInsetsDirectional.fromSTEB(
         20,
         MediaQuery.paddingOf(context).top + 88,
         20,
@@ -896,7 +902,7 @@ class _ProviderRatingsState extends State<_ProviderRatings> {
                     width: 76,
                     height: 26,
                     decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: .30),
+                        color: NovaColors.ink.withValues(alpha: .30),
                         borderRadius: BorderRadius.circular(999)),
                   ),
               ],
@@ -972,7 +978,9 @@ class _RatingChip extends StatelessWidget {
             ? () async {
                 if (context.read<AppState>().kidsSession &&
                     (!await NovaParentalGate.verify(context) ||
-                        !context.mounted)) return;
+                        !context.mounted)) {
+                  return;
+                }
                 await launchUrl(url!);
               }
             : null,
@@ -1102,12 +1110,13 @@ class _SimilarTitlesState extends State<_SimilarTitles> {
           return RailLoadingSkeleton(
               title: NovaStrings.lookup(app.english, 'message185'));
         }
-        if (items.isEmpty)
+        if (items.isEmpty) {
           return Padding(
               padding: const EdgeInsets.all(24),
               child: Text(NovaStrings.lookup(app.english, 'message186'),
                   style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurfaceVariant)));
+        }
         return Padding(
           padding: const EdgeInsetsDirectional.only(top: 32, bottom: 22),
           child: MediaRail(

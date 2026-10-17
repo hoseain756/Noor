@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/shell/dock_tab.dart';
-import 'package:noor_mobile/features/shell/noor_dock_tabs.dart';
+import 'package:nova_mobile/features/shell/dock_tab.dart';
+import 'package:nova_mobile/features/shell/noor_dock_tabs.dart';
 
 void main() {
   group('Noor dock tab set', () {
@@ -36,8 +36,7 @@ void main() {
     });
 
     test('library tab carries the bilingual labels the shell already used', () {
-      final library =
-          kNoorDockTabs.firstWhere((tab) => tab.id == 'library');
+      final library = kNoorDockTabs.firstWhere((tab) => tab.id == 'library');
       expect(library.label(arabic: false), 'My Library');
       expect(library.label(arabic: true), 'مكتبتي');
       expect(library.view, 'library');

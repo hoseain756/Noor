@@ -14,23 +14,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
-import 'package:noor_mobile/core/api/noor_api.dart';
-import 'package:noor_mobile/core/data/catalog_repository.dart';
-import 'package:noor_mobile/core/models/addon.dart';
-import 'package:noor_mobile/core/models/featured_artwork.dart';
-import 'package:noor_mobile/core/models/media_item.dart';
-import 'package:noor_mobile/core/state/app_state.dart';
-import 'package:noor_mobile/core/theme/horse_theme.dart';
-import 'package:noor_mobile/features/anime/anime_page.dart';
-import 'package:noor_mobile/features/home/home_page.dart';
-import 'package:noor_mobile/features/kids/kids_page.dart';
-import 'package:noor_mobile/features/library/library_page.dart';
-import 'package:noor_mobile/features/media/detail_glass.dart';
-import 'package:noor_mobile/features/shell/dock_tab.dart';
-import 'package:noor_mobile/features/shell/glass_dock.dart';
-import 'package:noor_mobile/features/shell/main_shell.dart';
-import 'package:noor_mobile/shared/widgets/glass_navigation.dart';
-import 'package:noor_mobile/shared/widgets/image_decode.dart';
+import 'package:nova_mobile/core/api/noor_api.dart';
+import 'package:nova_mobile/core/data/catalog_repository.dart';
+import 'package:nova_mobile/core/models/addon.dart';
+import 'package:nova_mobile/core/models/featured_artwork.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/core/state/app_state.dart';
+import 'package:nova_mobile/core/theme/horse_theme.dart';
+import 'package:nova_mobile/features/anime/anime_page.dart';
+import 'package:nova_mobile/features/home/home_page.dart';
+import 'package:nova_mobile/features/kids/kids_page.dart';
+import 'package:nova_mobile/features/library/library_page.dart';
+import 'package:nova_mobile/features/media/detail_glass.dart';
+import 'package:nova_mobile/features/shell/dock_tab.dart';
+import 'package:nova_mobile/features/shell/glass_dock.dart';
+import 'package:nova_mobile/features/shell/main_shell.dart';
+import 'package:nova_mobile/features/settings/settings_page.dart';
+import 'package:nova_mobile/shared/widgets/glass_navigation.dart';
+import 'package:nova_mobile/shared/widgets/image_decode.dart';
 
 /// Depth-first walk: does the subtree rooted at [root] contain a widget of
 /// type [T]?
@@ -100,6 +101,18 @@ Widget _shellHarness({double safeTop = 44}) {
       ),
     ),
   );
+}
+
+void _setShellTestViewport(WidgetTester tester) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(400, 860);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPhysicalSize);
+}
+
+void _activateDockTab(WidgetTester tester, String id) {
+  final dock = tester.widget<GlassDock>(find.byType(GlassDock));
+  dock.onTabSelected(dock.tabs.singleWhere((tab) => tab.id == id));
 }
 
 void main() {
@@ -174,53 +187,44 @@ void main() {
   });
 
   group('shell hidden pages are dormant (Task 136)', () {
-    testWidgets('all five pages stay alive; hidden ones Offstage + muted',
+    testWidgets('unvisited pages stay unmounted until their first visit',
         (tester) async {
+      _setShellTestViewport(tester);
       await tester.pumpWidget(_shellHarness());
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
       await tester.pump(const Duration(milliseconds: 80));
       expect(tester.takeException(), isNull);
 
-      bool muted(Element page) {
-        final modes = tester.widgetList<TickerMode>(find.ancestor(
-          of: find.byElementPredicate((e) => identical(e, page),
-              skipOffstage: false),
-          matching: find.byType(TickerMode, skipOffstage: false),
-        ));
-        return modes.any((m) => !m.enabled); // any muted ancestor ⇒ muted
-      }
-
-      bool offstaged(Element page) {
-        final stages = tester.widgetList<Offstage>(find.ancestor(
-          of: find.byElementPredicate((e) => identical(e, page),
-              skipOffstage: false),
-          matching: find.byType(Offstage, skipOffstage: false),
-        ));
-        return stages.any((s) => s.offstage);
-      }
-
-      final homeEl =
-          tester.element(find.byType(HomePage, skipOffstage: false).first);
-      expect(offstaged(homeEl), isFalse, reason: 'Home is the active tab');
-      expect(muted(homeEl), isFalse, reason: 'Home must animate (hero)');
-
-      for (final page in const [AnimePage, KidsPage, LibraryPage]) {
-        final el = tester.element(find.byType(page, skipOffstage: false).first);
-        expect(offstaged(el), isTrue,
-            reason: '$page must be skipped by layout+paint while hidden');
-        expect(muted(el), isTrue,
-            reason: '$page tickers must be muted while hidden — the old '
-                'IndexedStack let shimmers animate forever off-screen');
+      expect(find.byType(HomePage, skipOffstage: false), findsOneWidget);
+      for (final page in const [
+        AnimePage,
+        KidsPage,
+        LibraryPage,
+        SettingsPage
+      ]) {
+        expect(find.byType(page, skipOffstage: false), findsNothing,
+            reason: '$page should mount only after its first visit');
       }
     });
 
-    testWidgets('shell rebuilds keep every page element alive', (tester) async {
+    testWidgets('visited pages stay alive, offstage and muted when hidden',
+        (tester) async {
+      _setShellTestViewport(tester);
       await tester.pumpWidget(_shellHarness());
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
       await tester.pump(const Duration(milliseconds: 80));
 
+      _activateDockTab(tester, DockTab.animeId);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      _activateDockTab(tester, 'library');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.byType(AnimePage, skipOffstage: false), findsOneWidget);
+      expect(find.byType(LibraryPage, skipOffstage: false), findsOneWidget);
       final libraryBefore =
           tester.element(find.byType(LibraryPage, skipOffstage: false).first);
       final animeBefore =
@@ -239,9 +243,37 @@ void main() {
       final animeAfter =
           tester.element(find.byType(AnimePage, skipOffstage: false).first);
       expect(identical(libraryBefore, libraryAfter), isTrue,
-          reason: 'shell rebuilds must not remount the kept-alive pages');
+          reason: 'shell rebuilds must not remount a visited page');
       expect(identical(animeBefore, animeAfter), isTrue,
-          reason: 'shell rebuilds must not remount the kept-alive pages');
+          reason: 'shell rebuilds must not remount a visited page');
+
+      bool offstaged(Element page) => tester
+          .widgetList<Offstage>(
+            find.ancestor(
+              of: find.byElementPredicate((e) => identical(e, page),
+                  skipOffstage: false),
+              matching: find.byType(Offstage, skipOffstage: false),
+            ),
+          )
+          .any((stage) => stage.offstage);
+      bool muted(Element page) => tester
+          .widgetList<TickerMode>(
+            find.ancestor(
+              of: find.byElementPredicate((e) => identical(e, page),
+                  skipOffstage: false),
+              matching: find.byType(TickerMode, skipOffstage: false),
+            ),
+          )
+          .any((mode) => !mode.enabled);
+
+      expect(offstaged(libraryAfter), isFalse,
+          reason: 'the selected Library page remains visible');
+      expect(muted(libraryAfter), isFalse,
+          reason: 'the selected Library page may animate');
+      expect(offstaged(animeAfter), isTrue,
+          reason: 'the previously visited Anime page skips paint and layout');
+      expect(muted(animeAfter), isTrue,
+          reason: 'offscreen Anime tickers stay paused');
 
       // The dock is still mounted exactly once after the rebuild.
       expect(find.byType(GlassDock), findsOneWidget);

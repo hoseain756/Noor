@@ -5,8 +5,8 @@
 /// still accepted (legacy callers) — when `loader` is provided it wins.
 library;
 
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -598,7 +598,7 @@ class _SourcesPageState extends State<SourcesPage> {
                                   ? () => Navigator.of(context).pop(stream)
                                   : null);
                         });
-            if (wide)
+            if (wide) {
               return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -615,6 +615,7 @@ class _SourcesPageState extends State<SourcesPage> {
                           sliver: resultSliver)
                     ])),
                   ]);
+            }
             return CustomScrollView(slivers: [
               SliverToBoxAdapter(
                   child: Padding(

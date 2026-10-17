@@ -8,7 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/theme/system_bars.dart';
+import 'package:nova_mobile/core/theme/system_bars.dart';
 
 void main() {
   group('noorSystemBarOverlayStyle — edge-to-edge contract', () {

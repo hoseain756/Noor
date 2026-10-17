@@ -1,5 +1,5 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -187,7 +187,7 @@ class _WatchlistCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(5),
             child: Material(
-              color: Colors.black.withValues(alpha: .68),
+              color: NovaColors.ink.withValues(alpha: .68),
               shape: const CircleBorder(),
               child: IconButton(
                 iconSize: 18,
@@ -356,7 +356,7 @@ class _HistoryRow extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.all(3),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: .55),
+                                color: NovaColors.ink.withValues(alpha: .55),
                                 borderRadius: BorderRadius.circular(7),
                               ),
                               child: Icon(

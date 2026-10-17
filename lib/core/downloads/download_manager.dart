@@ -233,8 +233,9 @@ class DownloadManager extends ChangeNotifier {
     final result = _operations.then((_) async {
       if (_disposed) throw StateError('Download manager is closed');
       await initialize();
-      if (!initialized)
+      if (!initialized) {
         throw const FileSystemException('Download storage is unavailable');
+      }
       await action();
     });
     _operations =
@@ -255,8 +256,9 @@ class DownloadManager extends ChangeNotifier {
             id: id,
             title: title,
             path: '${_root!.path}${Platform.pathSeparator}$id.$extension');
-        if (!await _managedPath(job))
+        if (!await _managedPath(job)) {
           throw const FileSystemException('Unsafe download destination');
+        }
         final key = 'nova.download.$id';
         await _writeSecret(key, jsonEncode({'url': url, 'headers': headers}));
         _jobs.insert(0, job);
@@ -277,10 +279,13 @@ class DownloadManager extends ChangeNotifier {
         if (!_jobs.contains(job) ||
             job.status == 'complete' ||
             job.status == 'downloading' ||
-            job.status == 'queued') return;
+            job.status == 'queued') {
+          return;
+        }
         await _settleActive(job);
-        if (!await _managedPath(job))
+        if (!await _managedPath(job)) {
           throw const FileSystemException('Unsafe download destination');
+        }
         job.status = 'queued';
         job.error = null;
         job.received = 0;
@@ -313,8 +318,9 @@ class DownloadManager extends ChangeNotifier {
         if (previous != 'complete') job.status = 'cancelled';
         await _settleActive(job);
         // Validate the actual parent and reject links before every disk mutation.
-        if (!await _managedPath(job))
+        if (!await _managedPath(job)) {
           throw const FileSystemException('Unsafe download destination');
+        }
         try {
           await _deleteManagedFile(job, partial: true);
           await _deleteManagedFile(job);
@@ -351,8 +357,9 @@ class DownloadManager extends ChangeNotifier {
     if (_disposed || _pumpFuture != null) return;
     _pumpFuture = _pump().whenComplete(() {
       _pumpFuture = null;
-      if (!_disposed && _jobs.any((job) => job.status == 'queued'))
+      if (!_disposed && _jobs.any((job) => job.status == 'queued')) {
         _startPump();
+      }
     });
   }
 
@@ -369,8 +376,9 @@ class DownloadManager extends ChangeNotifier {
       _notify();
       var lastPaint = DateTime.now();
       try {
-        if (!await _managedPath(job))
+        if (!await _managedPath(job)) {
           throw const FileSystemException('Unsafe download destination');
+        }
         final raw = await _readSecret('nova.download.${job.id}');
         if (raw == null) throw const FormatException('Missing download source');
         final source = jsonDecode(raw) as Map;
@@ -380,8 +388,9 @@ class DownloadManager extends ChangeNotifier {
         _validateSource(url, headers);
         if (token.isCancelled) continue;
         final partial = File('${job.path}.part');
-        if (!await _managedPath(job, partial: true))
+        if (!await _managedPath(job, partial: true)) {
           throw const FileSystemException('Unsafe partial destination');
+        }
         final response = await _dio.download(url, partial.path,
             options: Options(headers: headers),
             cancelToken: token,
@@ -396,7 +405,9 @@ class DownloadManager extends ChangeNotifier {
         });
         if (token.isCancelled ||
             job.status == 'cancelled' ||
-            !_jobs.contains(job)) continue;
+            !_jobs.contains(job)) {
+          continue;
+        }
         final contentType =
             (response.headers.value('content-type') ?? '').toLowerCase();
         if (contentType.contains('text/') ||
@@ -416,8 +427,10 @@ class DownloadManager extends ChangeNotifier {
             bytes != expected) {
           throw const FormatException('Incomplete download');
         }
-        if (!await _managedPath(job) || !await _managedPath(job, partial: true))
+        if (!await _managedPath(job) ||
+            !await _managedPath(job, partial: true)) {
           throw const FileSystemException('Unsafe download destination');
+        }
         await partial.rename(job.path);
         job.received = bytes;
         job.total = bytes;
@@ -475,7 +488,9 @@ class DownloadManager extends ChangeNotifier {
         '${root.path}${Platform.pathSeparator}${job.id}.$extension';
     if (_normalized(job.path) != _normalized(expected)) return false;
     if (_normalized(await root.resolveSymbolicLinks()) !=
-        _normalized(root.path)) return false;
+        _normalized(root.path)) {
+      return false;
+    }
     final path = partial ? '${job.path}.part' : job.path;
     final type = await FileSystemEntity.type(path, followLinks: false);
     return type == FileSystemEntityType.notFound ||
@@ -484,8 +499,9 @@ class DownloadManager extends ChangeNotifier {
 
   Future<void> _deleteManagedFile(NovaDownload job,
       {bool partial = false}) async {
-    if (!await _managedPath(job, partial: partial))
+    if (!await _managedPath(job, partial: partial)) {
       throw const FileSystemException('Unsafe download destination');
+    }
     final file = File(partial ? '${job.path}.part' : job.path);
     if (await file.exists()) await file.delete();
   }
@@ -493,7 +509,9 @@ class DownloadManager extends ChangeNotifier {
   Future<bool> _isVideoFile(File file) async {
     if (await FileSystemEntity.type(file.path, followLinks: false) !=
             FileSystemEntityType.file ||
-        await file.length() < 16) return false;
+        await file.length() < 16) {
+      return false;
+    }
     final handle = await file.open();
     try {
       final bytes = await handle.read(64);

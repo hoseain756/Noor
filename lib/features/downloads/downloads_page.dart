@@ -4,6 +4,7 @@ import '../../core/downloads/download_manager.dart';
 import '../../core/models/media_item.dart';
 import '../../l10n/nova_strings.dart';
 import '../../shared/widgets/app_state_message.dart';
+import '../../shared/widgets/noor_toast.dart';
 import '../player/video_player_page.dart';
 
 class DownloadsPage extends StatefulWidget {
@@ -25,6 +26,25 @@ class _DownloadsPageState extends State<DownloadsPage> {
       : bytes >= 1073741824
           ? '${(bytes / 1073741824).toStringAsFixed(1)} GB'
           : '${(bytes / 1048576).toStringAsFixed(1)} MB';
+  Future<void> _action(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (_) {
+      if (mounted) {
+        NoorToast.show(
+            context, NovaStrings.of(context).text('operationFailed'));
+      }
+    }
+  }
+
+  String _failure(String? code) => NovaStrings.of(context).text(switch (code) {
+        'storage' => 'downloadStorageError',
+        'interrupted' => 'downloadInterrupted',
+        'missingFile' => 'downloadMissingFile',
+        'invalidSource' => 'downloadInvalidSource',
+        _ => 'downloadNetworkError',
+      });
+
   Future<void> _remove(NovaDownload job) async {
     final s = NovaStrings.of(context);
     final yes = await showDialog<bool>(
@@ -40,7 +60,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                       onPressed: () => Navigator.pop(context, true),
                       child: Text(s.text('remove')))
                 ]));
-    if (yes == true) await _manager.remove(job);
+    if (yes == true) await _action(() => _manager.remove(job));
   }
 
   @override
@@ -55,6 +75,19 @@ class _DownloadsPageState extends State<DownloadsPage> {
               child: AnimatedBuilder(
                   animation: _manager,
                   builder: (context, _) {
+                    if (!_manager.initialized) {
+                      final error = _manager.initializationError != null;
+                      return AppStateMessage(
+                        loading: !error,
+                        icon: LucideIcons.hardDrive,
+                        message: error
+                            ? s.text('downloadStorageError')
+                            : s.text('downloads'),
+                        actionLabel: error ? s.text('retry') : null,
+                        onAction:
+                            error ? () => _action(_manager.initialize) : null,
+                      );
+                    }
                     final jobs = _manager.jobs;
                     return CustomScrollView(slivers: [
                       SliverPadding(
@@ -75,6 +108,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
                                 Text(s.text('downloadForeground'),
                                     style:
                                         Theme.of(context).textTheme.bodySmall),
+                                if (_manager.storageError != null) ...[
+                                  const SizedBox(height: 12),
+                                  Text(s.text('downloadStorageError'),
+                                      style: TextStyle(color: scheme.error)),
+                                ],
                               ]))),
                       if (jobs.isEmpty)
                         SliverFillRemaining(
@@ -98,8 +136,8 @@ class _DownloadsPageState extends State<DownloadsPage> {
                                     _ => 'downloadFailed'
                                   };
                                   return Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 24),
+                                      padding: const EdgeInsetsDirectional.only(
+                                          bottom: 24),
                                       child: Column(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
@@ -136,6 +174,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
                                                         style: Theme.of(context)
                                                             .textTheme
                                                             .bodySmall),
+                                                    if (job.status == 'failed')
+                                                      Text(_failure(job.error),
+                                                          style: TextStyle(
+                                                              color: scheme
+                                                                  .error)),
                                                     Text(
                                                         s.text(
                                                             'downloadBytes', {
@@ -180,9 +223,9 @@ class _DownloadsPageState extends State<DownloadsPage> {
                                                                 videoId: job.id,
                                                                 recordProgress: false))))
                                                   else if (job.status == 'downloading' || job.status == 'queued')
-                                                    TextButton(onPressed: () => _manager.cancel(job), child: Text(s.text('cancel')))
+                                                    TextButton(onPressed: () => _action(() => _manager.cancel(job)), child: Text(s.text('cancel')))
                                                   else
-                                                    OutlinedButton.icon(onPressed: () => _manager.retry(job), icon: const Icon(LucideIcons.rotateCw), label: Text(s.text('retry'))),
+                                                    OutlinedButton.icon(onPressed: () => _action(() => _manager.retry(job)), icon: const Icon(LucideIcons.rotateCw), label: Text(s.text('retry'))),
                                                   TextButton.icon(
                                                       onPressed: () =>
                                                           _remove(job),

@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart' show ValueListenable, mapEquals;
 import 'package:flutter/material.dart';
+import '../../../core/theme/nova_theme.dart';
 
 import '../engine/playback_engine.dart';
 
@@ -22,8 +23,8 @@ import '../engine/playback_engine.dart';
 class SubtitleStyle {
   const SubtitleStyle({
     this.fontSize = 28,
-    this.color = const Color(0xFFFFFFFF),
-    this.borderColor = const Color(0xFF000000),
+    this.color = NovaColors.white,
+    this.borderColor = NovaColors.ink,
     this.borderSize = 0,
     this.backgroundOpacity = 0.35,
     this.style = 'shadow',
@@ -114,8 +115,8 @@ class SubtitleStyle {
   /// subFontFamily).
   factory SubtitleStyle.fromMap(Map<String, Object?> map) => SubtitleStyle(
         fontSize: _int(map, 'subFontSize', 28, 14, 44),
-        color: _color(map['subFontColor'], const Color(0xFFFFFFFF)),
-        borderColor: _color(map['subBorderColor'], const Color(0xFF000000)),
+        color: _color(map['subFontColor'], NovaColors.white),
+        borderColor: _color(map['subBorderColor'], NovaColors.ink),
         borderSize: _int(map, 'subBorderSize', 0, 0, 8),
         backgroundOpacity: _double(map, 'subBackgroundOpacity', 0.35, 0.0, 1.0),
         style: _styleName(map['subStyle']),
@@ -172,14 +173,16 @@ class SubtitleStyle {
 
   /// Drop shadow for the `shadow` style (matches the settings sheet preview).
   List<Shadow> get shadows => [
-        const Shadow(
-            color: Color(0xE6000000), blurRadius: 4, offset: Offset(2, 2)),
+        Shadow(
+            color: NovaColors.ink.withValues(alpha: .90),
+            blurRadius: 4,
+            offset: Offset(2, 2)),
       ];
 
   /// Background for the `box` style; null for shadow/outline (mirrors the
   /// preview — background opacity only paints the box style).
   Color? get background => style == 'box'
-      ? Color(0xFF000000).withValues(alpha: backgroundOpacity)
+      ? NovaColors.ink.withValues(alpha: backgroundOpacity)
       : null;
 }
 

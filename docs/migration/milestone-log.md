@@ -349,3 +349,70 @@ and smoothness still need an actual stream run on the device.
 - ADB confirmed version `1.2.56` / code `60` installed and the app launched on
   `SM-A217F`. No Torrentio stream was started during this verification, so
   actual decoding, buffering and audio/video smoothness remain unconfirmed.
+
+## Milestone 15 — NOVA brand and product-wide Flutter redesign
+
+Status: implementation, ordered design documentation, full regression,
+analysis and Android Release build are verified. iOS, provider, device-visual,
+accessibility-hardware and profile-mode acceptance remain open.
+
+- Rebranded visible app surfaces, startup identity, About and native Android /
+  iOS display names to NOVA while preserving storage, package and OAuth
+  compatibility identifiers.
+- Applied the supplied brand assets and palette to complete Light and Dark
+  themes; added Poppins + IBM Plex Sans Arabic, live English/Arabic direction,
+  localized copy and shared NOVA components.
+- Reworked browsing, Home, Details, Kids, Library, Search, Downloads, Settings,
+  integrations, source selection, player panels and supporting sheets/dialogs.
+  Added pinned cinematic covers, responsive tablet navigation, Kids PIN gates,
+  conditional metadata, catalog refresh subscriptions and bounded image/cache
+  handling. Removed recurring blur from shared glass controls and fixed a
+  player stream-server shutdown race.
+- Added ordered audit, design tokens/contrast calculations, information
+  architecture, page specs, motion/accessibility rules, rationale and an
+  acceptance tracker under `docs/nova/`.
+- Localization parity check: 886 English / 886 Arabic messages, zero key or
+  placeholder mismatches. An earlier full serial Flutter run had 317 passes
+  and 8 failures from stale dock, lazy-page, subtitle-palette and Top 10 test
+  expectations. Updated those contracts, corrected the shell widget-test
+  viewport and reveal-transition timing, then reran the full serial suite:
+  **325 tests passed with no failures**. Focused browse, perf/page lifecycle,
+  subtitle style, Top 10 and shell edge-to-edge suites also pass.
+  Final `flutter analyze --no-pub` completed with `No issues found` in 205.8s.
+  Built a fresh Android arm64 Release APK (`1.2.56+60`, 95,320,261 bytes),
+  confirmed the `NOVA` application label with `aapt`, and verified the APK
+  signature (v2). SHA-256:
+  `694E850B3326E3CF8F1F0F6F27705E64951A4775692EA6C7DEBCBBBF6DAE7D13`.
+  Gradle completed through its fallback Kotlin compiler after daemon
+  connection retries. Flutter warned that the current Gradle 8.14, AGP 8.11.1
+  and Kotlin 2.2.20 versions will need upgrades for future Flutter support.
+  No Android device was attached (`adb devices -l` returned no devices).
+  iOS/Xcode, visual-device review, live provider flows,
+  accessibility hardware and profile-mode performance remain unverified.
+- Follow-up cinematic layering fix: the fixed hero had lived as the first
+  transformed sliver in the same `CustomScrollView` as the content, where
+  pinned-sliver paint order could leave it above later content. Home and
+  Details now use a fixed bottom hero layer and a top scroll view with a clear
+  hero-height spacer and an opaque, rounded theme-surface sliver. Hero copy
+  and actions fade with scroll progress and stop hit-testing as scrolling
+  begins; the layer host keeps hero controls tappable at the top while routing
+  scroll gestures to the scroll view. Added small-phone/tablet, Arabic/English,
+  Light/Dark layout coverage and hit-test/paint-order assertions. The final
+  serial Flutter suite passed: **333 tests, no failures**; targeted analysis
+  of the changed Dart files reported no issues. Device screenshots remain
+  unverified because ADB reports no attached device.
+- Episode display control: replaced the paired list/grid segments with one
+  48px icon button. Its icon tracks the current layout; pressing it switches
+  between list and grid, with a localized tooltip describing the destination.
+  Kept automatic phone/tablet defaults and saved preference behavior. Widget
+  coverage passed for Arabic/English and Light/Dark on phone/tablet; targeted
+  analysis passed. No emulator was launched.
+- Navigation bar appearance: added Classic, Compact icons, and Mini choices
+  under Settings > Appearance, with an interactive preview using the real
+  tabs. The selection persists through the existing settings store and applies
+  immediately; tablet navigation keeps its side rail for all three choices.
+  Added Arabic/English copy, responsive RTL/theme/text-scale widget coverage,
+  and updated navigation/settings specs. Targeted tests and analysis passed;
+  no emulator was launched.
+- Device screenshots, real provider authorization, accessibility hardware
+  checks and profile-mode performance traces remain pending.

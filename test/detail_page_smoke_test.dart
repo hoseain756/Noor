@@ -3,10 +3,11 @@
 // to catch layout exceptions.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import 'package:noor_mobile/core/models/media_item.dart';
-import 'package:noor_mobile/features/media/detail_hero.dart';
-import 'package:noor_mobile/features/media/episode_views.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/features/media/detail_hero.dart';
+import 'package:nova_mobile/features/media/episode_views.dart';
 
 void main() {
   final item = MediaItem(
@@ -45,6 +46,7 @@ void main() {
 
   Widget harness(double width, double height) {
     final isWide = width >= 700;
+    final contentVisibility = ValueNotifier<double>(1);
     // Fresh controller per pump — mirrors how the page creates it lazily.
     final controller = EpisodesController(
       item: item,
@@ -68,6 +70,7 @@ void main() {
                     isWide: isWide,
                     viewportHeight: height,
                     viewportWidth: width,
+                    contentVisibility: contentVisibility,
                   ),
                 ),
               ),
@@ -150,7 +153,7 @@ void main() {
       final seasonTrigger = find
           .descendant(
             of: find.byKey(const ValueKey('season-tt1')),
-            matching: find.byIcon(Icons.keyboard_arrow_down_rounded),
+            matching: find.byIcon(LucideIcons.chevronDown),
           )
           .first;
       await tester.ensureVisible(seasonTrigger);
@@ -180,7 +183,7 @@ void main() {
       final menuTrigger = find
           .descendant(
             of: actionRow,
-            matching: find.byIcon(Icons.keyboard_arrow_down_rounded),
+            matching: find.byIcon(LucideIcons.ellipsis),
           )
           .first;
       await tester.ensureVisible(menuTrigger);
@@ -188,7 +191,7 @@ void main() {
       await tester.tap(menuTrigger);
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.text('مصادر التشغيل'), findsOneWidget);
-      expect(find.text('مشاركة'), findsOneWidget);
+      expect(find.byTooltip('مشاركة'), findsOneWidget);
       expect(find.text('تتبّع الأنمي'), findsOneWidget);
       expect(tester.takeException(), isNull);
 

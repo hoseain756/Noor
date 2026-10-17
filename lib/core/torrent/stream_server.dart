@@ -53,6 +53,8 @@ class StreamServer {
   static const int _chunkSize = 512 * 1024;
 
   HttpServer? _server;
+  bool _closing = false;
+  final Set<Future<void>> _pendingRequests = {};
 
   /// Bound port, or `null` before [start] / after [close].
   int? get port => _server?.port;
@@ -70,10 +72,13 @@ class StreamServer {
       InternetAddress.loopbackIPv4,
       0,
     );
+    _closing = false;
     server.listen(
       (HttpRequest request) {
         // Each request is handled independently; errors never kill the server.
-        unawaited(_handleRequest(request));
+        final pending = _handleRequest(request);
+        _pendingRequests.add(pending);
+        unawaited(pending.whenComplete(() => _pendingRequests.remove(pending)));
       },
       onError: (Object _) {
         // A broken client socket surfaces here; the server keeps running.
@@ -86,12 +91,16 @@ class StreamServer {
   Future<void> close() async {
     final server = _server;
     _server = null;
+    _closing = true;
     if (server != null) {
       try {
         await server.close(force: true);
       } catch (_) {
         // Listener may already be dead.
       }
+    }
+    if (_pendingRequests.isNotEmpty) {
+      await Future.wait(List<Future<void>>.of(_pendingRequests));
     }
   }
 
@@ -236,7 +245,7 @@ class StreamServer {
 
       var remaining = length;
       var stallDeadline = DateTime.now().add(_stallTimeout);
-      while (remaining > 0) {
+      while (remaining > 0 && !_closing) {
         final offset = start + (length - remaining);
         final maxBytes = math.min(_chunkSize, remaining);
         var readableLength = maxBytes;
@@ -295,6 +304,7 @@ class StreamServer {
   Future<RandomAccessFile> _openWhenExists() async {
     final deadline = DateTime.now().add(_stallTimeout);
     while (true) {
+      if (_closing) throw StateError('Stream server is closing.');
       try {
         return await File(filePath).open();
       } on FileSystemException {

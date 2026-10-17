@@ -1,8 +1,8 @@
-/// Noor's glass-dock tab set: the app-agnostic dock model from `dock_tab.dart`
-/// mapped onto Noor's real top-level destinations.
+/// NOVA's glass-dock tab set: the app-agnostic dock model from `dock_tab.dart`
+/// mapped onto the app's top-level destinations.
 ///
 /// Integration decisions (Task 107-d, revised Task 111):
-///  - Noor HAS all five top-level views (Home / Anime / Kids / My Library /
+///  - NOVA HAS all five top-level views (Home / Anime / Kids / My Library /
 ///    Settings), so the four Harbor tabs keep their slots and My Library joins
 ///    the dock — it was previously unreachable from the phone bar (only the
 ///    Settings page shortcut and the tablet side panel linked to it).
@@ -22,27 +22,29 @@
 ///    and the dock's `kidsZoom` stays 1.0 (see MainShell).
 library;
 
+import 'package:nova_mobile/l10n/nova_strings.dart';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'dock_tab.dart';
 import 'glass_dock.dart';
 
-/// Noor's dock tab pool: the four Harbor tabs + My Library (labels/icons
+/// NOVA's dock tab pool: the four Harbor tabs + My Library (labels/icons
 /// match the tablet side panel).
-const List<DockTab> kNoorDockTabs = [
+final List<DockTab> kNoorDockTabs = [
   ...kDockTabs,
   DockTab(
     id: 'library',
     view: 'library',
-    labelEn: 'My Library',
-    labelAr: 'مكتبتي',
+    labelEn: NovaStrings.lookup(true, 'message776'),
+    labelAr: NovaStrings.lookup(false, 'message776'),
     iconOutline: LucideIcons.library,
     iconFilled: LucideIcons.library,
   ),
 ];
 
-/// On-screen order, left → right: Settings | Library | Kids | Anime | Home.
+/// Logical start → end: Home | Anime | Kids | Library | Settings.
 const List<String> kNoorDockOrderLtr = [
   DockTab.homeId,
   DockTab.animeId,

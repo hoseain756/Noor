@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/data/cache_reset_service.dart';
+import 'package:nova_mobile/core/data/cache_reset_service.dart';
 
 void main() {
   group('CacheResetService.isDue', () {

@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -40,175 +40,217 @@ class _Preference {
   final String suffix;
 }
 
-const _playerPreferences = <_Preference>[
+final _playerPreferences = <_Preference>[
   // Task 139: 'instantPlay' removed — watching ALWAYS lands on the sources
   // page now (user mandate); the legacy stored key stays harmless in prefs.
   _Preference(
       key: 'autoPlayNextEpisode',
-      arabic: 'تشغيل الحلقة التالية تلقائيًا',
-      english: 'Autoplay next episode',
+      arabic: NovaStrings.lookup(false, 'message728'),
+      english: NovaStrings.lookup(true, 'message728'),
       control: _Control.toggle),
   _Preference(
       key: 'resumePlayback',
-      arabic: 'استئناف من آخر موضع',
-      english: 'Resume playback',
+      arabic: NovaStrings.lookup(false, 'message729'),
+      english: NovaStrings.lookup(true, 'message729'),
       control: _Control.toggle),
   _Preference(
       key: 'resumePrompt',
-      arabic: 'السؤال قبل الاستئناف',
-      english: 'Ask before resuming',
+      arabic: NovaStrings.lookup(false, 'message730'),
+      english: NovaStrings.lookup(true, 'message730'),
       control: _Control.toggle),
   _Preference(
       key: 'playerConfirmLeave',
-      arabic: 'تأكيد الخروج من المشغّل',
-      english: 'Confirm before leaving',
+      arabic: NovaStrings.lookup(false, 'message731'),
+      english: NovaStrings.lookup(true, 'message731'),
       control: _Control.toggle),
   _Preference(
       key: 'seekBackStepSec',
-      arabic: 'مقدار الرجوع',
-      english: 'Seek backward step',
+      arabic: NovaStrings.lookup(false, 'message732'),
+      english: NovaStrings.lookup(true, 'message732'),
       control: _Control.select,
       suffix: 's',
       options: [
-        _Option('5', '٥ ثوانٍ', '5 sec'),
-        _Option('10', '١٠ ثوانٍ', '10 sec'),
-        _Option('15', '١٥ ثانية', '15 sec'),
-        _Option('30', '٣٠ ثانية', '30 sec')
+        _Option('5', NovaStrings.lookup(false, 'message733'),
+            NovaStrings.lookup(true, 'message733')),
+        _Option('10', NovaStrings.lookup(false, 'message734'),
+            NovaStrings.lookup(true, 'message734')),
+        _Option('15', NovaStrings.lookup(false, 'message735'),
+            NovaStrings.lookup(true, 'message735')),
+        _Option('30', NovaStrings.lookup(false, 'message736'),
+            NovaStrings.lookup(true, 'message736'))
       ]),
   _Preference(
       key: 'seekForwardStepSec',
-      arabic: 'مقدار التقديم',
-      english: 'Seek forward step',
+      arabic: NovaStrings.lookup(false, 'message737'),
+      english: NovaStrings.lookup(true, 'message737'),
       control: _Control.select,
       suffix: 's',
       options: [
-        _Option('5', '٥ ثوانٍ', '5 sec'),
-        _Option('10', '١٠ ثوانٍ', '10 sec'),
-        _Option('15', '١٥ ثانية', '15 sec'),
-        _Option('30', '٣٠ ثانية', '30 sec')
+        _Option('5', NovaStrings.lookup(false, 'message733'),
+            NovaStrings.lookup(true, 'message733')),
+        _Option('10', NovaStrings.lookup(false, 'message734'),
+            NovaStrings.lookup(true, 'message734')),
+        _Option('15', NovaStrings.lookup(false, 'message735'),
+            NovaStrings.lookup(true, 'message735')),
+        _Option('30', NovaStrings.lookup(false, 'message736'),
+            NovaStrings.lookup(true, 'message736'))
       ]),
   _Preference(
       key: 'defaultAudioLanguage',
-      arabic: 'لغة الصوت المفضلة',
-      english: 'Default audio language',
+      arabic: NovaStrings.lookup(false, 'message738'),
+      english: NovaStrings.lookup(true, 'message738'),
       control: _Control.select,
       options: [
-        _Option('source', 'لغة المصدر', 'Source language'),
-        _Option('ar', 'العربية', 'Arabic'),
-        _Option('en', 'الإنجليزية', 'English'),
-        _Option('ja', 'اليابانية', 'Japanese'),
-        _Option('original', 'الصوت الأصلي', 'Original audio')
+        _Option('source', NovaStrings.lookup(false, 'message739'),
+            NovaStrings.lookup(true, 'message739')),
+        _Option('ar', NovaStrings.lookup(false, 'arabicLanguage'),
+            NovaStrings.lookup(true, 'arabicLanguage')),
+        _Option('en', NovaStrings.lookup(false, 'message740'),
+            NovaStrings.lookup(true, 'message740')),
+        _Option('ja', NovaStrings.lookup(false, 'message741'),
+            NovaStrings.lookup(true, 'message741')),
+        _Option('original', NovaStrings.lookup(false, 'message742'),
+            NovaStrings.lookup(true, 'message742'))
       ]),
   _Preference(
       key: 'preferredQuality',
-      arabic: 'جودة المصدر المفضلة',
-      english: 'Preferred source quality',
+      arabic: NovaStrings.lookup(false, 'message743'),
+      english: NovaStrings.lookup(true, 'message743'),
       control: _Control.select,
       options: [
-        _Option('auto', 'تلقائي', 'Auto'),
-        _Option('2160p', '4K', '4K'),
-        _Option('1080p', '1080p', '1080p'),
-        _Option('720p', '720p', '720p'),
-        _Option('480p', '480p', '480p')
+        _Option('auto', NovaStrings.lookup(false, 'message5'),
+            NovaStrings.lookup(true, 'message5')),
+        _Option('2160p', NovaStrings.lookup(false, 'message744'),
+            NovaStrings.lookup(true, 'message744')),
+        _Option('1080p', NovaStrings.lookup(false, 'message745'),
+            NovaStrings.lookup(true, 'message745')),
+        _Option('720p', NovaStrings.lookup(false, 'message746'),
+            NovaStrings.lookup(true, 'message746')),
+        _Option('480p', NovaStrings.lookup(false, 'message747'),
+            NovaStrings.lookup(true, 'message747'))
       ]),
   _Preference(
       key: 'videoFill',
-      arabic: 'ملاءمة الفيديو',
-      english: 'Video fit',
+      arabic: NovaStrings.lookup(false, 'message83'),
+      english: NovaStrings.lookup(true, 'message83'),
       control: _Control.select,
       options: [
-        _Option('fit', 'احتواء', 'Fit'),
-        _Option('fill', 'ملء الشاشة', 'Fill'),
-        _Option('zoom', 'تكبير', 'Zoom')
+        _Option('fit', NovaStrings.lookup(false, 'message84'),
+            NovaStrings.lookup(true, 'message84')),
+        _Option('fill', NovaStrings.lookup(false, 'message748'),
+            NovaStrings.lookup(true, 'message748')),
+        _Option('zoom', NovaStrings.lookup(false, 'message749'),
+            NovaStrings.lookup(true, 'message749'))
       ]),
   _Preference(
       key: 'showQualityInfo',
-      arabic: 'إظهار معلومات الجودة',
-      english: 'Show quality information',
+      arabic: NovaStrings.lookup(false, 'message750'),
+      english: NovaStrings.lookup(true, 'message750'),
       control: _Control.toggle),
   _Preference(
       key: 'customPlaybackSpeeds',
-      arabic: 'سرعات التشغيل',
-      english: 'Playback speeds',
+      arabic: NovaStrings.lookup(false, 'message751'),
+      english: NovaStrings.lookup(true, 'message751'),
       control: _Control.multiple,
       options: [
-        _Option('0.75', '0.75×', '0.75×'),
-        _Option('1', '1×', '1×'),
-        _Option('1.25', '1.25×', '1.25×'),
-        _Option('1.5', '1.5×', '1.5×'),
-        _Option('1.75', '1.75×', '1.75×'),
-        _Option('2', '2×', '2×')
+        _Option('0.75', NovaStrings.lookup(false, 'message752'),
+            NovaStrings.lookup(true, 'message752')),
+        _Option('1', NovaStrings.lookup(false, 'message753'),
+            NovaStrings.lookup(true, 'message753')),
+        _Option('1.25', NovaStrings.lookup(false, 'message754'),
+            NovaStrings.lookup(true, 'message754')),
+        _Option('1.5', NovaStrings.lookup(false, 'message755'),
+            NovaStrings.lookup(true, 'message755')),
+        _Option('1.75', NovaStrings.lookup(false, 'message756'),
+            NovaStrings.lookup(true, 'message756')),
+        _Option('2', NovaStrings.lookup(false, 'message757'),
+            NovaStrings.lookup(true, 'message757'))
       ]),
   _Preference(
       key: 'pickerLayout',
-      arabic: 'طريقة عرض المصادر',
-      english: 'Stream picker layout',
+      arabic: NovaStrings.lookup(false, 'message758'),
+      english: NovaStrings.lookup(true, 'message758'),
       control: _Control.select,
       options: [
-        _Option('stremio', 'تفصيلي', 'Detailed'),
-        _Option('condensed', 'مختصر', 'Compact')
+        _Option('stremio', NovaStrings.lookup(false, 'message759'),
+            NovaStrings.lookup(true, 'message759')),
+        _Option('condensed', NovaStrings.lookup(false, 'message424'),
+            NovaStrings.lookup(true, 'message424'))
       ]),
   _Preference(
       key: 'streamSort',
-      arabic: 'ترتيب المصادر',
-      english: 'Stream sorting',
+      arabic: NovaStrings.lookup(false, 'message760'),
+      english: NovaStrings.lookup(true, 'message760'),
       control: _Control.select,
       options: [
-        _Option('addon', 'حسب الإضافة', 'By add-on'),
-        _Option('score', 'حسب الجودة', 'By quality')
+        _Option('addon', NovaStrings.lookup(false, 'message761'),
+            NovaStrings.lookup(true, 'message761')),
+        _Option('score', NovaStrings.lookup(false, 'message762'),
+            NovaStrings.lookup(true, 'message762'))
       ]),
   _Preference(
       key: 'playableOnly',
-      arabic: 'إخفاء المصادر غير المدعومة',
-      english: 'Hide unsupported streams',
+      arabic: NovaStrings.lookup(false, 'message763'),
+      english: NovaStrings.lookup(true, 'message763'),
       control: _Control.toggle),
   _Preference(
       key: 'preferH264',
-      arabic: 'تفضيل H.264',
-      english: 'Prefer H.264',
+      arabic: NovaStrings.lookup(false, 'message764'),
+      english: NovaStrings.lookup(true, 'message764'),
       control: _Control.toggle),
   _Preference(
       key: 'p2pEnabled',
-      arabic: 'مصادر التورنت عبر الخادم',
-      english: 'Server torrent engine',
+      arabic: NovaStrings.lookup(false, 'message765'),
+      english: NovaStrings.lookup(true, 'message765'),
       control: _Control.toggle),
 ];
 
-const _subtitlePreferences = <_Preference>[
+final _subtitlePreferences = <_Preference>[
   _Preference(
       key: 'preferredSubLangs',
-      arabic: 'لغات الترجمة المفضلة',
-      english: 'Preferred subtitle languages',
+      arabic: NovaStrings.lookup(false, 'message766'),
+      english: NovaStrings.lookup(true, 'message766'),
       control: _Control.multiple,
       options: [
-        _Option('Arabic', 'العربية', 'Arabic'),
-        _Option('English', 'الإنجليزية', 'English'),
-        _Option('Japanese', 'اليابانية', 'Japanese'),
-        _Option('French', 'الفرنسية', 'French'),
-        _Option('Spanish', 'الإسبانية', 'Spanish')
+        _Option('Arabic', NovaStrings.lookup(false, 'arabicLanguage'),
+            NovaStrings.lookup(true, 'arabicLanguage')),
+        _Option('English', NovaStrings.lookup(false, 'message740'),
+            NovaStrings.lookup(true, 'message740')),
+        _Option('Japanese', NovaStrings.lookup(false, 'message741'),
+            NovaStrings.lookup(true, 'message741')),
+        _Option('French', NovaStrings.lookup(false, 'message767'),
+            NovaStrings.lookup(true, 'message767')),
+        _Option('Spanish', NovaStrings.lookup(false, 'message768'),
+            NovaStrings.lookup(true, 'message768'))
       ]),
   _Preference(
       key: 'subtitleTranslationLanguage',
-      arabic: 'لغة الترجمة المفضلة للمسار',
-      english: 'Preferred subtitle track language',
+      arabic: NovaStrings.lookup(false, 'message769'),
+      english: NovaStrings.lookup(true, 'message769'),
       control: _Control.select,
       options: [
-        _Option('off', 'حسب اللغات المفضلة', 'Use preferred languages'),
-        _Option('ar', 'العربية', 'Arabic'),
-        _Option('en', 'الإنجليزية', 'English'),
-        _Option('ja', 'اليابانية', 'Japanese'),
-        _Option('fr', 'الفرنسية', 'French'),
-        _Option('es', 'الإسبانية', 'Spanish')
+        _Option('off', NovaStrings.lookup(false, 'message770'),
+            NovaStrings.lookup(true, 'message770')),
+        _Option('ar', NovaStrings.lookup(false, 'arabicLanguage'),
+            NovaStrings.lookup(true, 'arabicLanguage')),
+        _Option('en', NovaStrings.lookup(false, 'message740'),
+            NovaStrings.lookup(true, 'message740')),
+        _Option('ja', NovaStrings.lookup(false, 'message741'),
+            NovaStrings.lookup(true, 'message741')),
+        _Option('fr', NovaStrings.lookup(false, 'message767'),
+            NovaStrings.lookup(true, 'message767')),
+        _Option('es', NovaStrings.lookup(false, 'message768'),
+            NovaStrings.lookup(true, 'message768'))
       ]),
   _Preference(
       key: 'subtitlesOffByDefault',
-      arabic: 'إيقاف الترجمة تلقائيًا',
-      english: 'Subtitles off by default',
+      arabic: NovaStrings.lookup(false, 'message771'),
+      english: NovaStrings.lookup(true, 'message771'),
       control: _Control.toggle),
   _Preference(
       key: 'subFontSize',
-      arabic: 'حجم الترجمة',
-      english: 'Subtitle size',
+      arabic: NovaStrings.lookup(false, 'message53'),
+      english: NovaStrings.lookup(true, 'message53'),
       control: _Control.slider,
       min: 14,
       max: 44,
@@ -216,28 +258,31 @@ const _subtitlePreferences = <_Preference>[
       suffix: ' px'),
   _Preference(
       key: 'subFontColor',
-      arabic: 'لون النص',
-      english: 'Text color',
+      arabic: NovaStrings.lookup(false, 'message52'),
+      english: NovaStrings.lookup(true, 'message52'),
       control: _Control.color),
   _Preference(
       key: 'subStyle',
-      arabic: 'نمط الترجمة',
-      english: 'Subtitle style',
+      arabic: NovaStrings.lookup(false, 'message64'),
+      english: NovaStrings.lookup(true, 'message64'),
       control: _Control.select,
       options: [
-        _Option('shadow', 'ظل', 'Shadow'),
-        _Option('outline', 'حد خارجي', 'Outline'),
-        _Option('box', 'خلفية', 'Background')
+        _Option('shadow', NovaStrings.lookup(false, 'message65'),
+            NovaStrings.lookup(true, 'message65')),
+        _Option('outline', NovaStrings.lookup(false, 'message66'),
+            NovaStrings.lookup(true, 'message66')),
+        _Option('box', NovaStrings.lookup(false, 'message67'),
+            NovaStrings.lookup(true, 'message67'))
       ]),
   _Preference(
       key: 'subBorderColor',
-      arabic: 'لون الحد',
-      english: 'Outline color',
+      arabic: NovaStrings.lookup(false, 'message55'),
+      english: NovaStrings.lookup(true, 'message55'),
       control: _Control.color),
   _Preference(
       key: 'subBorderSize',
-      arabic: 'سماكة الحد',
-      english: 'Outline size',
+      arabic: NovaStrings.lookup(false, 'message772'),
+      english: NovaStrings.lookup(true, 'message772'),
       control: _Control.slider,
       min: 0,
       max: 8,
@@ -245,16 +290,16 @@ const _subtitlePreferences = <_Preference>[
       suffix: ' px'),
   _Preference(
       key: 'subBackgroundOpacity',
-      arabic: 'شفافية الخلفية',
-      english: 'Background opacity',
+      arabic: NovaStrings.lookup(false, 'message57'),
+      english: NovaStrings.lookup(true, 'message57'),
       control: _Control.slider,
       min: 0,
       max: 1,
       step: .05),
   _Preference(
       key: 'subtitleOffsetMs',
-      arabic: 'تقديم أو تأخير الترجمة',
-      english: 'Subtitle offset',
+      arabic: NovaStrings.lookup(false, 'message773'),
+      english: NovaStrings.lookup(true, 'message773'),
       control: _Control.slider,
       min: -5000,
       max: 5000,

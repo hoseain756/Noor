@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/features/player/gesture_math.dart';
+import 'package:nova_mobile/features/player/gesture_math.dart';
 
 void main() {
   group('gestureScaledValue (volume / brightness mapping)', () {

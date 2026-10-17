@@ -1,4 +1,3 @@
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -64,8 +63,9 @@ class NovaNetworkImage extends StatelessWidget {
         loadingBuilder: loadingBuilder,
         frameBuilder: frameBuilder ??
             (context, child, frame, synchronous) {
-              if (synchronous || MediaQuery.disableAnimationsOf(context))
+              if (synchronous || MediaQuery.disableAnimationsOf(context)) {
                 return frame == null ? const ShimmerBox() : child;
+              }
               return AnimatedSwitcher(
                   duration: const Duration(milliseconds: 180),
                   child: frame == null

@@ -1,4 +1,4 @@
-name: noor_mobile
+name: nova_mobile
 description: "NOVA, a bilingual cinematic media experience for phones and tablets."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -62,6 +62,7 @@ dependencies:
   lucide_icons_flutter: ^4.0.0
   flutter_svg: ^2.3.0
   cached_network_image: ^4.0.4
+  flutter_cache_manager: ^3.4.5
 
 dependency_overrides:
   # Sandbox/user builds have no NDK: pin the last pre-jnigen path_provider_android

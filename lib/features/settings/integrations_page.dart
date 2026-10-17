@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -265,7 +265,9 @@ class _TmdbKeyCardState extends State<_TmdbKeyCard> {
         title: app.tr('message284'),
         message: app.tr('message285'),
         confirm: app.tr('remove'),
-        cancel: app.tr('cancel'))) return;
+        cancel: app.tr('cancel'))) {
+      return;
+    }
     await app.api.clearTmdbUserKey();
     if (mounted) setState(() {});
     if (!mounted) return;
@@ -687,7 +689,9 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
         title: app.tr('message306'),
         message: app.tr('message307', {'p0': widget.title}),
         confirm: app.tr('message308'),
-        cancel: app.tr('cancel'))) return;
+        cancel: app.tr('cancel'))) {
+      return;
+    }
     await app.unlinkService(widget.service);
     if (mounted) {
       NoorToast.show(
@@ -1091,13 +1095,11 @@ class _LinkedServiceCardState extends State<_LinkedServiceCard> {
                 onPressed: _start,
                 icon: Icon(LucideIcons.refreshCw),
                 label: Text(
-                  english
-                      ? (widget.service == 'trakt'
-                          ? 'Restart the link'
-                          : 'Generate a new code')
-                      : (widget.service == 'trakt'
-                          ? 'إعادة بدء الربط'
-                          : 'إنشاء رمز جديد'),
+                  NovaStrings.lookup(
+                      english,
+                      widget.service == 'trakt'
+                          ? 'serviceRestartLink'
+                          : 'serviceGenerateCode'),
                 ),
               ),
           ],
@@ -1200,7 +1202,9 @@ class _DebridCardState extends State<_DebridCard> {
         title: app.tr('message337'),
         message: app.tr('message338'),
         confirm: app.tr('message308'),
-        cancel: app.tr('cancel'))) return;
+        cancel: app.tr('cancel'))) {
+      return;
+    }
     await app.disconnectDebrid();
     if (mounted) {
       NoorToast.show(
@@ -1262,7 +1266,7 @@ class _DebridCardState extends State<_DebridCard> {
             ),
             if (user?['premium'] != null)
               Padding(
-                padding: const EdgeInsets.only(top: 3),
+                padding: const EdgeInsetsDirectional.only(top: 3),
                 child: Text(
                   '${NovaStrings.lookup(english, 'message341')}: ${user!['premium']}',
                   style: Theme.of(context).textTheme.bodySmall,

@@ -1,5 +1,5 @@
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 

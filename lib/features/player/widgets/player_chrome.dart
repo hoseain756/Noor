@@ -1,12 +1,11 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/horse_theme.dart';
-import '../../../core/theme/nova_theme.dart';
 
 /// Visual language of the cinematic player chrome (reference design):
-/// white controls over the video, a teal→blue gradient timeline, a large
+/// white controls over the video, a NOVA-red gradient timeline, a large
 /// outlined central play control and slim translucent scrims.
 ///
 /// Task 124/125 layout mandate:
@@ -25,7 +24,7 @@ class PlayerPalette {
   static const Color thumb = NovaColors.redSoft;
 
   static const List<Shadow> iconShadow = [
-    Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1)),
+    Shadow(color: NovaColors.scrim, blurRadius: 6, offset: Offset(0, 1)),
   ];
 
   static const LinearGradient played = LinearGradient(
@@ -74,16 +73,16 @@ class PlayerTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     // Directional mirror (spec §0): RTL → title right / exit left;
     // LTR → title left / exit right. START = title, END = exit.
-    return Positioned(
+    return PositionedDirectional(
       top: 0,
-      left: 0,
-      right: 0,
+      start: 0,
+      end: 0,
       child: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0x99000000), Colors.transparent],
+            colors: [NovaColors.scrim, Colors.transparent],
           ),
         ),
         child: SafeArea(
@@ -102,7 +101,7 @@ class PlayerTopBar extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: NovaColors.white,
                           fontSize: wide ? 16.5 : 14,
                           fontWeight: FontWeight.w600,
                           shadows: PlayerPalette.iconShadow,
@@ -110,7 +109,7 @@ class PlayerTopBar extends StatelessWidget {
                       ),
                       if (episodeTag.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(top: 3),
+                          padding: const EdgeInsetsDirectional.only(top: 3),
                           child: Directionality(
                             // Mixed-script mandate: the tag is always LTR.
                             textDirection: TextDirection.ltr,
@@ -120,14 +119,17 @@ class PlayerTopBar extends StatelessWidget {
                                 vertical: 1.5,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: .35),
+                                color: NovaColors.ink.withValues(alpha: .35),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Colors.white24),
+                                border: Border.all(
+                                    color: NovaColors.white
+                                        .withValues(alpha: .24)),
                               ),
                               child: Text(
                                 episodeTag,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: .92),
+                                  color:
+                                      NovaColors.white.withValues(alpha: .92),
                                   fontSize: wide ? 12 : 11,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: .8,
@@ -200,7 +202,7 @@ class PlayerRailButton extends StatelessWidget {
             height: 48,
             child: Icon(
               icon,
-              color: active ? PlayerPalette.thumb : Colors.white,
+              color: active ? PlayerPalette.thumb : NovaColors.white,
               size: iconSize,
               shadows: PlayerPalette.iconShadow,
             ),
@@ -260,15 +262,15 @@ class PlayerCenterTransport extends StatelessWidget {
                     width: big,
                     height: big,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .14),
+                      color: NovaColors.white.withValues(alpha: .14),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: Colors.white,
+                        color: NovaColors.white,
                         width: 2.4,
                       ),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(
-                          color: Colors.black38,
+                          color: NovaColors.ink.withValues(alpha: .38),
                           blurRadius: 16,
                           offset: Offset(0, 4),
                         ),
@@ -276,7 +278,7 @@ class PlayerCenterTransport extends StatelessWidget {
                     ),
                     child: Icon(
                       isPlaying ? LucideIcons.pause : LucideIcons.play,
-                      color: Colors.white,
+                      color: NovaColors.white,
                       size: big * .5,
                       shadows: PlayerPalette.iconShadow,
                     ),
@@ -322,14 +324,15 @@ class PlayerSpeedPill extends StatelessWidget {
             height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: .30),
+              color: NovaColors.ink.withValues(alpha: .30),
               borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: Colors.white.withValues(alpha: .85)),
+              border:
+                  Border.all(color: NovaColors.white.withValues(alpha: .85)),
             ),
             child: Text(
               label,
               style: const TextStyle(
-                color: Colors.white,
+                color: NovaColors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 letterSpacing: .4,
@@ -444,10 +447,18 @@ class _GradientTimelineState extends State<GradientTimeline> {
         }
 
         return Semantics(
-          label: Localizations.localeOf(context).languageCode == 'ar'
-              ? 'موضع التشغيل'
-              : 'Playback position',
+          label: NovaStrings.lookup(
+              Localizations.localeOf(context).languageCode != 'ar',
+              'playbackPosition'),
           value: formatPlayerTime(Duration(milliseconds: widget.positionMs)),
+          increasedValue: duration > 0
+              ? formatPlayerTime(Duration(
+                  milliseconds: (widget.positionMs + 10000).clamp(0, duration)))
+              : null,
+          decreasedValue: duration > 0
+              ? formatPlayerTime(Duration(
+                  milliseconds: (widget.positionMs - 10000).clamp(0, duration)))
+              : null,
           onIncrease: duration > 0
               ? () => widget.onScrubEnd(
                   (widget.positionMs + 10000).clamp(0, duration) / 1000)
@@ -500,7 +511,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                   Container(
                     height: thickness,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .22),
+                      color: NovaColors.white.withValues(alpha: .22),
                       borderRadius: BorderRadius.circular(999),
                     ),
                   ),
@@ -510,7 +521,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                     child: Container(
                       height: thickness,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: .38),
+                        color: NovaColors.white.withValues(alpha: .38),
                         borderRadius: BorderRadius.circular(999),
                       ),
                     ),
@@ -539,9 +550,9 @@ class _GradientTimelineState extends State<GradientTimeline> {
                       decoration: BoxDecoration(
                         color: PlayerPalette.thumb,
                         shape: BoxShape.circle,
-                        boxShadow: const [
+                        boxShadow: [
                           BoxShadow(
-                            color: Colors.black45,
+                            color: NovaColors.ink.withValues(alpha: .45),
                             blurRadius: 5,
                             offset: Offset(0, 1),
                           ),
@@ -561,7 +572,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                           vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: .78),
+                          color: NovaColors.ink.withValues(alpha: .78),
                           borderRadius: BorderRadius.circular(9),
                         ),
                         child: Text(
@@ -571,7 +582,7 @@ class _GradientTimelineState extends State<GradientTimeline> {
                           ),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: NovaColors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             fontFeatures: [FontFeature.tabularFigures()],
@@ -667,19 +678,19 @@ class PlayerBottomCluster extends StatelessWidget {
     final controlSize = 48.0 * scale;
     final margin = wide ? 28.0 : 14.0;
     final thickness = wide ? 6.0 : 4.0;
-    return Positioned(
-      left: 0,
-      right: 0,
+    return PositionedDirectional(
+      start: 0,
+      end: 0,
       bottom: 0,
       child: DecoratedBox(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
             colors: [
-              Color(0xB3000000),
-              Color(0x66000000),
-              Colors.transparent,
+              NovaColors.ink.withValues(alpha: .70),
+              NovaColors.ink.withValues(alpha: .40),
+              NovaColors.ink.withValues(alpha: 0),
             ],
           ),
         ),
@@ -766,7 +777,8 @@ class PlayerBottomCluster extends StatelessWidget {
                 : volume < .5
                     ? LucideIcons.volume1
                     : LucideIcons.volume2,
-            semanticLabel: muted ? 'Unmute' : 'Mute',
+            semanticLabel:
+                NovaStrings.lookup(english, muted ? 'unmute' : 'mute'),
             label: wide ? (NovaStrings.lookup(english, 'message36')) : null,
             scale: scale,
             onTap: onMuteToggle,
@@ -862,8 +874,8 @@ class _VolumeSlider extends StatelessWidget {
             value: value.clamp(0.0, 1.0),
             onChanged: onChanged,
             onChangeEnd: onChangeEnd,
-            activeColor: Colors.white,
-            inactiveColor: Colors.white24,
+            activeColor: NovaColors.white,
+            inactiveColor: NovaColors.white.withValues(alpha: .24),
           ),
         ),
       );
@@ -887,7 +899,11 @@ class _SkipButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
         button: true,
-        label: '${forward ? 'Forward' : 'Rewind'} $seconds seconds',
+        label: NovaStrings.lookup(
+          Localizations.localeOf(context).languageCode != 'ar',
+          forward ? 'forwardSeconds' : 'rewindSeconds',
+          {'p0': seconds},
+        ),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
@@ -899,20 +915,21 @@ class _SkipButton extends StatelessWidget {
               children: [
                 Icon(
                   forward ? LucideIcons.rotateCw : LucideIcons.rotateCcw,
-                  color: Colors.white,
+                  color: NovaColors.white,
                   size: size * .62,
                   shadows: PlayerPalette.iconShadow,
                 ),
                 Padding(
-                  padding: EdgeInsets.only(
-                    top: size * .08,
-                    left: forward ? size * .16 : 0,
-                    right: forward ? 0 : size * .16,
+                  padding: EdgeInsetsDirectional.fromSTEB(
+                    forward ? size * .16 : 0,
+                    size * .08,
+                    forward ? 0 : size * .16,
+                    0,
                   ),
                   child: Text(
                     '$seconds',
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: NovaColors.white,
                       fontSize: 9.5,
                       fontWeight: FontWeight.w800,
                       fontFeatures: [FontFeature.tabularFigures()],
@@ -943,7 +960,7 @@ class _TimeLabel extends StatelessWidget {
             text,
             textDirection: TextDirection.ltr,
             style: TextStyle(
-              color: Colors.white70,
+              color: NovaColors.white.withValues(alpha: .70),
               fontSize: wide ? 13.5 : 12,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
@@ -976,7 +993,8 @@ class _RaillessControl extends StatelessWidget {
     final enabled = onTap != null;
     final iconWidget = Icon(
       icon,
-      color: enabled ? Colors.white : Colors.white30,
+      color:
+          enabled ? NovaColors.white : NovaColors.white.withValues(alpha: .30),
       size: iconSize * scale,
       shadows: enabled ? PlayerPalette.iconShadow : null,
     );
@@ -1008,7 +1026,9 @@ class _RaillessControl extends StatelessWidget {
                       Text(
                         label!,
                         style: TextStyle(
-                          color: enabled ? Colors.white70 : Colors.white24,
+                          color: enabled
+                              ? NovaColors.white.withValues(alpha: .70)
+                              : NovaColors.white.withValues(alpha: .24),
                           fontSize: 10.5,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1095,9 +1115,9 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  Colors.white.withValues(alpha: .20),
-                  Colors.white.withValues(alpha: .06),
-                  Colors.white.withValues(alpha: 0),
+                  NovaColors.white.withValues(alpha: .20),
+                  NovaColors.white.withValues(alpha: .06),
+                  NovaColors.white.withValues(alpha: 0),
                 ],
               ),
             ),
@@ -1107,8 +1127,9 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
               height: 118,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: .13),
-                border: Border.all(color: Colors.white24),
+                color: NovaColors.white.withValues(alpha: .13),
+                border:
+                    Border.all(color: NovaColors.white.withValues(alpha: .24)),
               ),
               alignment: Alignment.center,
               child: Column(
@@ -1119,7 +1140,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                             (Directionality.of(context) == TextDirection.ltr)
                         ? LucideIcons.chevronsRight
                         : LucideIcons.chevronsLeft,
-                    color: Colors.white,
+                    color: NovaColors.white,
                     size: 32,
                     shadows: PlayerPalette.iconShadow,
                   ),
@@ -1130,7 +1151,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                       'p1': widget.seconds
                     }),
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: NovaColors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                       fontFeatures: [FontFeature.tabularFigures()],
@@ -1161,7 +1182,7 @@ class SeekHud extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .72),
+          color: NovaColors.ink.withValues(alpha: .72),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Directionality(
@@ -1183,7 +1204,7 @@ class SeekHud extends StatelessWidget {
                   Text(
                     '${deltaSeconds >= 0 ? '+' : ''}$deltaSeconds s',
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: NovaColors.white,
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       fontFeatures: [FontFeature.tabularFigures()],
@@ -1194,8 +1215,8 @@ class SeekHud extends StatelessWidget {
               const SizedBox(height: 3),
               Text(
                 targetText,
-                style: const TextStyle(
-                  color: Colors.white70,
+                style: TextStyle(
+                  color: NovaColors.white.withValues(alpha: .70),
                   fontSize: 12,
                   fontFeatures: [FontFeature.tabularFigures()],
                 ),
@@ -1229,9 +1250,9 @@ class VerticalHud extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .66),
+          color: NovaColors.ink.withValues(alpha: .66),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: NovaColors.white.withValues(alpha: .12)),
         ),
         child: Directionality(
           textDirection: TextDirection.ltr,
@@ -1241,7 +1262,7 @@ class VerticalHud extends StatelessWidget {
               Text(
                 '${(value * 100).round()}%',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: NovaColors.white,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   fontFeatures: [FontFeature.tabularFigures()],
@@ -1256,7 +1277,7 @@ class VerticalHud extends StatelessWidget {
                   child: Stack(
                     alignment: AlignmentDirectional.bottomStart,
                     children: [
-                      Container(color: Colors.white24),
+                      Container(color: NovaColors.white.withValues(alpha: .24)),
                       FractionallySizedBox(
                         heightFactor: value.clamp(0.0, 1.0),
                         child: Container(color: PlayerPalette.thumb),
@@ -1266,7 +1287,7 @@ class VerticalHud extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Icon(icon, color: Colors.white, size: 20),
+              Icon(icon, color: NovaColors.white, size: 20),
             ],
           ),
         ),
@@ -1275,7 +1296,7 @@ class VerticalHud extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .72),
+        color: NovaColors.ink.withValues(alpha: .72),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Directionality(
@@ -1283,7 +1304,7 @@ class VerticalHud extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 22),
+            Icon(icon, color: NovaColors.white, size: 22),
             const SizedBox(height: 8),
             SizedBox(
               width: 110,
@@ -1292,7 +1313,7 @@ class VerticalHud extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: value.clamp(0.0, 1.0),
                   minHeight: 4,
-                  backgroundColor: Colors.white24,
+                  backgroundColor: NovaColors.white.withValues(alpha: .24),
                   valueColor: const AlwaysStoppedAnimation(PlayerPalette.thumb),
                 ),
               ),
@@ -1300,8 +1321,8 @@ class VerticalHud extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               '$label · ${(value * 100).round()}%',
-              style: const TextStyle(
-                color: Colors.white70,
+              style: TextStyle(
+                color: NovaColors.white.withValues(alpha: .70),
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 fontFeatures: [FontFeature.tabularFigures()],
@@ -1322,13 +1343,13 @@ class ZoomHud extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .72),
+          color: NovaColors.ink.withValues(alpha: .72),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
           '${scale.toStringAsFixed(1)}×',
           style: const TextStyle(
-            color: Colors.white,
+            color: NovaColors.white,
             fontSize: 14,
             fontWeight: FontWeight.w700,
             fontFeatures: [FontFeature.tabularFigures()],
@@ -1345,18 +1366,18 @@ class LockHintHud extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .72),
+          color: NovaColors.ink.withValues(alpha: .72),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(LucideIcons.lock, color: Colors.white, size: 15),
+            const Icon(LucideIcons.lock, color: NovaColors.white, size: 15),
             const SizedBox(width: 7),
             Text(
               message,
               style: const TextStyle(
-                color: Colors.white,
+                color: NovaColors.white,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -1385,10 +1406,10 @@ class PlayerCardShell extends StatelessWidget {
         decoration: BoxDecoration(
           color: HorseTheme.raised.withValues(alpha: .97),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: .07)),
-          boxShadow: const [
+          border: Border.all(color: NovaColors.white.withValues(alpha: .07)),
+          boxShadow: [
             BoxShadow(
-              color: Colors.black45,
+              color: NovaColors.ink.withValues(alpha: .45),
               blurRadius: 24,
               offset: Offset(0, 8),
             ),
@@ -1417,8 +1438,8 @@ class PlayerCardHeader extends StatelessWidget {
           const SizedBox(width: 7),
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.white54,
+            style: TextStyle(
+              color: NovaColors.white.withValues(alpha: .54),
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 1,

@@ -100,10 +100,11 @@ class _LaunchGateState extends State<_LaunchGate> {
   Widget build(BuildContext context) {
     final ready = context.select<AppState, bool>((app) => app.initialized);
     final s = NovaStrings.of(context);
-    if (ready)
+    if (ready) {
       return _onboarding
           ? OnboardingPage(onComplete: _complete)
           : const MainShell();
+    }
     return Scaffold(
         body: SafeArea(
             child: Center(

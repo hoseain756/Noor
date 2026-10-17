@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/version.dart';
+import 'package:nova_mobile/core/version.dart';
 
 /// Guards the user-visible version constants against drift from pubspec.yaml.
 ///
@@ -10,7 +10,7 @@ import 'package:noor_mobile/core/version.dart';
 /// so this test is the only thing keeping the two in sync: bumping
 /// pubspec.yaml without lib/core/version.dart (or vice versa) fails here.
 void main() {
-  test('noorVersion/noorBuild stay pinned to pubspec.yaml', () {
+  test('appVersion/appBuild stay pinned to pubspec.yaml', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final match = RegExp(
       r'^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$',

@@ -1,8 +1,9 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -23,11 +24,13 @@ class FeaturedHero extends StatefulWidget {
     required this.items,
     required this.autoplayActive,
     required this.onTap,
+    required this.contentVisibility,
   });
 
   final List<MediaItem> items;
   final bool autoplayActive;
   final ValueChanged<MediaItem> onTap;
+  final ValueListenable<double> contentVisibility;
 
   @override
   State<FeaturedHero> createState() => _FeaturedCardState();
@@ -199,13 +202,14 @@ class _FeaturedCardState extends State<FeaturedHero>
     final url = wide
         ? (art?.landscape ?? next.background ?? next.poster)
         : (art?.portrait ?? next.poster ?? next.background);
-    if (url != null)
+    if (url != null) {
       unawaited(precacheImage(
           ResizeImage.resizeIfNeeded(
               imageCacheWidth(context, MediaQuery.sizeOf(context).width),
               null,
               NetworkImage(url)),
           context));
+    }
   }
 
   void _handleSwipeEnd() {
@@ -251,14 +255,26 @@ class _FeaturedCardState extends State<FeaturedHero>
               ),
               const Positioned.fill(child: _FeaturedScrim()),
               Positioned.fill(
-                child: _FeaturedOverlay(
-                  item: activeItem,
-                  artwork: _artwork[activeItem.id],
-                  itemsCount: widget.items.length,
-                  activeIndex: _activeIndex,
-                  reduceMotion: _reducedMotion,
-                  onSelectPage: _goToSlide,
-                  onTap: () => widget.onTap(activeItem),
+                child: ValueListenableBuilder<double>(
+                  valueListenable: widget.contentVisibility,
+                  child: _FeaturedOverlay(
+                    item: activeItem,
+                    artwork: _artwork[activeItem.id],
+                    itemsCount: widget.items.length,
+                    activeIndex: _activeIndex,
+                    reduceMotion: _reducedMotion,
+                    onSelectPage: _goToSlide,
+                    onTap: () => widget.onTap(activeItem),
+                  ),
+                  builder: (context, visibility, child) => IgnorePointer(
+                    key: const ValueKey('home-hero-content-ignore-pointer'),
+                    ignoring: visibility <= .05,
+                    child: Opacity(
+                      key: const ValueKey('home-hero-content-opacity'),
+                      opacity: visibility,
+                      child: child,
+                    ),
+                  ),
                 ),
               ),
             ],

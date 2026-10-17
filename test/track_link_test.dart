@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/track/track_link.dart';
+import 'package:nova_mobile/core/track/track_link.dart';
 
 void main() {
   group('TrackLink', () {

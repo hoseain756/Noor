@@ -35,6 +35,8 @@
 ///    passive `window.scroll` listener.
 library;
 
+import 'package:nova_mobile/core/theme/nova_theme.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
@@ -45,7 +47,7 @@ import 'package:flutter/services.dart';
 import 'dock_tab.dart';
 
 // ---------------------------------------------------------------------------
-// Tokens (web `--nav-*` / `--glass-*`, dark appearance — Noor is dark-only).
+// Navigation tokens map to NOVA's shared palette in Light and Dark themes.
 // ---------------------------------------------------------------------------
 
 /// Web `--glass-ease: cubic-bezier(0.2, 0, 0, 1)` — used for the pill slide,
@@ -77,6 +79,21 @@ const int _kMaxScrubSamples = 6;
 
 /// Web `--nav-radius: 9999px` (stadium capsule).
 const double _kStadiumRadius = 9999;
+
+/// User-selectable presentations for the horizontal bottom glass dock.
+/// Tablets retain the persistent side rail; these styles apply wherever the
+/// dock is mounted.
+enum NavigationBarStyle {
+  classic,
+  compact,
+  mini;
+
+  static NavigationBarStyle fromSetting(Object? value) => switch (value) {
+        'compact' => NavigationBarStyle.compact,
+        'mini' => NavigationBarStyle.mini,
+        _ => NavigationBarStyle.classic,
+      };
+}
 
 // Glass recipe (Task 120 user mandate): the OLD detail back-pill surface —
 // blur backdrop over a black/55 fill, 1px white/15 ring, soft black shadow —
@@ -131,6 +148,7 @@ class GlassDockSizing {
 GlassDockSizing glassDockSizing({
   required Size viewport,
   EdgeInsets safePadding = EdgeInsets.zero,
+  NavigationBarStyle style = NavigationBarStyle.classic,
   double zoom = 1.0,
   double kidsZoom = 1.0,
 }) {
@@ -189,11 +207,25 @@ GlassDockSizing glassDockSizing({
     bottom = 32;
     pad = 8;
   }
+  final mini = style == NavigationBarStyle.mini;
+  if (mini) {
+    // Keep a 24dp horizontal inset on phones and preserve 48dp tab targets.
+    barH = 56;
+    tabH = 48;
+    icon = math.min(icon, 20);
+    width = math.min(340, math.max(0.0, w - 48));
+    bottom = math.min(bottom, 16);
+    pad = 4;
+  }
   final scale = zoom * kidsZoom;
-  barH = math.max(barH, 76) * scale;
-  tabH = math.max(tabH, 60) * scale;
+  // A compact landscape class still preserves a 44dp target per tab while
+  // reclaiming vertical room. Portrait/tablet/TV retain the roomier base.
+  final compactLandscape = viewport.height <= 480;
+  barH = (mini ? 56 : math.max(barH, compactLandscape ? 60 : 76)) * scale;
+  tabH = (mini ? 48 : math.max(tabH, compactLandscape ? 44 : 60)) * scale;
   icon *= scale;
-  width = math.max(width, math.min(w - 24, 390)) * scale;
+  if (!mini) width = math.max(width, math.min(w - 24, 390));
+  width *= scale;
   // Hard width guard (web `--nav-max` + safe-area caps).
   final viewportCap =
       math.max(0.0, math.min(w - 16, w - safePadding.horizontal));
@@ -232,6 +264,8 @@ class GlassDock extends StatefulWidget {
     required this.onTabSelected,
     this.languageCode,
     this.hidden = false,
+    this.previewMode = false,
+    this.style = NavigationBarStyle.classic,
     this.reduceMotion = false,
     this.reduceTransparency = false,
     this.zoom = 1.0,
@@ -259,6 +293,12 @@ class GlassDock extends StatefulWidget {
   /// Effective hidden state (slide below screen + fade + ignore pointers +
   /// exclude semantics). Drive it from [GlassDockScrollHide] and/or routes.
   final bool hidden;
+
+  /// Prevents activation and hides the sample from assistive technology when
+  /// the dock is displayed as a non-interactive settings preview.
+  final bool previewMode;
+
+  final NavigationBarStyle style;
   final bool reduceMotion;
   final bool reduceTransparency;
 
@@ -593,7 +633,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     final arabic = widget.languageCode != null
         ? dockIsArabicLanguage(widget.languageCode)
         : rtl;
-    final navLabel = arabic ? 'التنقل الرئيسي' : 'Primary navigation';
+    final navLabel = NovaStrings.lookup(!arabic, 'primaryNavigation');
 
     final activeIndex =
         widget.tabs.indexWhere((tab) => tab.id == widget.activeId);
@@ -601,12 +641,14 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
 
     return Semantics(
       container: true,
+      explicitChildNodes: true,
+      excludeSemantics: widget.previewMode,
       label: navLabel,
       child: ExcludeSemantics(
         // aria-hidden equivalent: the hidden dock leaves the a11y tree.
-        excluding: widget.hidden,
+        excluding: widget.hidden || widget.previewMode,
         child: IgnorePointer(
-          ignoring: widget.hidden,
+          ignoring: widget.hidden || widget.previewMode,
           child: AnimatedSlide(
             offset: widget.hidden ? const Offset(0, 1) : Offset.zero,
             duration: _reduceMotion ? Duration.zero : _kDockSlideDuration,
@@ -617,7 +659,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
               curve: kDockEase,
               child: Padding(
                 // Safe area (web: bottom offset + env(safe-area-inset-bottom)).
-                padding: EdgeInsets.only(
+                padding: EdgeInsetsDirectional.only(
                   bottom: MediaQuery.paddingOf(context).bottom,
                 ),
                 child: Center(
@@ -640,11 +682,12 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
     final sizing = glassDockSizing(
       viewport: media.size,
       safePadding: media.padding,
+      style: widget.style,
       zoom: widget.zoom,
       kidsZoom: widget.kidsZoom,
     );
     return Padding(
-      padding: EdgeInsets.only(bottom: sizing.bottomOffset),
+      padding: EdgeInsetsDirectional.only(bottom: sizing.bottomOffset),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: sizing.barWidth),
         child: SizedBox(
@@ -688,7 +731,7 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                             .withValues(alpha: .65)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: .35),
+                        color: NovaColors.ink.withValues(alpha: .35),
                         blurRadius: 14,
                         offset: const Offset(0, 4),
                       ),
@@ -777,6 +820,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                           i++)
                                         Expanded(
                                           child: _DockTabButton(
+                                            key: ValueKey(
+                                                'dock-tab-${widget.tabs[i].id}'),
                                             tab: widget.tabs[i],
                                             // Preview lighting while scrubbing
                                             // suppresses the real active tab's
@@ -789,6 +834,8 @@ class _GlassDockState extends State<GlassDock> with TickerProviderStateMixin {
                                             pressed: _pressedIndex == i,
                                             arabic: arabic,
                                             iconSize: sizing.iconSize,
+                                            showLabel: widget.style ==
+                                                NavigationBarStyle.classic,
                                             reduceMotion: _reduceMotion,
                                             onActivate: () => widget
                                                 .onTabSelected(widget.tabs[i]),
@@ -843,12 +890,14 @@ class _PendingGesture {
 /// dock's Listener — this button only carries visuals + semantics.
 class _DockTabButton extends StatelessWidget {
   const _DockTabButton({
+    super.key,
     required this.tab,
     required this.highlighted,
     required this.selected,
     required this.pressed,
     required this.arabic,
     required this.iconSize,
+    required this.showLabel,
     required this.reduceMotion,
     required this.onActivate,
   });
@@ -865,13 +914,15 @@ class _DockTabButton extends StatelessWidget {
   final bool pressed;
   final bool arabic;
   final double iconSize;
+  final bool showLabel;
   final bool reduceMotion;
   final VoidCallback onActivate;
 
   @override
   Widget build(BuildContext context) {
     final duration = reduceMotion ? Duration.zero : _kIconCrossfadeDuration;
-    return FocusableActionDetector(
+    final label = dockTabLabel(tab, arabic: arabic);
+    final button = FocusableActionDetector(
         mouseCursor: SystemMouseCursors.click,
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
@@ -880,9 +931,10 @@ class _DockTabButton extends StatelessWidget {
           })
         },
         child: Semantics(
+          excludeSemantics: true,
           button: true,
           selected: selected,
-          label: dockTabLabel(tab, arabic: arabic),
+          label: label,
           onTap: onActivate,
           child: AnimatedScale(
             scale: pressed ? 0.96 : 1, // web :active scale(--glass-press-scale)
@@ -897,7 +949,7 @@ class _DockTabButton extends StatelessWidget {
                     duration: duration,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: NovaColors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(_kStadiumRadius),
                       ),
                     ),
@@ -910,32 +962,42 @@ class _DockTabButton extends StatelessWidget {
                       color: highlighted
                           ? Theme.of(context).colorScheme.onPrimaryContainer
                           : Theme.of(context).colorScheme.onSurfaceVariant),
-                  const SizedBox(height: 3),
-                  Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: Text(dockTabLabel(tab, arabic: arabic),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
-                              ?.copyWith(
-                                  fontSize: 10,
-                                  fontWeight: highlighted
-                                      ? FontWeight.w800
-                                      : FontWeight.w500,
-                                  color: highlighted
-                                      ? Theme.of(context)
-                                          .colorScheme
-                                          .onPrimaryContainer
-                                      : Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant))),
+                  if (showLabel) ...[
+                    const SizedBox(height: 3),
+                    Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                    fontSize: 10,
+                                    fontWeight:
+                                        highlighted
+                                            ? FontWeight.w800
+                                            : FontWeight.w500,
+                                    color: highlighted
+                                        ? Theme.of(context)
+                                            .colorScheme
+                                            .onPrimaryContainer
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant))),
+                  ],
                 ])),
               ],
             ),
           ),
         ));
+    if (showLabel) return button;
+    return Tooltip(
+      message: label,
+      waitDuration: const Duration(milliseconds: 650),
+      excludeFromSemantics: true,
+      child: button,
+    );
   }
 }
 

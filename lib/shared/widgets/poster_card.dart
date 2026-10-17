@@ -1,5 +1,5 @@
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -80,7 +80,7 @@ class PosterCard extends StatelessWidget {
                             gradient: LinearGradient(
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
-                              colors: [Colors.black54, Colors.transparent],
+                              colors: [NovaColors.scrim, Colors.transparent],
                             ),
                           ),
                         ),
@@ -91,7 +91,7 @@ class PosterCard extends StatelessWidget {
                           end: 8,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: .72),
+                              color: NovaColors.ink.withValues(alpha: .72),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Padding(
@@ -138,7 +138,7 @@ class PosterCard extends StatelessWidget {
               ],
               if (showTitle && item.releaseInfo != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 3),
+                  padding: const EdgeInsetsDirectional.only(top: 3),
                   child: Text(
                     item.releaseInfo!,
                     maxLines: 1,

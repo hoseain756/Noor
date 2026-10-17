@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/player/engine/playback_engine.dart';
-import 'package:noor_mobile/features/player/widgets/subtitle_overlay.dart';
+import 'package:nova_mobile/features/player/engine/playback_engine.dart';
+import 'package:nova_mobile/features/player/widgets/subtitle_overlay.dart';
 
 /// Minimal [PlaybackEngine] stand-in: the overlay only touches the subtitle
 /// text stream, so everything else is a stub.

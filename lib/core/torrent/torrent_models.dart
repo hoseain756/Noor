@@ -4,6 +4,8 @@
 /// (`noor/torrent`), the [TorrentService] singleton and the player UI.
 library;
 
+import 'package:nova_mobile/l10n/nova_strings.dart';
+
 /// A single file inside a torrent.
 class TorrentFileInfo {
   const TorrentFileInfo({
@@ -241,33 +243,15 @@ class TorrentException implements Exception {
 /// to a generic try-another-source line.
 String torrentFriendlyMessage(Object error, {required bool english}) {
   final code = error is TorrentException ? error.code : '';
-  switch (code) {
-    case 'metadata_timeout':
-    case 'timeout':
-      return english
-          ? 'Could not find torrent peers in time — your network may block P2P or the swarm is thin. Try again, or pick a direct source.'
-          : 'تعذّر العثور على مشاركي التورنت في الوقت المناسب — قد تحجب شبكتك اتصالات P2P أو تكون البذور قليلة. أعد المحاولة أو اختر مصدرًا مباشرًا.';
-    case 'invalid_magnet':
-      return english
-          ? 'This stream has no usable torrent identifier — pick another source.'
-          : 'لا يحتوي هذا المصدر على معرّف تورنت صالح — اختر مصدرًا آخر.';
-    case 'unavailable':
-      return english
-          ? 'Torrent streaming needs a device with the built-in engine or a connected Debrid service.'
-          : 'البث عبر التورنت يحتاج جهازًا يدعم المحرك المدمج أو خدمة Debrid متصلة.';
-    case 'server_failed':
-      return english
-          ? 'The local stream server could not start — try again or pick another source.'
-          : 'تعذّر تشغيل خادم البث المحلي — أعد المحاولة أو اختر مصدرًا آخر.';
-    case 'no_files':
-      return english
-          ? 'This torrent contains no playable files — pick another source.'
-          : 'لا يحتوي هذا التورنت على ملفات قابلة للتشغيل — اختر مصدرًا آخر.';
-    default:
-      return english
-          ? 'Could not start this stream — try another source or check your connection.'
-          : 'تعذّر بدء هذا البث — جرّب مصدرًا آخر أو تحقق من اتصالك.';
-  }
+  final key = switch (code) {
+    'metadata_timeout' || 'timeout' => 'torrentPeerTimeout',
+    'invalid_magnet' => 'torrentInvalidMagnet',
+    'unavailable' => 'torrentUnavailable',
+    'server_failed' => 'torrentServerFailed',
+    'no_files' => 'torrentNoFiles',
+    _ => 'torrentStartFailed',
+  };
+  return NovaStrings.lookup(english, key);
 }
 
 /// Minimal structural list equality helper (keeps the models dependency-free).

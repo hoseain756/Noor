@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/models/media_item.dart';
-import 'package:noor_mobile/features/media/episode_data.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/features/media/episode_data.dart';
 
 MediaItem _item(String id) => MediaItem(id: id, type: 'series', name: id);
 

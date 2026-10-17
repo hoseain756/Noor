@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -214,10 +214,11 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                           future: _results,
                           builder: (context, snapshot) {
                             if (snapshot.connectionState ==
-                                ConnectionState.waiting)
+                                ConnectionState.waiting) {
                               return const NovaBrowseSkeleton();
+                            }
                             final items = snapshot.data ?? const <MediaItem>[];
-                            if (snapshot.hasError || items.isEmpty)
+                            if (snapshot.hasError || items.isEmpty) {
                               return Center(
                                   child: Padding(
                                       padding: const EdgeInsets.all(24),
@@ -239,6 +240,7 @@ class _AnimeSearchSheetState extends State<_AnimeSearchSheet> {
                                                       app.tr('message174')))
                                             ],
                                           ])));
+                            }
                             return LayoutBuilder(
                                 builder: (context, constraints) {
                               final columns = (constraints.maxWidth / 180)

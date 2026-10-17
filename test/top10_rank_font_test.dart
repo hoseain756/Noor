@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/features/home/top10_rail.dart';
+import 'package:nova_mobile/features/home/top10_rail.dart';
 
 void main() {
-  // The Top 10 rank numerals must stay Roboto regardless of the app-wide
-  // theme family (Cairo historically, Tajawal since v1.2.32): the rank
-  // geometry (_digitFactor .58, overlap fractions, the "10" lockup pull) is
-  // calibrated on Roboto metrics and Roboto is the look the user approved.
+  // NOVA uses clear editorial rank labels instead of the old outlined,
+  // overlapping numeral lockup. Keep the compatibility widget compact and
+  // direction-safe while the current Top10Rail renders rank + real title.
   Future<List<Text>> pumpRank(WidgetTester tester, int rank) async {
     await tester.pumpWidget(
       MaterialApp(
-        // Deliberately cascade a DIFFERENT family: the numerals must
-        // override it on every layer.
+        // The compatibility widget follows the surrounding theme typography.
         theme: ThemeData(fontFamily: 'Tajawal'),
         home: Scaffold(
           body: Center(
@@ -24,22 +22,19 @@ void main() {
     return tester.widgetList<Text>(find.byType(Text)).toList();
   }
 
-  testWidgets('single-digit ranks: fill and stroke layers are both Roboto',
-      (tester) async {
+  testWidgets('single-digit rank renders one readable label', (tester) async {
     final texts = await pumpRank(tester, 7);
-    expect(texts, hasLength(2), reason: 'fill layer + stroke layer');
-    for (final text in texts) {
-      expect(text.style?.fontFamily, 'Roboto');
-      expect(text.style?.fontWeight, FontWeight.w900);
-    }
+    expect(texts, hasLength(1));
+    expect(texts.single.data, '7');
+    expect(texts.single.textDirection, TextDirection.ltr);
+    expect(texts.single.style?.fontSize, 100);
+    expect(texts.single.style?.fontWeight, FontWeight.w800);
   });
 
-  testWidgets('rank 10 lockup: every glyph on every layer is Roboto',
-      (tester) async {
+  testWidgets('rank ten is one direction-safe number label', (tester) async {
     final texts = await pumpRank(tester, 10);
-    expect(texts, hasLength(4), reason: '"0" and "1" glyphs, each fill+stroke');
-    for (final text in texts) {
-      expect(text.style?.fontFamily, 'Roboto');
-    }
+    expect(texts, hasLength(1));
+    expect(texts.single.data, '10');
+    expect(texts.single.textDirection, TextDirection.ltr);
   });
 }

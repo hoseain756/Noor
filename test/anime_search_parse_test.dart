@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/data/catalog_repository.dart';
+import 'package:nova_mobile/core/data/catalog_repository.dart';
 
 /// `parseAnimeResponse` routing for both providers' search rows: AniList
 /// GraphQL rows and the MAL-normalized rows (`source: 'mal'`) must keep

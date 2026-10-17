@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart' show Alignment, Color, Size;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/player/widgets/subtitle_overlay.dart';
+import 'package:nova_mobile/core/theme/nova_theme.dart';
+import 'package:nova_mobile/features/player/widgets/subtitle_overlay.dart';
 
 void main() {
   group('SubtitleStyle.fromMap — defaults', () {
@@ -9,7 +10,7 @@ void main() {
       final s = SubtitleStyle.fromMap({});
       expect(s.fontSize, 28);
       expect(s.color, const Color(0xFFFFFFFF));
-      expect(s.borderColor, const Color(0xFF000000));
+      expect(s.borderColor, NovaColors.ink);
       expect(s.borderSize, 0);
       expect(s.backgroundOpacity, 0.35);
       expect(s.style, 'shadow');
@@ -92,7 +93,7 @@ void main() {
         'subBorderColor': 42,
       });
       expect(s.color, const Color(0xFFFFFFFF));
-      expect(s.borderColor, const Color(0xFF000000));
+      expect(s.borderColor, NovaColors.ink);
     });
 
     test('style vocabulary: legacy opaque/background map to box', () {

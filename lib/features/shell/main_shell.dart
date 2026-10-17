@@ -87,8 +87,9 @@ class _MainShellState extends State<MainShell> {
     _changingTab = true;
     try {
       if (!await _mayLeaveKids() || !mounted) return;
-      if (index == 2 && !await NovaParentalGate.ensureConfigured(context))
+      if (index == 2 && !await NovaParentalGate.ensureConfigured(context)) {
         return;
+      }
       if (!mounted) return;
       await context.read<AppState>().setKidsSession(index == 2);
       if (!mounted) return;
@@ -97,8 +98,9 @@ class _MainShellState extends State<MainShell> {
         _visited.add(index);
         _chromeVisible = true;
         _scrollDelta = 0;
-        if ((index == 0) != _homePage.active)
+        if ((index == 0) != _homePage.active) {
           _homePage = HomePage(active: index == 0);
+        }
       });
     } finally {
       _changingTab = false;
@@ -108,7 +110,9 @@ class _MainShellState extends State<MainShell> {
   bool _onScroll(ScrollNotification event) {
     if (event.depth > 0 ||
         event.metrics.axis != Axis.vertical ||
-        event is! ScrollUpdateNotification) return false;
+        event is! ScrollUpdateNotification) {
+      return false;
+    }
     final app = context.read<AppState>();
     if (_selected == 2 ||
         app.webSettings['dockAutoHide'] == false ||
@@ -165,6 +169,9 @@ class _MainShellState extends State<MainShell> {
         (app) => app.webSettings['reduceMotion'] == true);
     final reduceTransparency = context.select<AppState, bool>(
         (app) => app.webSettings['reduceTransparency'] == true);
+    final navigationBarStyle = context.select<AppState, NavigationBarStyle>(
+        (app) => NavigationBarStyle.fromSetting(
+            app.webSettings['navigationBarStyle']));
     final tablet = MediaQuery.sizeOf(context).width >= 840;
     final reduce = MediaQuery.disableAnimationsOf(context) || reduceSetting;
     final duration = reduce ? Duration.zero : const Duration(milliseconds: 220);
@@ -188,6 +195,8 @@ class _MainShellState extends State<MainShell> {
         child: Scaffold(
             body: Row(children: [
           if (tablet)
+            // Bottom-dock appearance preferences do not replace the tablet
+            // side rail: all three options are horizontal dock presentations.
             _TabletNavigation(
                 selected: _selected,
                 onTabSelected: (i) => unawaited(_selectTab(i)),
@@ -221,6 +230,7 @@ class _MainShellState extends State<MainShell> {
                       onTabSelected: (DockTab tab) => unawaited(
                           _selectTab(noorDockIndexForTabId(tab.view))),
                       languageCode: english ? 'en' : 'ar',
+                      style: navigationBarStyle,
                       hidden: !_chromeVisible,
                       reduceMotion: reduce,
                       reduceTransparency: reduceTransparency)),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/player/widgets/player_side_panel.dart';
+import 'package:nova_mobile/features/player/widgets/player_side_panel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

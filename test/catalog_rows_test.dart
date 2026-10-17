@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/data/catalog_repository.dart';
-import 'package:noor_mobile/core/models/addon.dart';
+import 'package:nova_mobile/core/data/catalog_repository.dart';
+import 'package:nova_mobile/core/models/addon.dart';
 
 Addon _addon(
   String id, {
@@ -43,7 +43,8 @@ void main() {
           _catalog('other', 'series', 'Other'),
         ]),
       ]);
-      expect(rows.map((row) => row.key).toList(), ['a:movie:top', 'b:series:other']);
+      expect(rows.map((row) => row.key).toList(),
+          ['a:movie:top', 'b:series:other']);
       expect(rows.first.title, 'Popular');
       expect(rows.first.subtitle, 'Addon a');
     });
@@ -59,7 +60,9 @@ void main() {
         _addon('b', enabled: false, catalogs: [
           _catalog('x', 'movie', 'Hidden'),
         ]),
-      ], anchorKeys: const {'movie:trailer'});
+      ], anchorKeys: const {
+        'movie:trailer'
+      });
       expect(rows.map((row) => row.key).toList(), ['a:movie:other']);
     });
 

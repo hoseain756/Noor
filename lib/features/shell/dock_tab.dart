@@ -13,6 +13,8 @@
 /// See INTEGRATION_NOTES.md for the wiring recipe.
 library;
 
+import 'package:nova_mobile/l10n/nova_strings.dart';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -62,36 +64,36 @@ class DockTab {
 
 /// The four Harbor tabs in LOGICAL order (web `DOCK_TABS` declaration order:
 /// settings | kids | anime | home).
-const List<DockTab> kDockTabs = [
+final List<DockTab> kDockTabs = [
   DockTab(
     id: DockTab.settingsId,
     view: 'settings',
-    labelEn: 'Settings',
-    labelAr: 'الإعدادات',
+    labelEn: NovaStrings.lookup(true, 'settings'),
+    labelAr: NovaStrings.lookup(false, 'settings'),
     iconOutline: LucideIcons.settings,
     iconFilled: LucideIcons.settings,
   ),
   DockTab(
     id: DockTab.kidsId,
     view: 'kids',
-    labelEn: 'Kids',
-    labelAr: 'الأطفال',
+    labelEn: NovaStrings.lookup(true, 'message774'),
+    labelAr: NovaStrings.lookup(false, 'message774'),
     iconOutline: LucideIcons.baby,
     iconFilled: LucideIcons.baby,
   ),
   DockTab(
     id: DockTab.animeId,
     view: 'anime',
-    labelEn: 'Anime',
-    labelAr: 'الأنمي',
+    labelEn: NovaStrings.lookup(true, 'message775'),
+    labelAr: NovaStrings.lookup(false, 'message775'),
     iconOutline: LucideIcons.sparkles,
     iconFilled: LucideIcons.sparkles,
   ),
   DockTab(
     id: DockTab.homeId,
     view: 'home',
-    labelEn: 'Home',
-    labelAr: 'الرئيسية',
+    labelEn: NovaStrings.lookup(true, 'message421'),
+    labelAr: NovaStrings.lookup(false, 'message421'),
     iconOutline: LucideIcons.house,
     iconFilled: LucideIcons.house,
   ),
@@ -201,8 +203,9 @@ String dockActiveTabId(
   Map<String, String> extraViewIds = const {},
 }) {
   for (final frame in stack.reversed) {
-    if (frame.isView)
+    if (frame.isView) {
       return dockTabIdForView(frame.view, extraViewIds: extraViewIds);
+    }
   }
   return DockTab.fallbackId;
 }

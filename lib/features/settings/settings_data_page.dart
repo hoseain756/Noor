@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -243,7 +243,7 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
       );
     });
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsetsDirectional.only(bottom: 8),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -281,7 +281,7 @@ class _SupabaseSyncCardState extends State<_SupabaseSyncCard> {
           if (enabled)
             ...NoorSyncService.buckets.map(
               (bucket) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsetsDirectional.only(bottom: 6),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -422,7 +422,9 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
         title: app.tr('message382'),
         message: app.tr('message383'),
         confirm: app.tr('message384'),
-        cancel: app.tr('cancel'))) return;
+        cancel: app.tr('cancel'))) {
+      return;
+    }
     if (!mounted) return;
     setState(() => _busy = true);
     try {
@@ -453,7 +455,9 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
         title: app.tr('message385'),
         message: app.tr('message386'),
         confirm: app.tr('message387'),
-        cancel: app.tr('cancel'))) return;
+        cancel: app.tr('cancel'))) {
+      return;
+    }
     if (!mounted) return;
     setState(() => _busy = true);
     for (final entry in entries) {
@@ -498,7 +502,7 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
     final entries = _entries;
     final total = entries?.fold<int>(0, (sum, e) => sum + e.size) ?? 0;
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsetsDirectional.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -557,7 +561,7 @@ class _TorrentDownloadsCardState extends State<_TorrentDownloadsCard> {
           if (entries != null && entries.isNotEmpty) ...[
             SizedBox(height: 10),
             ...entries.map((entry) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsetsDirectional.only(bottom: 8),
                   child: Row(
                     children: [
                       Expanded(
@@ -662,24 +666,24 @@ class _CacheResetCard extends StatelessWidget {
   const _CacheResetCard();
 
   // (hours, arabic, english)
-  static const List<(int, String, String)> _choices = [
-    (0, 'إيقاف', 'Off'),
-    (1, 'كل ساعة', 'Every hour'),
-    (3, 'كل 3 ساعات', 'Every 3 hours'),
-    (6, 'كل 6 ساعات', 'Every 6 hours'),
-    (12, 'كل 12 ساعة', 'Every 12 hours'),
-    (24, 'كل 24 ساعة', 'Every 24 hours'),
-    (48, 'كل 48 ساعة', 'Every 48 hours'),
+  static const List<(int, String)> _choices = [
+    (0, 'cacheOff'),
+    (1, 'cacheEveryHour'),
+    (3, 'cacheEvery3Hours'),
+    (6, 'cacheEvery6Hours'),
+    (12, 'cacheEvery12Hours'),
+    (24, 'cacheEvery24Hours'),
+    (48, 'cacheEvery48Hours'),
   ];
 
   static String _labelFor(int hours, bool english) {
-    for (final (value, arabic, eng) in _choices) {
-      if (value == hours) return english ? eng : arabic;
+    for (final (value, key) in _choices) {
+      if (value == hours) return NovaStrings.lookup(english, key);
     }
     final fallback = _choices.firstWhere(
       (choice) => choice.$1 == CacheResetService.defaultHours,
     );
-    return english ? fallback.$3 : fallback.$2;
+    return NovaStrings.lookup(english, fallback.$2);
   }
 
   @override
@@ -697,7 +701,7 @@ class _CacheResetCard extends StatelessWidget {
             'p1': _labelFor(hours, false)
           }));
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsetsDirectional.only(bottom: 8),
       child: Material(
         color: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
@@ -765,7 +769,7 @@ class _CacheResetCard extends StatelessWidget {
                   ),
                 ),
               ),
-              for (final (hours, arabic, label) in _choices)
+              for (final (hours, key) in _choices)
                 ListTile(
                   leading: Icon(
                     current == hours
@@ -775,7 +779,7 @@ class _CacheResetCard extends StatelessWidget {
                         ? Theme.of(context).colorScheme.secondary
                         : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  title: Text(english ? label : arabic),
+                  title: Text(NovaStrings.lookup(english, key)),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     unawaited(app.setSetting('cacheResetHours', hours));
@@ -842,7 +846,7 @@ class _DataRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: const EdgeInsetsDirectional.only(bottom: 8),
         child: Material(
           color: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(

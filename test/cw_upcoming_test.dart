@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/home/cw_upcoming.dart';
+import 'package:nova_mobile/features/home/cw_upcoming.dart';
 
 List<Map<String, dynamic>> _videos() => [
       {
@@ -164,38 +164,40 @@ void main() {
       // and sub-24h releases read as tomorrow (midnight-aligned air dates).
       final now = DateTime.utc(2026, 3, 1, 12);
       expect(
-        cwUpcomingLabel(now.add(const Duration(hours: 2)).millisecondsSinceEpoch,
+        cwUpcomingLabel(
+            now.add(const Duration(hours: 2)).millisecondsSinceEpoch,
+            false,
+            now),
+        'يُعرض غداً',
+      );
+      expect(
+        cwUpcomingLabel(
+            now.add(const Duration(hours: 2)).millisecondsSinceEpoch,
+            true,
+            now),
+        'Airs tomorrow',
+      );
+      expect(
+        cwUpcomingLabel(now.add(const Duration(days: 1)).millisecondsSinceEpoch,
             false, now),
         'يُعرض غداً',
       );
       expect(
-        cwUpcomingLabel(now.add(const Duration(hours: 2)).millisecondsSinceEpoch,
-            true, now),
-        'Airs tomorrow',
-      );
-      expect(
         cwUpcomingLabel(
-            now.add(const Duration(days: 1)).millisecondsSinceEpoch, false, now),
-        'يُعرض غداً',
-      );
-      expect(
-        cwUpcomingLabel(now
-                .add(const Duration(days: 1, hours: 1))
-                .millisecondsSinceEpoch,
+            now.add(const Duration(days: 1, hours: 1)).millisecondsSinceEpoch,
             false,
             now),
-        'يُعرض بعد 2 يومين',
+        'يُعرض بعد يومين',
       );
     });
 
     test('Arabic day pluralization: يومين / أيام / يوم', () {
       final now = DateTime.utc(2026, 3, 1, 12);
-      int at(int days) =>
-          now.add(Duration(days: days)).millisecondsSinceEpoch;
-      expect(cwUpcomingLabel(at(2), false, now), 'يُعرض بعد 2 يومين');
+      int at(int days) => now.add(Duration(days: days)).millisecondsSinceEpoch;
+      expect(cwUpcomingLabel(at(2), false, now), 'يُعرض بعد يومين');
       expect(cwUpcomingLabel(at(5), false, now), 'يُعرض بعد 5 أيام');
       expect(cwUpcomingLabel(at(15), false, now), 'يُعرض بعد 15 يوم');
-      expect(cwUpcomingLabel(at(2), true, now), 'In 2 days');
+      expect(cwUpcomingLabel(at(2), true, now), 'Airs in two days');
       expect(cwUpcomingLabel(at(1), true, now), 'Airs tomorrow');
     });
 

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/trakt/trakt_tokens.dart';
+import 'package:nova_mobile/core/trakt/trakt_tokens.dart';
 
 const int _createdAt = 1700000000;
 final DateTime _createdAtDt =

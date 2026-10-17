@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:noor_mobile/core/api/noor_api.dart';
-import 'package:noor_mobile/core/data/catalog_repository.dart';
-import 'package:noor_mobile/core/models/addon.dart';
-import 'package:noor_mobile/core/state/app_state.dart';
-import 'package:noor_mobile/core/theme/nova_theme.dart';
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/features/settings/addons_page.dart';
-import 'package:noor_mobile/features/settings/integrations_page.dart';
-import 'package:noor_mobile/features/settings/settings_page.dart';
-import 'package:noor_mobile/features/settings/settings_display_page.dart';
-import 'package:noor_mobile/features/settings/settings_personalization_page.dart';
-import 'package:noor_mobile/features/settings/settings_preferences_page.dart';
-import 'package:noor_mobile/features/settings/stats_page.dart';
+import 'package:nova_mobile/core/api/noor_api.dart';
+import 'package:nova_mobile/core/data/catalog_repository.dart';
+import 'package:nova_mobile/core/models/addon.dart';
+import 'package:nova_mobile/core/state/app_state.dart';
+import 'package:nova_mobile/core/theme/nova_theme.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/features/settings/addons_page.dart';
+import 'package:nova_mobile/features/settings/integrations_page.dart';
+import 'package:nova_mobile/features/settings/settings_page.dart';
+import 'package:nova_mobile/features/settings/settings_display_page.dart';
+import 'package:nova_mobile/features/settings/settings_personalization_page.dart';
+import 'package:nova_mobile/features/settings/settings_preferences_page.dart';
+import 'package:nova_mobile/features/settings/stats_page.dart';
 
 class _SettingsApp extends AppState {
   _SettingsApp(NoorApi api) : super(api, CatalogRepository(api)) {
@@ -94,7 +94,7 @@ void main() {
     await tester.tap(find.text('Language'));
     await tester.pumpAndSettle();
     expect(find.byType(SettingsPersonalizationPage), findsOneWidget);
-    await tester.tap(find.widgetWithText(RadioListTile<bool>, 'العربية'));
+    await tester.tap(find.text('Arabic'));
     await tester.pumpAndSettle();
     expect(app.english, isFalse);
     expect(app.webSettings['uiLanguage'], 'ar');

@@ -190,8 +190,9 @@ class _SearchSheetState extends State<SearchSheet>
                       onChanged: _onChanged,
                       onSubmitted: (value) {
                         _timer?.cancel();
-                        if (value.trim().length >= 2)
+                        if (value.trim().length >= 2) {
                           unawaited(_search(value.trim()));
+                        }
                       },
                       textInputAction: TextInputAction.search,
                       decoration: InputDecoration(

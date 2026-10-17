@@ -117,8 +117,9 @@ Future<void> showCustomListPicker(BuildContext context, MediaItem item) async {
   if (selection == null || !context.mounted) return;
   if (selection == 'create') {
     await createNovaCollection(context);
-    if (context.mounted && app.customLists.isNotEmpty)
+    if (context.mounted && app.customLists.isNotEmpty) {
       await showCustomListPicker(context, item);
+    }
     return;
   }
   final list = selection as CustomMediaList;

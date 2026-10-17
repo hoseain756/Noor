@@ -22,7 +22,7 @@
 /// right / bottom) keep their system insets.
 library;
 
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -297,7 +297,7 @@ class _AudioTracksPanelBodyState extends State<AudioTracksPanelBody> {
   }
 
   String _groupTitle(String code) {
-    if (code == 'default' || code == 'افتراضي') {
+    if (code == 'default' || code == NovaStrings.lookup(false, 'message2')) {
       return NovaStrings.lookup(widget.english, 'message2');
     }
     final name = subtitleLanguageName(code);
@@ -919,7 +919,7 @@ class PlayerSettingsPanelBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsetsDirectional.only(bottom: 4),
       children: [
         Padding(
           padding: const EdgeInsetsDirectional.fromSTEB(4, 2, 4, 0),

@@ -50,9 +50,9 @@ class OnboardingPage extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(s.text('language'), style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 16),
-        SegmentedButton<bool>(segments: const [
-          ButtonSegment(value: false, label: Text('العربية')),
-          ButtonSegment(value: true, label: Text('English'))
+        SegmentedButton<bool>(segments: [
+          ButtonSegment(value: false, label: Text(s.text('arabicLanguage'))),
+          ButtonSegment(value: true, label: Text(s.text('englishLanguage')))
         ], selected: {
           app.english
         }, onSelectionChanged: (value) => app.setLanguage(value.first)),

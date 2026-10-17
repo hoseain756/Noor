@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/torrent/torrent_models.dart';
-import 'package:noor_mobile/core/torrent/torrent_service.dart';
+import 'package:nova_mobile/core/torrent/torrent_models.dart';
+import 'package:nova_mobile/core/torrent/torrent_service.dart';
 
 void main() {
   // A real Torrentio stream object (shape verified live against

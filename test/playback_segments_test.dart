@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/features/player/segments/playback_segments.dart';
+import 'package:nova_mobile/features/player/segments/playback_segments.dart';
 
 void main() {
   group('PlaybackSegmentsResolver — absence means unknown', () {

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
 
 void main() {
   test('parses cast/director/runtime from a Cinemeta-shaped payload', () {

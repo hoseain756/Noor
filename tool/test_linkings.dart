@@ -29,12 +29,10 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 
 // ---- Mirrors of the embedded constants in lib/core/api/noor_api.dart ----
-const String traktClientId =
-    'pk0CCmQaUuZt3VqpWu0lphpro_i52wX9QnkbGbf_fUY';
+const String traktClientId = 'pk0CCmQaUuZt3VqpWu0lphpro_i52wX9QnkbGbf_fUY';
 const String simklClientId =
     '77b9125e4f1148d09b4fec74474171a02daefe24272cc1aa8b2efcb4da367bee';
-const String simklClientSecret =
-    'simkl_cs_bFZ4x7Sgrkc2hhslQDD38LVnkM7D1bI0Ym';
+const String simklClientSecret = 'simkl_cs_bFZ4x7Sgrkc2hhslQDD38LVnkM7D1bI0Ym';
 
 const String traktBase = 'https://api.trakt.tv';
 const String simklBase = 'https://api.simkl.com';
@@ -197,9 +195,7 @@ Future<void> _testTrakt() async {
 
   final deviceCode = body['device_code']?.toString() ?? '';
   final userCode = body['user_code']?.toString() ?? '';
-  if (start.statusCode == 200 &&
-      deviceCode.isNotEmpty &&
-      userCode.isNotEmpty) {
+  if (start.statusCode == 200 && deviceCode.isNotEmpty && userCode.isNotEmpty) {
     _ok('device code issued: user_code=$userCode '
         'verification=${body['verification_url']}');
   } else {
@@ -284,13 +280,11 @@ Future<void> _testSimkl() async {
   final deviceCode = body['device_code']?.toString() ?? '';
   final userCode = body['user_code']?.toString() ?? '';
   final verificationUrl = (body['verification_uri_complete'] ??
-          body['verification_uri'] ??
-          body['verification_url'])
-      ?.toString() ??
+              body['verification_uri'] ??
+              body['verification_url'])
+          ?.toString() ??
       '';
-  if (start.statusCode == 200 &&
-      deviceCode.isNotEmpty &&
-      userCode.isNotEmpty) {
+  if (start.statusCode == 200 && deviceCode.isNotEmpty && userCode.isNotEmpty) {
     _ok('device code issued: user_code=$userCode url=$verificationUrl');
   } else {
     _bad('POST /oauth2/device failed — the embedded client_id itself may be '
@@ -310,9 +304,10 @@ Future<void> _testSimkl() async {
     headers: <String, String>{'simkl-api-key': simklClientId},
   );
   _info('HTTP ${poll.statusCode} — ${_brief(poll.data)}');
-  final errText =
-      (_json(poll.data)?['error'] ?? _json(poll.data)?['error_description'] ?? '')
-          .toString();
+  final errText = (_json(poll.data)?['error'] ??
+          _json(poll.data)?['error_description'] ??
+          '')
+      .toString();
   if (poll.statusCode == 400 &&
       (errText.contains('pending') || errText.contains('slow_down'))) {
     _ok('authorization_pending with the embedded secret => client_id + '

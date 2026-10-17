@@ -1,4 +1,3 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -115,14 +114,15 @@ class _NovaColorPickerState extends State<_NovaColorPicker> {
                         labelText: NovaStrings.lookup(english, 'message726'),
                         errorText: _error),
                     onChanged: (value) {
-                      if (RegExp(r'^#?[0-9a-fA-F]{6}$').hasMatch(value))
+                      if (RegExp(r'^#?[0-9a-fA-F]{6}$').hasMatch(value)) {
                         setState(() {
                           _color = _parse(value);
                           _error = null;
                         });
-                      else
+                      } else {
                         setState(() =>
                             _error = NovaStrings.lookup(english, 'message727'));
+                      }
                     }),
               ]))),
       actions: [

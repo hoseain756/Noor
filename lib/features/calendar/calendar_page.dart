@@ -1,5 +1,5 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -271,7 +271,7 @@ class _CalendarPageState extends State<CalendarPage> {
                             itemCount: sections.length,
                             itemBuilder: (context, index) {
                               final section = sections[index];
-                              if (section is DateTime)
+                              if (section is DateTime) {
                                 return Padding(
                                     padding: const EdgeInsetsDirectional.only(
                                         top: 16, bottom: 16),
@@ -280,6 +280,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                             ?.copyWith(
                                                 color: theme
                                                     .colorScheme.secondary)));
+                              }
                               final episode = section as _CalendarEpisode;
                               return _EpisodeTile(
                                   episode: episode,

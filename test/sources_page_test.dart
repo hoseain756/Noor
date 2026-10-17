@@ -5,8 +5,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:noor_mobile/core/models/media_item.dart';
-import 'package:noor_mobile/features/media/sources_page.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/features/media/sources_page.dart';
 
 void main() {
   final item = MediaItem(
@@ -66,12 +66,22 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Sources'), findsOneWidget);
-    expect(find.text('3 sources from 3 add-ons'), findsOneWidget);
+    expect(find.text('Choose your stream'), findsOneWidget);
+    expect(find.text('3 sources · 3 addons'), findsOneWidget);
     // Episode context line: S1:E2 · Pilot
     expect(find.text('S1:E2 · Pilot'), findsOneWidget);
     expect(find.text('1080p H264'), findsOneWidget);
+    final sourceList = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(find.text('2160p HEVC'), 180,
+        scrollable: sourceList);
     expect(find.text('2160p HEVC'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('broken source'), 180,
+        scrollable: sourceList);
     expect(find.text('broken source'), findsOneWidget);
 
     await tester.tap(find.text('1080p H264'));
@@ -102,6 +112,14 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    final sourceList = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(find.text('broken source'), 180,
+        scrollable: sourceList);
     await tester.tap(find.text('broken source'));
     await tester.pumpAndSettle();
     expect(picked, isNull);

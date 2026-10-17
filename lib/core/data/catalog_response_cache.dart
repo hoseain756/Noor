@@ -37,10 +37,11 @@ class CatalogResponseCache extends ChangeNotifier {
               DateTime.fromMillisecondsSinceEpoch(record['time'] as int),
               record['data']
             );
-            if (DateTime.now().difference(cached.$1).inDays < 7)
+            if (DateTime.now().difference(cached.$1).inDays < 7) {
               _remember(digest, cached);
-            else
+            } else {
               cached = null;
+            }
           }
         }
       } catch (_) {

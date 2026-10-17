@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -61,7 +61,7 @@ Future<void> openMagnetFlow(
       constraints: const BoxConstraints(maxWidth: 800),
       useSafeArea: true,
       backgroundColor: NovaTheme.of(context).surface,
-      barrierColor: Colors.black54,
+      barrierColor: NovaColors.scrim,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -341,8 +341,8 @@ class _MagnetSheetState extends State<_MagnetSheet> {
     return SafeArea(
         top: false,
         child: Padding(
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          padding: EdgeInsetsDirectional.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom),
           child: ConstrainedBox(
             constraints: BoxConstraints(
                 maxHeight: MediaQuery.sizeOf(context).height * .88),
@@ -461,14 +461,15 @@ class _MagnetSheetState extends State<_MagnetSheet> {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(LucideIcons.circleAlert,
-                  color: NovaColors.error, size: 17),
+              Icon(LucideIcons.circleAlert,
+                  color: NovaTheme.of(context).theme.colorScheme.error,
+                  size: 17),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   _error!,
-                  style: const TextStyle(
-                    color: NovaColors.error,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
                     fontSize: 12.5,
                   ),
                 ),

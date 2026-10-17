@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import '../shell/nova_catalog_refresh.dart';
 import 'dart:async';
 
@@ -241,8 +241,9 @@ class _CatalogBrowserPageState extends State<CatalogBrowserPage>
                                   decoration: InputDecoration(
                                       labelText: app.tr('message588')),
                                   onChanged: (value) {
-                                    if (value != null)
+                                    if (value != null) {
                                       setState(() => _sort = value);
+                                    }
                                   },
                                   items: [
                                     for (final entry in [

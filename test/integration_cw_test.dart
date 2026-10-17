@@ -1,7 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/models/integration_cw.dart';
+import 'package:nova_mobile/core/models/integration_cw.dart';
 
-Map<String, dynamic> _traktMovie({double progress = 42.5, int pausedAt = 1700000000}) =>
+Map<String, dynamic> _traktMovie(
+        {double progress = 42.5, int pausedAt = 1700000000}) =>
     <String, dynamic>{
       'id': 1,
       'progress': progress,
@@ -136,8 +137,7 @@ void main() {
   });
 
   group('IntegrationCwEntry.fromAniListRow', () {
-    test('CURRENT entry maps with cover art, mal id and episode fraction',
-        () {
+    test('CURRENT entry maps with cover art, mal id and episode fraction', () {
       final entry = IntegrationCwEntry.fromAniListRow(
         _anilistEntry(),
         statusFilter: 'CURRENT',
@@ -237,7 +237,8 @@ void main() {
         IntegrationCwEntry.fromAniListRow(_anilistEntry(updatedAt: 400))!,
       ];
       final mal = [
-        IntegrationCwEntry.fromMalRow(_malRow(updatedAt: '2024-05-01T12:00:00Z'))!,
+        IntegrationCwEntry.fromMalRow(
+            _malRow(updatedAt: '2024-05-01T12:00:00Z'))!,
       ];
       final merged = IntegrationCwEntry.merge([trakt, anilist, mal], limit: 2);
       expect(merged.length, 2);

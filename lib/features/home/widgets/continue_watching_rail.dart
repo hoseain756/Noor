@@ -1,6 +1,6 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -412,16 +412,16 @@ class ContinueCard extends StatelessWidget {
                               ),
                             ),
                       // Web scrim: to top, 85% black → 45% → transparent.
-                      const DecoratedBox(
+                      DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             stops: [0, .45, .75],
                             colors: [
-                              Color(0xD9000000),
-                              Color(0x73000000),
-                              Color(0x00000000),
+                              NovaColors.ink.withValues(alpha: .85),
+                              NovaColors.ink.withValues(alpha: .45),
+                              NovaColors.ink.withValues(alpha: 0),
                             ],
                           ),
                         ),
@@ -445,7 +445,8 @@ class ContinueCard extends StatelessWidget {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     height: 1.3,
-                                    color: Colors.white.withValues(alpha: .95),
+                                    color:
+                                        NovaColors.white.withValues(alpha: .95),
                                   ),
                                 ),
                               ),
@@ -459,7 +460,7 @@ class ContinueCard extends StatelessWidget {
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
                                 height: 1.2,
-                                color: Colors.white,
+                                color: NovaColors.white,
                               ),
                             ),
                             if (subtitle != null)
@@ -471,7 +472,8 @@ class ContinueCard extends StatelessWidget {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
                                   height: 1.35,
-                                  color: Colors.white.withValues(alpha: .65),
+                                  color:
+                                      NovaColors.white.withValues(alpha: .65),
                                 ),
                               ),
                           ],
@@ -488,7 +490,7 @@ class ContinueCard extends StatelessWidget {
                               value: progress,
                               minHeight: 3,
                               backgroundColor:
-                                  Colors.white.withValues(alpha: .24),
+                                  NovaColors.white.withValues(alpha: .24),
                               color: _progressRed,
                             ),
                           ),
@@ -507,7 +509,7 @@ class ContinueCard extends StatelessWidget {
                             ),
                             alignment: AlignmentDirectional.center,
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: .7),
+                              color: NovaColors.ink.withValues(alpha: .7),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
@@ -517,7 +519,7 @@ class ContinueCard extends StatelessWidget {
                               style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500,
-                                color: Colors.white,
+                                color: NovaColors.white,
                               ),
                             ),
                           ),
@@ -536,7 +538,7 @@ class ContinueCard extends StatelessWidget {
                             ),
                             alignment: AlignmentDirectional.center,
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: .6),
+                              color: NovaColors.ink.withValues(alpha: .6),
                               borderRadius: BorderRadius.circular(7),
                             ),
                             child: Text(
@@ -547,7 +549,7 @@ class ContinueCard extends StatelessWidget {
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: .2,
-                                color: Colors.white.withValues(alpha: .92),
+                                color: NovaColors.white.withValues(alpha: .92),
                               ),
                             ),
                           ),
@@ -579,7 +581,7 @@ class ContinueCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: .22),
+                        color: NovaColors.white.withValues(alpha: .22),
                       ),
                     ),
                   ),

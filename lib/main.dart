@@ -12,7 +12,7 @@ import 'app/noor_app.dart';
 import 'core/api/noor_api.dart';
 import 'core/data/catalog_repository.dart';
 import 'core/state/app_state.dart';
-import 'core/theme/horse_theme.dart';
+import 'core/theme/nova_theme.dart';
 import 'core/theme/system_bars.dart';
 import 'core/torrent/torrent_service.dart';
 
@@ -31,42 +31,7 @@ void main() {
     if (!kReleaseMode) {
       return ErrorWidget(details.exception);
     }
-    return ColoredBox(
-      color: HorseTheme.canvas,
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                LucideIcons.circleAlert,
-                color: HorseTheme.gold,
-                size: 40,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                NovaStrings(PlatformDispatcher.instance.locale)
-                    .text('errorTitle'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: HorseTheme.ink,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                NovaStrings(PlatformDispatcher.instance.locale)
-                    .text('errorBody'),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: HorseTheme.muted, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return const _NovaErrorPanel();
   };
   // Edge-to-edge (user mandate, Tasks 115/117): the app draws behind a fully
   // transparent status bar (battery/signal/clock) and navigation bar — the
@@ -85,4 +50,43 @@ void main() {
   // the first torrent stream never pays the 10–30s cold-start inside its own
   // metadata timeout. No-op (and fully swallowed) off Android.
   unawaited(TorrentService.instance.warmup());
+}
+
+class _NovaErrorPanel extends StatelessWidget {
+  const _NovaErrorPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = NovaTheme.of(context);
+    final locale = Localizations.maybeLocaleOf(context) ??
+        PlatformDispatcher.instance.locale;
+    final strings = NovaStrings(locale);
+    return ColoredBox(
+      color: palette.canvas,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.circleAlert, color: palette.gold, size: 40),
+                  const SizedBox(height: 16),
+                  Text(strings.text('errorTitle'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  Text(strings.text('errorBody'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

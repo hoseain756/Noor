@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/features/player/engine/playback_engine.dart';
-import 'package:noor_mobile/features/player/widgets/subtitle_overlay.dart';
+import 'package:nova_mobile/features/player/engine/playback_engine.dart';
+import 'package:nova_mobile/features/player/widgets/subtitle_overlay.dart';
 
 /// Minimal [PlaybackEngine] stand-in (same pattern as the overlay suite).
 class _FakeEngine extends PlaybackEngine {

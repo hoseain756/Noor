@@ -1,4 +1,4 @@
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -61,11 +61,14 @@ class _AddonsPageState extends State<AddonsPage> {
         _messageError = false;
       });
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(() {
-          _message = error.toString().replaceFirst('Exception: ', '');
+          _message = error is FormatException
+              ? app.tr('addonInvalidManifest')
+              : app.tr('addonInstallFailed');
           _messageError = true;
         });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -282,9 +285,10 @@ class _AddonDetailsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final addon = app.addons.where((a) => a.id == addonId).firstOrNull;
-    if (addon == null)
+    if (addon == null) {
       return Scaffold(
           appBar: AppBar(), body: Center(child: Text(app.tr('message237'))));
+    }
     final configurable =
         (addon.manifest['behaviorHints'] as Map?)?['configurable'] == true;
     return Scaffold(
@@ -319,11 +323,12 @@ class _AddonDetailsPage extends StatelessWidget {
                                   final opened = await launchUrl(
                                       Uri.parse('${addon.baseUrl}/configure'),
                                       mode: LaunchMode.externalApplication);
-                                  if (!opened && context.mounted)
+                                  if (!opened && context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
                                             content:
                                                 Text(app.tr('message244'))));
+                                  }
                                 }),
                           SettingsTile(
                               icon: LucideIcons.copy,
@@ -331,10 +336,11 @@ class _AddonDetailsPage extends StatelessWidget {
                               onTap: () async {
                                 await Clipboard.setData(
                                     ClipboardData(text: addon.transportUrl));
-                                if (context.mounted)
+                                if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                           content: Text(app.tr('message246'))));
+                                }
                               }),
                         ]),
                     if (addon.catalogs.isNotEmpty)

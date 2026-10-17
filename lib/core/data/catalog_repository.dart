@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../l10n/nova_strings.dart';
 import '../api/noor_api.dart';
 import 'content_classifier.dart';
 import '../models/addon.dart';
@@ -330,8 +331,9 @@ query ($weekStart: Int!, $weekEnd: Int!) {
         .toList();
     final json = item.toJson();
     void add(String key, Object? value) {
-      if (value != null && value.toString().trim().isNotEmpty)
+      if (value != null && value.toString().trim().isNotEmpty) {
         json[key] = value;
+      }
     }
 
     add('originalTitle', details['original_title'] ?? details['original_name']);
@@ -342,16 +344,21 @@ query ($weekStart: Int!, $weekEnd: Int!) {
       add('seasonCount', details['number_of_seasons']);
       add('episodeCount', details['number_of_episodes']);
     }
-    if ((credits['cast'] as List?)?.isNotEmpty == true)
+    if ((credits['cast'] as List?)?.isNotEmpty == true) {
       json['castMembers'] = credits['cast'];
-    if (crew.isNotEmpty || creators.isNotEmpty)
+    }
+    if (crew.isNotEmpty || creators.isNotEmpty) {
       json['crewMembers'] = [...creators, ...crew];
-    if ((details['production_companies'] as List?)?.isNotEmpty == true)
+    }
+    if ((details['production_companies'] as List?)?.isNotEmpty == true) {
       json['productionCompanies'] = details['production_companies'];
-    if (item.director.isEmpty && directors.isNotEmpty)
+    }
+    if (item.director.isEmpty && directors.isNotEmpty) {
       json['director'] = directors;
-    if (item.originCountry == null)
+    }
+    if (item.originCountry == null) {
       json['countries'] = details['production_countries'];
+    }
     return MediaItem.fromJson(json);
   }
 
@@ -798,7 +805,8 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     return result.expand((rows) => rows).toList();
   }
 
-  Future<Map<String, dynamic>> manifest(String rawUrl) async {
+  Future<Map<String, dynamic>> manifest(String rawUrl,
+      {bool english = true}) async {
     var url = rawUrl.trim().replaceFirst(
           RegExp(r'^stremio://', caseSensitive: false),
           'https://',
@@ -809,7 +817,8 @@ query ($weekStart: Int!, $weekEnd: Int!) {
     if (!url.endsWith('manifest.json')) url = '$url/manifest.json';
     final data = await api.proxyGet(url);
     if (data['id'] is! String || data['name'] is! String) {
-      throw const FormatException('رابط الإضافة لا يحتوي على manifest صالح.');
+      throw FormatException(
+          NovaStrings.lookup(english, 'addonInvalidManifest'));
     }
     return data;
   }

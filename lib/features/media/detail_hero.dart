@@ -1,5 +1,6 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
-import 'package:noor_mobile/shared/widgets/nova_network_image.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/shared/widgets/nova_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -38,13 +39,15 @@ class DetailHero extends StatelessWidget {
       required this.logoUrl,
       required this.isWide,
       required this.viewportHeight,
-      required this.viewportWidth});
+      required this.viewportWidth,
+      required this.contentVisibility});
   final MediaItem item;
   final String? backdropUrl;
   final String? logoUrl;
   final bool isWide;
   final double viewportHeight;
   final double viewportWidth;
+  final ValueListenable<double> contentVisibility;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -90,34 +93,48 @@ class DetailHero extends StatelessWidget {
           start: isWide ? 40 : 24,
           end: isWide ? 40 : 24,
           bottom: 32,
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (logoUrl?.isNotEmpty == true)
-              NovaNetworkImage(logoUrl!,
-                  height: isWide ? 112 : 80,
-                  width: isWide ? 400 : viewportWidth - 48,
-                  fit: BoxFit.contain,
-                  alignment: AlignmentDirectional.centerStart
-                      .resolve(Directionality.of(context)),
-                  cacheWidth: imageCacheWidth(
-                      context, isWide ? 400 : viewportWidth - 48),
-                  semanticLabel: item.name,
-                  errorBuilder: (_, __, ___) => Text(item.name,
+          child: ValueListenableBuilder<double>(
+            valueListenable: contentVisibility,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (logoUrl?.isNotEmpty == true)
+                  NovaNetworkImage(logoUrl!,
+                      height: isWide ? 112 : 80,
+                      width: isWide ? 400 : viewportWidth - 48,
+                      fit: BoxFit.contain,
+                      alignment: AlignmentDirectional.centerStart
+                          .resolve(Directionality.of(context)),
+                      cacheWidth: imageCacheWidth(
+                          context, isWide ? 400 : viewportWidth - 48),
+                      semanticLabel: item.name,
+                      errorBuilder: (_, __, ___) => Text(item.name,
+                          style: TextStyle(
+                              color: foreground,
+                              fontSize: isWide ? 48 : 32,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2)))
+                else
+                  Text(item.name,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           color: foreground,
                           fontSize: isWide ? 48 : 32,
                           fontWeight: FontWeight.w800,
-                          height: 1.2)))
-            else
-              Text(item.name,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: foreground,
-                      fontSize: isWide ? 48 : 32,
-                      fontWeight: FontWeight.w800,
-                      height: 1.2)),
-          ])),
+                          height: 1.2)),
+              ],
+            ),
+            builder: (context, visibility, child) => IgnorePointer(
+              key: const ValueKey('detail-hero-content-ignore-pointer'),
+              ignoring: visibility <= .05,
+              child: Opacity(
+                key: const ValueKey('detail-hero-content-opacity'),
+                opacity: visibility,
+                child: child,
+              ),
+            ),
+          )),
     ]));
   }
 }
@@ -405,7 +422,7 @@ class DetailProduction extends StatelessWidget {
           const SizedBox(height: 16),
           SizedBox(
               height:
-                  128 + (MediaQuery.textScalerOf(context).scale(14) - 14) * 2,
+                  128 + (MediaQuery.textScalerOf(context).scale(14) - 14) * 2.8,
               child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: item.productionCompanies.length,

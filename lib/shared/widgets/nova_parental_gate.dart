@@ -110,15 +110,17 @@ class _PinDialogState extends State<_PinDialog> {
           final attempts = (prefs.getInt('nova.parent-pin.attempts') ?? 0) + 1;
           await prefs.setInt(
               'nova.parent-pin.attempts', attempts >= 5 ? 0 : attempts);
-          if (attempts >= 5)
+          if (attempts >= 5) {
             await prefs.setInt(
                 'nova.parent-pin.lock-until',
                 DateTime.now()
                     .add(const Duration(minutes: 1))
                     .millisecondsSinceEpoch);
-          if (mounted)
+          }
+          if (mounted) {
             setState(() => _error =
                 strings.text(attempts >= 5 ? 'pinLocked' : 'pinWrong'));
+          }
           return;
         }
       }
@@ -172,7 +174,7 @@ class _PinDialogState extends State<_PinDialog> {
             ],
             if (_error != null)
               Padding(
-                  padding: const EdgeInsets.only(top: 16),
+                  padding: const EdgeInsetsDirectional.only(top: 16),
                   child: Semantics(
                       liveRegion: true,
                       child: Text(_error!,

@@ -14,20 +14,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
-import 'package:noor_mobile/core/api/noor_api.dart';
-import 'package:noor_mobile/core/data/catalog_repository.dart';
-import 'package:noor_mobile/core/models/addon.dart';
-import 'package:noor_mobile/core/models/featured_artwork.dart';
-import 'package:noor_mobile/core/models/media_item.dart';
-import 'package:noor_mobile/core/state/app_state.dart';
-import 'package:noor_mobile/core/theme/horse_theme.dart';
-import 'package:noor_mobile/features/anime/anime_page.dart';
-import 'package:noor_mobile/features/home/home_page.dart';
-import 'package:noor_mobile/features/kids/kids_page.dart';
-import 'package:noor_mobile/features/library/library_page.dart';
-import 'package:noor_mobile/features/settings/settings_page.dart';
-import 'package:noor_mobile/features/shell/main_shell.dart';
-import 'package:noor_mobile/shared/widgets/glass_navigation.dart';
+import 'package:nova_mobile/core/api/noor_api.dart';
+import 'package:nova_mobile/core/data/catalog_repository.dart';
+import 'package:nova_mobile/core/models/addon.dart';
+import 'package:nova_mobile/core/models/featured_artwork.dart';
+import 'package:nova_mobile/core/models/media_item.dart';
+import 'package:nova_mobile/core/state/app_state.dart';
+import 'package:nova_mobile/core/theme/horse_theme.dart';
+import 'package:nova_mobile/features/anime/anime_page.dart';
+import 'package:nova_mobile/features/home/home_page.dart';
+import 'package:nova_mobile/features/kids/kids_page.dart';
+import 'package:nova_mobile/features/library/library_page.dart';
+import 'package:nova_mobile/features/settings/settings_page.dart';
+import 'package:nova_mobile/features/shell/main_shell.dart';
+import 'package:nova_mobile/shared/widgets/glass_navigation.dart';
 
 /// Offline, instant repository: every catalog source resolves empty so the
 /// shell can be pumped deterministically without network access.
@@ -92,6 +92,13 @@ Widget _harness({double safeTop = 44}) {
 
 void main() {
   testWidgets('shell edge-to-edge contract (Task 119)', (tester) async {
+    // Keep the RenderView's logical bounds aligned with the MediaQuery below;
+    // otherwise the dock is laid out past the test view and cannot receive taps.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(400, 860);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
     await tester.pumpWidget(_harness());
     // Let the page futures resolve (fake repo → instant) and frames settle.
     // Fixed pumps — pumpAndSettle can hang on the loading skeletons.
@@ -147,16 +154,20 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.drag(homeScroll, const Offset(0, 140));
+    // Process the reveal state change, then let its slide transition finish.
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('مكتبتي'));
+    await tester.tap(find.text('My Library'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(LibraryPage), findsOneWidget);
-    expect(find.ancestor(of: find.byType(LibraryPage), matching: find.byType(SafeArea)), findsWidgets);
+    expect(
+        find.ancestor(
+            of: find.byType(LibraryPage), matching: find.byType(SafeArea)),
+        findsWidgets);
     expect(tester.getTopLeft(find.byType(LibraryPage)).dy, 44);
     expect(find.byType(AnimePage, skipOffstage: false), findsNothing);
     expect(find.byType(KidsPage, skipOffstage: false), findsNothing);
     expect(tester.takeException(), isNull);
-
   });
 }

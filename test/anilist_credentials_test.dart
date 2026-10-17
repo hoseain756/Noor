@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noor_mobile/core/api/noor_api.dart';
-import 'package:noor_mobile/core/track/track_link.dart';
+import 'package:nova_mobile/core/api/noor_api.dart';
+import 'package:nova_mobile/core/track/track_link.dart';
 
 /// Regression lock for the owner's AniList dashboard credentials.
 ///

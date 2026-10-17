@@ -1,4 +1,4 @@
-import 'package:noor_mobile/l10n/nova_strings.dart';
+import 'package:nova_mobile/l10n/nova_strings.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -20,8 +20,8 @@ import 'subtitle_overlay.dart' show SubtitleStyle;
 /// Common subtitle language codes → native names (Task 124 mandate: the
 /// subtitles window groups addon results by language). Unknown codes fall
 /// back to the upper-cased code itself.
-const Map<String, String> kSubtitleLanguageNames = {
-  'ar': 'العربية',
+final Map<String, String> kSubtitleLanguageNames = {
+  'ar': NovaStrings.lookup(false, 'arabicLanguage'),
   'en': 'English',
   'es': 'Español',
   'fr': 'Français',
@@ -32,9 +32,9 @@ const Map<String, String> kSubtitleLanguageNames = {
   'ru': 'Русский',
   'tr': 'Türkçe',
   'hi': 'हिन्दी',
-  'ur': 'اردو',
-  'fa': 'فارسی',
-  'he': 'עברית',
+  'ur': NovaStrings.lookup(false, 'urduLanguage'),
+  'fa': NovaStrings.lookup(false, 'persianLanguage'),
+  'he': NovaStrings.lookup(false, 'hebrewLanguage'),
   'ja': '日本語',
   'ko': '한국어',
   'zh': '中文',
@@ -503,8 +503,9 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
   String _posLabel(int pos) {
     if (pos >= 98) return NovaStrings.lookup(widget.english, 'message49');
     if (pos <= 2) return NovaStrings.lookup(widget.english, 'message50');
-    if (pos >= 48 && pos <= 52)
+    if (pos >= 48 && pos <= 52) {
       return NovaStrings.lookup(widget.english, 'message51');
+    }
     return '$pos%';
   }
 
@@ -735,7 +736,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       case 'box':
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          color: Colors.black.withValues(alpha: opacity),
+          color: NovaColors.ink.withValues(alpha: opacity),
           child: Text(
             text,
             style: TextStyle(
@@ -781,7 +782,7 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
             fontFamily: SubtitleStyle.subtitleFontFamily,
             shadows: [
               Shadow(
-                color: Colors.black.withValues(alpha: .9),
+                color: NovaColors.ink.withValues(alpha: .9),
                 blurRadius: 4,
                 offset: Offset(2, 2),
               ),
@@ -800,8 +801,8 @@ class _SubtitleStyleSheetState extends State<SubtitleStyleSheet> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
           colors: [NovaColors.graphite, NovaColors.ink],
         ),
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
